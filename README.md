@@ -82,10 +82,15 @@ session to "need you" the moment they appear.
 
 The desks are interactive:
 
-- **Click a desk → jump to that session's Ghostty terminal.** The server focuses
-  the exact terminal (it writes a one-shot title marker to the session's tty and
-  matches it via Ghostty's AppleScript dictionary; falls back to matching the
-  working directory). macOS + Ghostty only.
+- **Click a desk → jump to that session's Ghostty terminal.** Targets the exact
+  terminal by Claude's task title (which equals the Ghostty tab title and is
+  unique per session) — or a tty title-marker when hooks are installed — falling
+  back to the working directory only as a last resort. macOS + Ghostty only.
+- **⌨ (hover) → send a prompt / answer.** An inline field types the text into the
+  session and submits it (Enter), exactly as if you typed it there. It appears
+  automatically for an agent that's **waiting on a question** so you can answer
+  inline. Only precise targets (title / tty) are used — never the cwd fallback —
+  so a prompt can't land in the wrong session.
 - **✎ (hover) → rename** the agent. The custom name is stored in
   `~/.agent-status/.overrides.json` and survives restarts.
 - **⏸ (hover) → pause** the agent — interrupts its current turn (like pressing
