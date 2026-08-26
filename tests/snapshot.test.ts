@@ -8,8 +8,11 @@ const A = (o: Partial<AgentStatus>): AgentStatus => ({
 });
 
 test("drops stale agents", () => {
-  const snap = buildSnapshot([A({ updatedAt: 0 })], 10 * 60_000);
-  expect(snap.agents.length).toBe(0);
+  const stale = buildSnapshot([A({ updatedAt: 0 })], 1000, 500);
+  expect(stale.agents.length).toBe(0);
+
+  const fresh = buildSnapshot([A({ updatedAt: 900 })], 1000, 500);
+  expect(fresh.agents.length).toBe(1);
 });
 
 test("waiting beats working for same ticket", () => {

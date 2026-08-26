@@ -24,7 +24,15 @@ export function makeServer(port: number) {
   let timer: ReturnType<typeof setTimeout> | null = null;
   const push = () => {
     const snap = readSnapshot(dir, Date.now());
-    for (const send of clients) send(snap);
+    for (const send of clients) {
+      try {
+        send(snap);
+      } catch {
+        // Client's controller is closed (cancel() hasn't fired yet) —
+        // drop it so it isn't retried on the next push.
+        clients.delete(send);
+      }
+    }
   };
   const watcher = watch(dir, () => { if (timer) clearTimeout(timer); timer = setTimeout(push, 150); });
 
