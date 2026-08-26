@@ -19,7 +19,7 @@ function AgentCard({ a, onOpen }: { a: AgentStatus; onOpen: (id: string) => void
     >
       <div className="desk-actions" onClick={stop}>
         <button className="deskbtn" title="Jump to this terminal in Ghostty"
-          onClick={() => focusSession(a.sessionId)}>↗ TAB</button>
+          onClick={() => focusSession(a.sessionId)}>↗ TERMINAL</button>
       </div>
       <div className="sprite-wrap">
         <Sprite sessionId={a.sessionId} role={a.role} state={a.state} />

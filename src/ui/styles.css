@@ -202,6 +202,68 @@
 .reply-input:focus{outline:none;border-color:var(--gold)}
 .reply-input::placeholder{color:var(--dim)}
 
+/* ---- selectable 2D-art backgrounds ---- */
+/* body has an opaque bg in the mock; make it transparent so the z-index:-1
+   art layer shows through (html keeps the --night fallback). */
+body{background:transparent}
+.artbg{position:fixed;inset:0;z-index:-1;background:var(--night);pointer-events:none;overflow:hidden}
+.bgbtn{
+  position:fixed;top:58px;right:16px;z-index:100;
+  font-family:"Press Start 2P",ui-monospace,monospace;font-size:8px;
+  background:var(--box);color:var(--bone);border:3px solid var(--bone);
+  box-shadow:inset 0 0 0 2px var(--bevel),0 3px 0 rgba(0,0,0,.55);
+  padding:9px 11px;cursor:pointer;letter-spacing:.5px;
+}
+.bgbtn:hover{color:var(--gold)}
+.bgbtn:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
+
+/* STARS — pixel starfield + faint nebula */
+:root[data-bg="stars"] .artbg{
+  background:
+    radial-gradient(1px 1px at 12% 22%, #fff 99%, transparent),
+    radial-gradient(1px 1px at 28% 64%, #bcd 99%, transparent),
+    radial-gradient(2px 2px at 46% 18%, #fff 99%, transparent),
+    radial-gradient(1px 1px at 63% 44%, #9db 99%, transparent),
+    radial-gradient(1px 1px at 78% 72%, #cfe0ff 99%, transparent),
+    radial-gradient(2px 2px at 88% 30%, #fff 99%, transparent),
+    radial-gradient(1px 1px at 36% 86%, #fff 99%, transparent),
+    radial-gradient(1px 1px at 92% 88%, #cdf 99%, transparent),
+    radial-gradient(1px 1px at 6% 52%, #fff 99%, transparent),
+    radial-gradient(130% 80% at 25% 8%, rgba(86,64,168,.30), transparent 60%),
+    radial-gradient(130% 90% at 82% 100%, rgba(30,96,150,.28), transparent 60%),
+    var(--night);
+}
+
+/* SYNTH — synthwave sky with a neon horizon grid */
+:root[data-bg="synth"] .artbg{
+  background:linear-gradient(180deg,#160a2b 0%,#2b0f45 42%,#6a1f6e 66%,#b5306e 77.6%,#0d0a1e 78%);
+}
+:root[data-bg="synth"] .artbg::after{
+  content:"";position:absolute;left:-25%;right:-25%;bottom:0;height:30%;
+  background:
+    repeating-linear-gradient(90deg,rgba(255,90,190,.55) 0 2px,transparent 2px 7%),
+    repeating-linear-gradient(0deg,rgba(255,90,190,.45) 0 2px,transparent 2px 16%);
+  transform:perspective(280px) rotateX(74deg);transform-origin:bottom center;
+}
+
+/* GRID — blueprint */
+:root[data-bg="grid"] .artbg{
+  background:
+    repeating-linear-gradient(0deg,rgba(110,140,224,.10) 0 1px,transparent 1px 32px),
+    repeating-linear-gradient(90deg,rgba(110,140,224,.10) 0 1px,transparent 1px 32px),
+    radial-gradient(130% 100% at 50% 0%,#13224a,#0a1120 72%);
+}
+
+/* DUSK — gradient sky over a pixel mountain silhouette */
+:root[data-bg="dusk"] .artbg{
+  background:linear-gradient(180deg,#0d1430 0%,#241a4a 42%,#6b3a5e 66%,#c9713f 82%,#f2b134 94%);
+}
+:root[data-bg="dusk"] .artbg::after{
+  content:"";position:absolute;left:0;right:0;bottom:0;height:42%;background:#0b1020;
+  clip-path:polygon(0 62%,8% 42%,18% 56%,28% 30%,40% 52%,52% 26%,64% 50%,76% 34%,88% 54%,100% 40%,100% 100%,0 100%);
+}
+@media (prefers-reduced-motion:reduce){.artbg::after{animation:none}}
+
 /* conversation drawer */
 .drawer-backdrop{position:fixed;inset:0;z-index:80;background:rgba(4,8,18,.55);display:flex;justify-content:flex-end}
 .drawer{width:min(560px,94vw);height:100%;display:flex;flex-direction:column;background:var(--box);padding:0;overflow:hidden}

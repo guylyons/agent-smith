@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useSnapshot } from "./useSnapshot";
+import { Backdrop } from "./Backdrop";
 import { Crt } from "./Crt";
 import { Header } from "./Header";
 import { Crew } from "./Crew";
@@ -13,6 +14,7 @@ export function App() {
 
   return (
     <>
+      <Backdrop />
       <Crt />
       <Header snap={snap} />
       <Crew agents={snap.agents} onOpen={setSelectedId} />

@@ -53,7 +53,7 @@ export function ConversationDrawer({ agent, onClose }: { agent: AgentStatus; onC
             <div className="pix state"><span className={`lamp ${agent.state}`}></span>{agent.state.toUpperCase()}</div>
           </div>
           <div className="drawer-btns">
-            <button className="deskbtn" title="Jump to this terminal in Ghostty" onClick={() => focusSession(agent.sessionId)}>↗ TAB</button>
+            <button className="deskbtn" title="Jump to this terminal in Ghostty" onClick={() => focusSession(agent.sessionId)}>↗ TERMINAL</button>
             <button className="deskbtn" title="Rename" onClick={() => renameSession(agent.sessionId, agent.name)}>✎</button>
             <button className="deskbtn" title="Pause (interrupt)" onClick={() => pauseSession(agent.sessionId, agent.name)}>⏸</button>
             <button className="deskbtn" title="Close" onClick={onClose}>✕</button>
