@@ -121,12 +121,17 @@ Click a desk to open its pane, with two tabs:
 - **⏸ pause** interrupts the agent's current turn (like pressing Esc/Ctrl-C
   once). The session stays open; resume by typing in it. Confirmed before it
   fires.
+- **◼ stop** ends the agent — it closes the session's Ghostty tab. Confirmed
+  before it fires (two-step). Targets the exact tab (marker/title), never a
+  cwd guess.
 - **Send a prompt or answer** from the UI — types the text into the session's
   terminal and submits it, without ever focusing/activating the terminal (you
   stay in the web UI).
 - **+ NEW AGENT** launches a brand-new Claude session: pick a folder (recent
-  folders are offered) and a task, and it opens in a new Ghostty tab running
-  `claude '<task>'`. It appears on the board via the scanner once it starts.
+  folders are offered), a task, and optionally a model (Opus/Sonnet/Haiku) and
+  permission mode (Default/Plan/Accept edits/Bypass). It opens in a new Ghostty
+  tab running `claude [--model …] [--permission-mode …] '<task>'` and appears on
+  the board via the scanner once it starts.
 
 ![new agent](docs/newagent.png)
 ![sprite picker](docs/spritepicker.png)
