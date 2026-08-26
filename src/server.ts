@@ -4,7 +4,19 @@ import { parseStatus, type AgentStatus } from "./schema";
 import { buildSnapshot, type Snapshot } from "./lib/snapshot";
 import { ensureStatusDir, statusDir } from "./lib/paths";
 import { scanLiveSessions } from "./scan";
-import { readOverrides, applyOverrides } from "./lib/overrides";
+import { readOverrides, applyOverrides, setNameOverride } from "./lib/overrides";
+import { focusSession, interruptSession } from "./ghostty";
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+}
+
+function loadStatus(dir: string, sessionId: string): AgentStatus | null {
+  // sessionId comes from the client; keep it to a single path segment
+  if (!/^[A-Za-z0-9._-]+$/.test(sessionId)) return null;
+  try { return parseStatus(JSON.parse(readFileSync(join(dir, `${sessionId}.json`), "utf8"))); }
+  catch { return null; }
+}
 
 export function readSnapshot(dir: string, now: number): Snapshot {
   const agents: AgentStatus[] = [];
@@ -76,6 +88,24 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
           "cache-control": "no-cache",
         }});
       }
+      // commands: act on a real session
+      if (req.method === "POST" && url.pathname.startsWith("/action/")) {
+        const action = url.pathname.slice("/action/".length);
+        let body: { sessionId?: string; name?: string };
+        try { body = await req.json(); } catch { return json({ ok: false, error: "bad body" }, 400); }
+        const status = body.sessionId ? loadStatus(dir, body.sessionId) : null;
+        if (action === "rename") {
+          if (!body.sessionId) return json({ ok: false, error: "no sessionId" }, 400);
+          setNameOverride(dir, body.sessionId, body.name ?? null);
+          push();
+          return json({ ok: true });
+        }
+        if (!status) return json({ ok: false, error: "unknown session" }, 404);
+        if (action === "focus") return json(await focusSession(status));
+        if (action === "pause") return json(interruptSession(status));
+        return json({ ok: false, error: "unknown action" }, 404);
+      }
+
       // static
       const path = url.pathname === "/" ? "/index.html" : url.pathname;
       const file = Bun.file(join(import.meta.dir, "..", "dist", path));
