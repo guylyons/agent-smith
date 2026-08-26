@@ -5,7 +5,7 @@ import { buildSnapshot, type Snapshot } from "./lib/snapshot";
 import { ensureStatusDir, statusDir } from "./lib/paths";
 import { scanLiveSessions, readConversation, readSubagents } from "./scan";
 import { readOverrides, applyOverrides, setNameOverride, setSpriteOverride } from "./lib/overrides";
-import { focusSession, interruptSession, sendPrompt, spawnAgent } from "./ghostty";
+import { ALLOWED_MODELS, ALLOWED_PERMISSION_MODES, focusSession, interruptSession, killAgent, sendPrompt, spawnAgent } from "./ghostty";
 import { readRepo } from "./repo";
 
 function json(body: unknown, status = 200): Response {
@@ -125,7 +125,7 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
           return json({ ok: false, error: "cross-site blocked" }, 403);
         }
         const action = url.pathname.slice("/action/".length);
-        let body: { sessionId?: string; name?: string; text?: string; cwd?: string; palette?: number; gear?: string };
+        let body: { sessionId?: string; name?: string; text?: string; cwd?: string; palette?: number; gear?: string; model?: string; permissionMode?: string };
         try { body = await req.json(); } catch { return json({ ok: false, error: "bad body" }, 400); }
         // spawn creates a brand-new session — it has a folder + task, not a sessionId
         if (action === "spawn") {
@@ -133,7 +133,9 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
           const task = typeof body.text === "string" ? body.text : "";
           if (!cwd || !task.trim()) return json({ ok: false, error: "folder and task are required" }, 400);
           try { if (!statSync(cwd).isDirectory()) throw 0; } catch { return json({ ok: false, error: `folder not found: ${cwd}` }, 400); }
-          return json(await spawnAgent(cwd, task));
+          const model = typeof body.model === "string" && ALLOWED_MODELS.has(body.model) ? body.model : undefined;
+          const permissionMode = typeof body.permissionMode === "string" && ALLOWED_PERMISSION_MODES.has(body.permissionMode) ? body.permissionMode : undefined;
+          return json(await spawnAgent(cwd, task, { model, permissionMode }));
         }
         if (!validSessionId(body.sessionId)) return json({ ok: false, error: "bad sessionId" }, 400);
         if (action === "rename") {
@@ -153,6 +155,7 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
         if (!status) return json({ ok: false, error: "unknown session" }, 404);
         if (action === "focus") return json(await focusSession(status));
         if (action === "pause") return json(await interruptSession(status));
+        if (action === "kill") return json(await killAgent(status));
         if (action === "prompt") {
           const text = typeof body.text === "string" ? body.text : "";
           if (!text.trim()) return json({ ok: false, error: "empty prompt" }, 400);

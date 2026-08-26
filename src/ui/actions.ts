@@ -31,6 +31,10 @@ export function pauseSession(sessionId: string): void {
   void act("pause", { sessionId });
 }
 
+export function killAgent(sessionId: string): void {
+  void act("kill", { sessionId });
+}
+
 export function renameSession(sessionId: string, name: string): void {
   void act("rename", { sessionId, name });
 }
@@ -43,9 +47,11 @@ export function sendPromptTo(sessionId: string, text: string): Promise<boolean> 
   return act("prompt", { sessionId, text });
 }
 
-/** Launch a new Claude agent in `cwd` with `task` as its opening prompt. */
-export async function spawnAgent(cwd: string, task: string): Promise<boolean> {
-  const r = await post("spawn", { cwd, text: task });
+/** Launch a new Claude agent in `cwd` with `task` as its opening prompt.
+ *  `opts.model` and `opts.permissionMode` are forwarded to the server, which
+ *  allowlist-checks them again before building the launch command. */
+export async function spawnAgent(cwd: string, task: string, opts?: { model?: string; permissionMode?: string }): Promise<boolean> {
+  const r = await post("spawn", { cwd, text: task, model: opts?.model, permissionMode: opts?.permissionMode });
   if (!r.ok) toast(r.error ?? "could not launch");
   return r.ok;
 }

@@ -4,7 +4,7 @@ import { Sprite } from "./Sprite";
 import { SpritePicker } from "./SpritePicker";
 import { renderMarkdown } from "./markdown";
 import {
-  fetchConversation, fetchSubagents, fetchRepo, sendPromptTo, focusSession, pauseSession, renameSession,
+  fetchConversation, fetchSubagents, fetchRepo, sendPromptTo, focusSession, pauseSession, renameSession, killAgent,
   type ChatMessage, type Subagent, type RepoInfo, type PendingQuestion,
 } from "./actions";
 
@@ -24,6 +24,7 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(agent.name);
   const [confirmPause, setConfirmPause] = useState(false);
+  const [confirmStop, setConfirmStop] = useState(false);
   const [pickSprite, setPickSprite] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
   const atBottomRef = useRef(true);
@@ -147,6 +148,14 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
               </>
             ) : (
               <button className="deskbtn" title="Pause (interrupt) this agent" onClick={() => setConfirmPause(true)}>⏸</button>
+            )}
+            {confirmStop ? (
+              <>
+                <button className="deskbtn danger" onClick={() => { killAgent(agent.sessionId); setConfirmStop(false); onClose(); }}>CONFIRM ◼</button>
+                <button className="deskbtn" onClick={() => setConfirmStop(false)}>✕</button>
+              </>
+            ) : (
+              <button className="deskbtn" title="Stop (end) this agent" onClick={() => setConfirmStop(true)}>◼</button>
             )}
             <button className="deskbtn" title="Close" onClick={onClose}>✕</button>
           </div>
