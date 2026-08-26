@@ -31,7 +31,7 @@ const AgentCard = memo(function AgentCard({ a, onOpen }: { a: AgentStatus; onOpe
           onClick={() => focusSession(a.sessionId)}>↗ TERMINAL</button>
       </div>
       <div className="sprite-wrap">
-        <Sprite sessionId={a.sessionId} role={a.role} state={a.state} />
+        <Sprite sessionId={a.sessionId} role={a.role} state={a.state} override={a.sprite} />
         {a.state === "waiting" && <div className="pix bubble">!</div>}
         {!!a.subagents && a.subagents > 0 && (
           <div className="pix crew-badge" title={`${a.subagents} subagent${a.subagents > 1 ? "s" : ""} working`}>⊂{a.subagents}</div>
@@ -54,7 +54,8 @@ const AgentCard = memo(function AgentCard({ a, onOpen }: { a: AgentStatus; onOpe
   return prev.onOpen === next.onOpen &&
     x.sessionId === y.sessionId && x.name === y.name && x.role === y.role &&
     x.ticket === y.ticket && x.state === y.state && x.doing === y.doing &&
-    x.subagents === y.subagents;
+    x.subagents === y.subagents &&
+    x.sprite?.palette === y.sprite?.palette && x.sprite?.gear === y.sprite?.gear;
 });
 
 export function Crew({ agents, onOpen }: { agents: AgentStatus[]; onOpen: (id: string) => void }) {

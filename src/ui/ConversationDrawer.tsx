@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentStatus } from "../schema";
 import { Sprite } from "./Sprite";
+import { SpritePicker } from "./SpritePicker";
 import { renderMarkdown } from "./markdown";
 import {
   fetchConversation, fetchSubagents, fetchRepo, sendPromptTo, focusSession, pauseSession, renameSession,
@@ -21,6 +22,7 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(agent.name);
   const [confirmPause, setConfirmPause] = useState(false);
+  const [pickSprite, setPickSprite] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
   const atBottomRef = useRef(true);
 
@@ -84,10 +86,13 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
   }
 
   return (
+    <>
     <div className="drawer-backdrop" onClick={onClose}>
       <aside className="win drawer" onClick={(e) => e.stopPropagation()}>
         <header className="drawer-head">
-          <div className="drawer-sprite"><Sprite sessionId={agent.sessionId} role={agent.role} state={agent.state} /></div>
+          <div className="drawer-sprite" title="Change sprite" style={{ cursor: "pointer" }} onClick={() => setPickSprite(true)}>
+            <Sprite sessionId={agent.sessionId} role={agent.role} state={agent.state} override={agent.sprite} />
+          </div>
           <div className="drawer-id">
             {editingName ? (
               <input className="reply-input name-input" autoFocus value={nameDraft}
@@ -200,5 +205,7 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
         )}
       </aside>
     </div>
+    {pickSprite && <SpritePicker agent={agent} onClose={() => setPickSprite(false)} />}
+    </>
   );
 }
