@@ -1,6 +1,5 @@
 import { readdirSync, readFileSync, watch } from "node:fs";
 import { join } from "node:path";
-import type { Server } from "bun";
 import { parseStatus } from "./schema";
 import { buildSnapshot, type Snapshot } from "./lib/snapshot";
 import { ensureStatusDir, statusDir } from "./lib/paths";
@@ -18,7 +17,7 @@ export function readSnapshot(dir: string, now: number): Snapshot {
   return buildSnapshot(agents, now);
 }
 
-export function makeServer(port: number): Server {
+export function makeServer(port: number) {
   const dir = ensureStatusDir();
   const clients = new Set<(s: Snapshot) => void>();
 
@@ -27,9 +26,9 @@ export function makeServer(port: number): Server {
     const snap = readSnapshot(dir, Date.now());
     for (const send of clients) send(snap);
   };
-  watch(dir, () => { if (timer) clearTimeout(timer); timer = setTimeout(push, 150); });
+  const watcher = watch(dir, () => { if (timer) clearTimeout(timer); timer = setTimeout(push, 150); });
 
-  return Bun.serve({
+  const server = Bun.serve({
     port,
     async fetch(req) {
       const url = new URL(req.url);
@@ -56,6 +55,16 @@ export function makeServer(port: number): Server {
       return new Response("not found", { status: 404 });
     },
   });
+
+  // Close the fs.watch handle when the server stops, so repeated
+  // makeServer() calls (e.g. across tests) don't leak OS watchers.
+  const baseStop = server.stop.bind(server);
+  server.stop = ((closeActiveConnections?: boolean) => {
+    watcher.close();
+    return baseStop(closeActiveConnections);
+  }) as typeof server.stop;
+
+  return server;
 }
 
 if (import.meta.main) {

@@ -54,10 +54,22 @@ export function applyEvent(prev: AgentStatus | null, e: HookEvent, now: number):
 // --- I/O glue (not unit-tested; exercised in the integration smoke test) ---
 async function main() {
   const raw = await Bun.stdin.text();
-  const e = JSON.parse(raw) as HookEvent;
+  let e: HookEvent;
+  try {
+    e = JSON.parse(raw) as HookEvent;
+  } catch {
+    return; // malformed event on stdin; never crash the hook
+  }
   const dir = ensureStatusDir();
   const file = join(dir, `${e.session_id}.json`);
-  const prev = existsSync(file) ? parseStatus(JSON.parse(readFileSync(file, "utf8"))) : null;
+  let prev: AgentStatus | null = null;
+  if (existsSync(file)) {
+    try {
+      prev = parseStatus(JSON.parse(readFileSync(file, "utf8")));
+    } catch {
+      prev = null; // corrupt/partial prior status file; treat as fresh
+    }
+  }
   const next = applyEvent(prev, e, Date.now());
   if (next === null) { rmSync(file, { force: true }); return; }
   const tmp = `${file}.tmp`;
