@@ -95,14 +95,14 @@ export function spriteRects({ gear, palette }: { gear: string; palette: SpritePa
   return rects;
 }
 
-const PALETTES: SpritePalette[] = [
+export const PALETTES: SpritePalette[] = [
   { O: "#101a2e", H: "#3f2b1e", B: "#4a7ec9", G: "#8fc0ff", P: "#26406b" },
   { O: "#2a1410", H: "#7a2f2f", B: "#c9673a", G: "#f2b134", P: "#6e3a22" },
   { O: "#171238", H: "#2b2b3d", B: "#6a5acd", G: "#b7a8ff", P: "#3a3168" },
   { O: "#0e2a20", H: "#4a3a1e", B: "#3f8f6a", G: "#4fbf6a", P: "#245140" },
   { O: "#1d2030", H: "#4a4a4a", B: "#8a8fa8", G: "#d8dcf0", P: "#4c5068" },
 ];
-const GEARS = ["headset", "goggles", "hood", "visor", "topknot"];
+export const GEARS = ["headset", "goggles", "hood", "visor", "topknot"];
 const ROLE_GEAR: Record<string, string> = {
   "Ticket triage": "headset", "Component build": "goggles", "Migration": "hood",
   "Test & profile": "visor", "Docs & changelog": "topknot",

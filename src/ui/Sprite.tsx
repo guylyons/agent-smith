@@ -1,14 +1,22 @@
 import { memo, useMemo } from "react";
-import { spriteRects, paletteFor } from "./sprite-data";
+import { spriteRects, paletteFor, PALETTES } from "./sprite-data";
 
-// The pixel grid depends only on sessionId+role, and building it is the priciest
-// bit of a card render — memoize the rects, and memo the component so it doesn't
-// re-render on every SSE snapshot unless its props actually change.
-function SpriteImpl({ sessionId, role, state }: { sessionId: string; role: string; state: string }) {
+// The pixel grid depends only on sessionId+role (or an explicit override), and
+// building it is the priciest bit of a card render — memoize the rects, and
+// memo the component so it doesn't re-render on every SSE snapshot unless its
+// props actually change.
+function SpriteImpl({ sessionId, role, state, override }: {
+  sessionId: string; role: string; state: string;
+  override?: { palette: number; gear: string };
+}) {
   const rects = useMemo(() => {
+    if (override) {
+      const palette = PALETTES[override.palette % PALETTES.length];
+      return spriteRects({ gear: override.gear, palette });
+    }
     const { palette, gear } = paletteFor(sessionId, role);
     return spriteRects({ gear, palette });
-  }, [sessionId, role]);
+  }, [sessionId, role, override]);
   return (
     <svg className={`sprite ${state === "working" ? "is-bobbing" : ""}`}
          viewBox="0 0 16 24" shapeRendering="crispEdges" aria-hidden="true">

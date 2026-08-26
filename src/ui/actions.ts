@@ -35,6 +35,10 @@ export function renameSession(sessionId: string, name: string): void {
   void act("rename", { sessionId, name });
 }
 
+export function setSprite(sessionId: string, palette: number, gear: string): void {
+  void act("sprite", { sessionId, palette, gear });
+}
+
 export function sendPromptTo(sessionId: string, text: string): Promise<boolean> {
   return act("prompt", { sessionId, text });
 }

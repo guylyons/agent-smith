@@ -20,6 +20,9 @@ export const AgentStatusSchema = z.object({
   title: z.string().optional(),
   // count of subagents (Task tool) currently active inside this session
   subagents: z.number().optional(),
+  // user-chosen sprite override (palette index + gear id), replacing the
+  // deterministic default derived from sessionId+role
+  sprite: z.object({ palette: z.number(), gear: z.string() }).optional(),
 });
 
 export type AgentStatus = z.infer<typeof AgentStatusSchema>;
