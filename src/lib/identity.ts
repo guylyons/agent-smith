@@ -23,8 +23,8 @@ function repoName(cwd: string): string {
 }
 
 export function identify(sessionId: string, branch: string | null, cwd: string): { role: string; name: string } {
-  const matched = inferRole(branch, cwd);
-  if (matched.name !== "AGENT") return matched; // a persona (FORGE/SCOUT/…) matched a known work type
+  const inferred = inferRole(branch, cwd);
+  if (inferred.matched) return { role: inferred.role, name: inferred.name }; // a persona (FORGE/SCOUT/…) matched
   const repo = repoName(cwd);
   return {
     role: repo || "General",

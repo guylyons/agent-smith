@@ -8,8 +8,8 @@ const TABLE: RoleDef[] = [
   { match: ["triage", "issue", "scope"], role: "Ticket triage", name: "SCOUT" },
 ];
 
-export function inferRole(branch: string | null, cwd: string): { role: string; name: string } {
+export function inferRole(branch: string | null, cwd: string): { role: string; name: string; matched: boolean } {
   const hay = `${branch ?? ""} ${cwd}`.toLowerCase();
-  for (const d of TABLE) if (d.match.some((k) => hay.includes(k))) return { role: d.role, name: d.name };
-  return { role: "General", name: "AGENT" };
+  for (const d of TABLE) if (d.match.some((k) => hay.includes(k))) return { role: d.role, name: d.name, matched: true };
+  return { role: "General", name: "AGENT", matched: false };
 }

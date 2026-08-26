@@ -6,6 +6,7 @@ import { parseStatus } from "../src/schema";
 import { parseTicket } from "../src/lib/ticket";
 import { identify } from "../src/lib/identity";
 import { humanizeTool } from "../src/lib/humanize";
+import { endsWithQuestion } from "../src/lib/question";
 import { ensureStatusDir } from "../src/lib/paths";
 
 export type HookEvent = {
@@ -28,8 +29,6 @@ function seed(e: HookEvent, now: number): AgentStatus {
   };
 }
 
-const QUESTION = /\?\s*$/;
-
 export function applyEvent(prev: AgentStatus | null, e: HookEvent, now: number): AgentStatus | null {
   const base = prev ?? seed(e, now);
   switch (e.hook_event_name) {
@@ -41,8 +40,7 @@ export function applyEvent(prev: AgentStatus | null, e: HookEvent, now: number):
     case "Notification":
       return { ...base, state: "waiting", waitingReason: "permission", updatedAt: now };
     case "Stop": {
-      const msg = e.last_assistant_message ?? e.last_message;
-      const asking = !!msg && QUESTION.test(msg.trim());
+      const asking = endsWithQuestion(e.last_assistant_message ?? e.last_message);
       return { ...base, state: asking ? "waiting" : "idle",
         waitingReason: asking ? "question" : undefined, updatedAt: now };
     }

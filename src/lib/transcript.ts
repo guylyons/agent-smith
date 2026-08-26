@@ -7,8 +7,7 @@ import type { AgentStatus } from "../schema";
 import { parseTicket } from "./ticket";
 import { identify } from "./identity";
 import { humanizeTool } from "./humanize";
-
-const QUESTION = /\?\s*$/;
+import { endsWithQuestion } from "./question";
 
 type Content = { type?: string; text?: string; name?: string; input?: Record<string, unknown> };
 
@@ -29,7 +28,9 @@ export function deriveStatusFromTranscript(lines: string[], updatedAt: number): 
   let branch: string | null = null;
   let lastToolUse: { name: string; input?: Record<string, unknown> } | null = null;
   let lastAssistantText: string | null = null;
-  let lastSubstantiveType: string | null = null; // "assistant" | "user" | "tool"
+  // Did the session end its turn on assistant text (turn complete), or is it
+  // still active (a user prompt or a tool in flight came last)?
+  let endedOnAssistantText = false;
 
   for (const raw of lines) {
     const line = raw.trim();
@@ -47,17 +48,17 @@ export function deriveStatusFromTranscript(lines: string[], updatedAt: number): 
       for (const c of contentArray(e)) {
         if (c.type === "text" && typeof c.text === "string" && c.text.trim()) {
           lastAssistantText = c.text.trim();
-          lastSubstantiveType = "assistant";
+          endedOnAssistantText = true;
         }
         if (c.type === "tool_use" && typeof c.name === "string") {
           lastToolUse = { name: c.name, input: c.input };
-          lastSubstantiveType = "tool";
+          endedOnAssistantText = false; // a tool_use after text means the turn continued
         }
       }
     } else if (type === "user") {
-      // a tool_result comes back as a user entry; a real prompt does too.
-      const hasToolResult = contentArray(e).some((c) => c.type === "tool_result");
-      lastSubstantiveType = hasToolResult ? "tool" : "user";
+      // Both a real prompt and a tool_result arrive as user-type entries; either
+      // way the assistant is now the one who should act next -> still active.
+      endedOnAssistantText = false;
     }
   }
 
@@ -69,8 +70,8 @@ export function deriveStatusFromTranscript(lines: string[], updatedAt: number): 
   let waitingReason: AgentStatus["waitingReason"];
   let doing: string;
 
-  if (lastSubstantiveType === "assistant") {
-    const asking = !!lastAssistantText && QUESTION.test(lastAssistantText);
+  if (endedOnAssistantText) {
+    const asking = endsWithQuestion(lastAssistantText);
     state = asking ? "waiting" : "idle";
     waitingReason = asking ? "question" : undefined;
     doing = asking ? "waiting on your answer" : "idle";

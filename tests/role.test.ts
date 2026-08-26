@@ -7,6 +7,10 @@ test("component branch -> build role", () => {
 test("docs branch -> docs role", () => {
   expect(inferRole("docs/changelog", "/x").name).toBe("SCRIBE");
 });
-test("unknown -> General/AGENT", () => {
-  expect(inferRole("main", "/x")).toEqual({ role: "General", name: "AGENT" });
+test("unknown -> General/AGENT, not matched", () => {
+  expect(inferRole("main", "/x")).toEqual({ role: "General", name: "AGENT", matched: false });
+});
+
+test("a matched work type reports matched: true", () => {
+  expect(inferRole("feature/4412-card-component", "/x").matched).toBe(true);
 });

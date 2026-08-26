@@ -42,9 +42,16 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
   // on startup and on an interval. Hooks handle real-time deltas in between.
   let scanTimer: ReturnType<typeof setInterval> | null = null;
   if (scan) {
-    const runScan = () => { try { scanLiveSessions(Date.now()); } catch { /* keep serving */ } push(); };
-    runScan();
-    scanTimer = setInterval(runScan, scanIntervalMs);
+    let scanning = false;
+    const runScan = async () => {
+      if (scanning) return; // don't overlap passes
+      scanning = true;
+      try { await scanLiveSessions(Date.now()); } catch { /* keep serving */ }
+      finally { scanning = false; }
+      push();
+    };
+    void runScan();
+    scanTimer = setInterval(() => void runScan(), scanIntervalMs);
   }
 
   const server = Bun.serve({

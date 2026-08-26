@@ -42,3 +42,20 @@ test("GET /events streams a snapshot", async () => {
   await reader.cancel();
   server.stop(true);
 });
+
+test("scan:true runs a pass and stop() cleans up without leaking a timer", async () => {
+  reset();
+  process.env.AGENT_STATUS_DIR = dir;
+  // point the scanner at an empty projects dir so it doesn't touch ~/.claude
+  const empty = "/tmp/aw-server-test-empty-projects";
+  rmSync(empty, { recursive: true, force: true });
+  mkdirSync(empty, { recursive: true });
+  process.env.AGENT_PROJECTS_DIR = empty;
+  const { makeServer } = await import("../src/server");
+  const server = makeServer(0, { scan: true, scanIntervalMs: 50 });
+  // let the initial async scan + interval run a few times
+  await new Promise((r) => setTimeout(r, 160));
+  server.stop(true); // must clear the scan interval; if it didn't, the test process would hang
+  // a scan over an empty projects dir writes nothing
+  expect(readSnapshot(dir, Date.now()).agents).toEqual([]);
+});
