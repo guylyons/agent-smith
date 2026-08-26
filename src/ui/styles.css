@@ -264,6 +264,23 @@ body{background:transparent}
 }
 @media (prefers-reduced-motion:reduce){.artbg::after{animation:none}}
 
+/* subagent count badge on a crew sprite */
+.crew-badge{
+  position:absolute;bottom:-6px;right:-8px;
+  background:var(--bevel);color:#0b1020;font-size:9px;
+  padding:2px 5px;border:2px solid var(--bone);line-height:1;
+}
+
+/* subagents strip in the conversation drawer */
+.subagents{border-bottom:var(--px) solid var(--bone);padding:10px 14px;display:flex;flex-direction:column;gap:7px;max-height:34%;overflow-y:auto}
+.subagents-head{font-size:8px;letter-spacing:.5px;color:var(--dim)}
+.subagent{display:flex;align-items:center;gap:8px;font-size:11px}
+.subagent .lamp{flex:0 0 auto}
+.subagent-desc{flex:0 0 auto;max-width:52%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--bone)}
+.subagent-doing{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dim)}
+.subagent-doing::before{content:"› "}
+.subagent.is-active .subagent-desc{color:var(--gold)}
+
 /* conversation drawer */
 .drawer-backdrop{position:fixed;inset:0;z-index:80;background:rgba(4,8,18,.55);display:flex;justify-content:flex-end}
 .drawer{width:min(560px,94vw);height:100%;display:flex;flex-direction:column;background:var(--box);padding:0;overflow:hidden}

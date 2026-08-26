@@ -18,6 +18,8 @@ export const AgentStatusSchema = z.object({
   // Claude Code's task title (aiTitle), which equals the Ghostty tab title — used
   // to focus the exact terminal without needing the tty.
   title: z.string().optional(),
+  // count of subagents (Task tool) currently active inside this session
+  subagents: z.number().optional(),
 });
 
 export type AgentStatus = z.infer<typeof AgentStatusSchema>;

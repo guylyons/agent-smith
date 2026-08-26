@@ -24,6 +24,9 @@ function AgentCard({ a, onOpen }: { a: AgentStatus; onOpen: (id: string) => void
       <div className="sprite-wrap">
         <Sprite sessionId={a.sessionId} role={a.role} state={a.state} />
         {a.state === "waiting" && <div className="pix bubble">!</div>}
+        {!!a.subagents && a.subagents > 0 && (
+          <div className="pix crew-badge" title={`${a.subagents} subagent${a.subagents > 1 ? "s" : ""} working`}>⊂{a.subagents}</div>
+        )}
       </div>
       <div className="who">
         <div className="pix name">{a.name}</div>

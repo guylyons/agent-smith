@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { parseStatus, type AgentStatus } from "./schema";
 import { buildSnapshot, type Snapshot } from "./lib/snapshot";
 import { ensureStatusDir, statusDir } from "./lib/paths";
-import { scanLiveSessions, readConversation } from "./scan";
+import { scanLiveSessions, readConversation, readSubagents } from "./scan";
 import { readOverrides, applyOverrides, setNameOverride } from "./lib/overrides";
 import { focusSession, interruptSession, sendPrompt } from "./ghostty";
 
@@ -97,6 +97,13 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
         const sid = url.searchParams.get("sessionId") ?? "";
         if (!validSessionId(sid)) return json({ messages: [] }, 400);
         return json({ messages: await readConversation(sid) });
+      }
+
+      // a session's live subagents
+      if (url.pathname === "/subagents") {
+        const sid = url.searchParams.get("sessionId") ?? "";
+        if (!validSessionId(sid)) return json({ subagents: [] }, 400);
+        return json({ subagents: await readSubagents(sid, Date.now()) });
       }
 
       // commands: act on a real session

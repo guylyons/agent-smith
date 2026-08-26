@@ -13,6 +13,21 @@ export async function fetchConversation(sessionId: string): Promise<ChatMessage[
   }
 }
 
+export type Subagent = {
+  agentId: string; description: string; agentType: string; model?: string;
+  doing: string; active: boolean; updatedAt: number;
+};
+
+export async function fetchSubagents(sessionId: string): Promise<Subagent[]> {
+  try {
+    const res = await fetch(`/subagents?sessionId=${encodeURIComponent(sessionId)}`);
+    const body = (await res.json()) as { subagents?: Subagent[] };
+    return body.subagents ?? [];
+  } catch {
+    return [];
+  }
+}
+
 async function post(action: string, body: object): Promise<Result> {
   try {
     const res = await fetch(`/action/${action}`, {

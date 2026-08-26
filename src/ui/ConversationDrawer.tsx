@@ -2,25 +2,27 @@ import { useEffect, useRef, useState } from "react";
 import type { AgentStatus } from "../schema";
 import { Sprite } from "./Sprite";
 import {
-  fetchConversation, sendPromptTo, focusSession, pauseSession, renameSession,
-  type ChatMessage,
+  fetchConversation, fetchSubagents, sendPromptTo, focusSession, pauseSession, renameSession,
+  type ChatMessage, type Subagent,
 } from "./actions";
 
 export function ConversationDrawer({ agent, onClose }: { agent: AgentStatus; onClose: () => void }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [subagents, setSubagents] = useState<Subagent[]>([]);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
   const atBottomRef = useRef(true);
 
-  // Load + poll the conversation while open.
+  // Load + poll the conversation and subagents while open.
   useEffect(() => {
     let alive = true;
     const load = async () => {
-      const m = await fetchConversation(agent.sessionId);
+      const [m, s] = await Promise.all([fetchConversation(agent.sessionId), fetchSubagents(agent.sessionId)]);
       if (!alive) return;
       setMessages(m);
+      setSubagents(s);
       setLoaded(true);
     };
     void load();
@@ -59,6 +61,19 @@ export function ConversationDrawer({ agent, onClose }: { agent: AgentStatus; onC
             <button className="deskbtn" title="Close" onClick={onClose}>✕</button>
           </div>
         </header>
+
+        {subagents.length > 0 && (
+          <div className="subagents">
+            <div className="pix subagents-head">SUBAGENTS · {subagents.length}</div>
+            {subagents.map((s) => (
+              <div key={s.agentId} className={`subagent ${s.active ? "is-active" : ""}`}>
+                <span className={`lamp ${s.active ? "working" : "idle"}`}></span>
+                <span className="subagent-desc" title={`${s.agentType}${s.model ? " · " + s.model : ""}`}>{s.description}</span>
+                <span className="subagent-doing">{s.doing}</span>
+              </div>
+            ))}
+          </div>
+        )}
 
         <div className="drawer-body" ref={bodyRef}
           onScroll={(e) => {

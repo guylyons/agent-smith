@@ -14,6 +14,7 @@ import { parseStatus } from "./schema";
 import { ensureStatusDir } from "./lib/paths";
 import { deriveStatusFromTranscript } from "./lib/transcript";
 import { parseConversation, type ChatMessage } from "./lib/conversation";
+import { deriveSubagent, type Subagent } from "./lib/subagents";
 
 const FRESH_MS = Number(process.env.AGENT_SCAN_FRESH_MS ?? 15 * 60_000);
 const TAIL_BYTES = 64 * 1024;
@@ -97,6 +98,47 @@ export async function readConversation(sessionId: string, maxBytes = 512 * 1024)
   return [];
 }
 
+/** Count subagents actively writing (mtime < 90s) in a session's subagents dir. */
+export async function countActiveSubagents(transcriptFile: string, now: number, activeMs = 90_000): Promise<number> {
+  const dir = transcriptFile.replace(/\.jsonl$/, "") + "/subagents";
+  let entries: string[];
+  try { entries = await readdir(dir); } catch { return 0; }
+  let n = 0;
+  for (const e of entries) {
+    if (!e.endsWith(".jsonl")) continue;
+    try { if (now - (await stat(join(dir, e))).mtimeMs < activeMs) n++; } catch { /* skip */ }
+  }
+  return n;
+}
+
+/** List a session's recent subagents with their description + current activity. */
+export async function readSubagents(sessionId: string, now: number, maxAgeMs = 10 * 60_000): Promise<Subagent[]> {
+  const root = projectsDir();
+  let projects: import("node:fs").Dirent[];
+  try { projects = await readdir(root, { withFileTypes: true }); } catch { return []; }
+  for (const proj of projects) {
+    if (!proj.isDirectory()) continue;
+    const subdir = join(root, proj.name, sessionId, "subagents");
+    let entries: string[];
+    try { entries = await readdir(subdir); } catch { continue; } // not this project
+    const out: Subagent[] = [];
+    for (const e of entries) {
+      if (!e.endsWith(".jsonl")) continue;
+      const file = join(subdir, e);
+      try {
+        const mtimeMs = (await stat(file)).mtimeMs;
+        if (now - mtimeMs > maxAgeMs) continue;
+        const agentId = e.replace(/^agent-/, "").replace(/\.jsonl$/, "");
+        let meta = {};
+        try { meta = JSON.parse(await readFile(join(subdir, e.replace(/\.jsonl$/, ".meta.json")), "utf8")); } catch { /* no meta */ }
+        out.push(deriveSubagent(agentId, meta, await tailLinesOf(file, 32 * 1024), mtimeMs, now));
+      } catch { /* skip */ }
+    }
+    return out.sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+  return [];
+}
+
 /** Top-level transcript files modified within freshMs (subagent sidechains live in subdirs and are skipped). */
 export async function freshTranscripts(now: number, freshMs = FRESH_MS): Promise<string[]> {
   const root = projectsDir();
@@ -176,6 +218,8 @@ export async function scanLiveSessions(
     try {
       const derived = deriveStatusFromTranscript(await tailLines(file), now);
       if (!derived) continue;
+      const subs = await countActiveSubagents(file, now);
+      if (subs > 0) derived.subagents = subs;
       cands.push({ derived, mtime: (await stat(file)).mtimeMs });
     } catch { /* skip */ }
   }
