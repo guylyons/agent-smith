@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "bun run src/server.ts",
     "build": "bun build src/ui/index.html --outdir dist --minify",
-    "test": "bun test"
+    "test": "bun test",
+    "scan": "bun run src/scan.ts",
+    "install-hooks": "bun run scripts/install-hooks.ts",
+    "uninstall-hooks": "bun run scripts/uninstall-hooks.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",
