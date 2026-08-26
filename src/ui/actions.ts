@@ -1,6 +1,18 @@
 // Send a command to the server about a real session.
 type Result = { ok: boolean; error?: string };
 
+export type ChatMessage = { role: "user" | "assistant" | "tool"; text: string };
+
+export async function fetchConversation(sessionId: string): Promise<ChatMessage[]> {
+  try {
+    const res = await fetch(`/conversation?sessionId=${encodeURIComponent(sessionId)}`);
+    const body = (await res.json()) as { messages?: ChatMessage[] };
+    return body.messages ?? [];
+  } catch {
+    return [];
+  }
+}
+
 async function post(action: string, body: object): Promise<Result> {
   try {
     const res = await fetch(`/action/${action}`, {

@@ -13,6 +13,7 @@ import type { AgentStatus } from "./schema";
 import { parseStatus } from "./schema";
 import { ensureStatusDir } from "./lib/paths";
 import { deriveStatusFromTranscript } from "./lib/transcript";
+import { parseConversation, type ChatMessage } from "./lib/conversation";
 
 const FRESH_MS = Number(process.env.AGENT_SCAN_FRESH_MS ?? 15 * 60_000);
 const TAIL_BYTES = 64 * 1024;
@@ -68,15 +69,32 @@ export async function runningClaudeCounts(): Promise<{ counts: Map<string, numbe
   return { counts, ok: counts.size > 0 };
 }
 
-/** Read the last ~TAIL_BYTES of a file and return its lines (bounded, for large transcripts). */
-async function tailLines(file: string): Promise<string[]> {
+/** Read the last `bytes` of a file and return its lines (bounded, for large transcripts). */
+async function tailLinesOf(file: string, bytes: number): Promise<string[]> {
   const { size } = await stat(file);
-  const start = Math.max(0, size - TAIL_BYTES);
+  const start = Math.max(0, size - bytes);
   const len = size - start;
   const buf = Buffer.alloc(len);
   const fh = await open(file, "r");
   try { await fh.read(buf, 0, len, start); } finally { await fh.close(); }
   return buf.toString("utf8").split("\n");
+}
+const tailLines = (file: string) => tailLinesOf(file, TAIL_BYTES);
+
+/** Find a session's transcript and parse it into a chat log (last ~maxBytes). */
+export async function readConversation(sessionId: string, maxBytes = 512 * 1024): Promise<ChatMessage[]> {
+  const root = projectsDir();
+  let projects: import("node:fs").Dirent[];
+  try { projects = await readdir(root, { withFileTypes: true }); } catch { return []; }
+  for (const proj of projects) {
+    if (!proj.isDirectory()) continue;
+    const file = join(root, proj.name, `${sessionId}.jsonl`);
+    try {
+      const lines = await tailLinesOf(file, maxBytes);
+      return parseConversation(lines);
+    } catch { /* not in this project dir */ }
+  }
+  return [];
 }
 
 /** Top-level transcript files modified within freshMs (subagent sidechains live in subdirs and are skipped). */
