@@ -6,6 +6,7 @@ import { ensureStatusDir, statusDir } from "./lib/paths";
 import { scanLiveSessions, readConversation, readSubagents } from "./scan";
 import { readOverrides, applyOverrides, setNameOverride } from "./lib/overrides";
 import { focusSession, interruptSession, sendPrompt } from "./ghostty";
+import { readRepo } from "./repo";
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -104,6 +105,15 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
         const sid = url.searchParams.get("sessionId") ?? "";
         if (!validSessionId(sid)) return json({ subagents: [] }, 400);
         return json({ subagents: await readSubagents(sid, Date.now()) });
+      }
+
+      // a session's git context (branch, commits, working-tree status)
+      if (url.pathname === "/repo") {
+        const sid = url.searchParams.get("sessionId") ?? "";
+        if (!validSessionId(sid)) return json({ error: "bad sessionId" }, 400);
+        const status = loadStatus(dir, sid);
+        if (!status) return json({ error: "unknown session" }, 404);
+        return json(await readRepo(status.cwd));
       }
 
       // commands: act on a real session

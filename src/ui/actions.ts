@@ -65,3 +65,20 @@ export async function fetchSubagents(sessionId: string): Promise<Subagent[]> {
     return [];
   }
 }
+
+export type RepoInfo = {
+  cwd: string; branch: string;
+  commits: { hash: string; subject: string }[];
+  status: { code: string; file: string }[];
+};
+
+export async function fetchRepo(sessionId: string): Promise<RepoInfo | null> {
+  try {
+    const res = await fetch(`/repo?sessionId=${encodeURIComponent(sessionId)}`);
+    const body = (await res.json()) as RepoInfo & { error?: string };
+    if (body.error) return null;
+    return body;
+  } catch {
+    return null;
+  }
+}

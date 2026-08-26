@@ -98,7 +98,15 @@ export async function interruptSession(status: Pick<AgentStatus, "pid">): Promis
     const p = Bun.spawn(["ps", "-o", "comm=", "-p", String(pid)], { stdout: "pipe", stderr: "ignore" });
     const comm = (await new Response(p.stdout).text()).trim();
     await p.exited;
-    if (comm !== "claude") return { ok: false, error: "that session isn't running any more" };
+    if (!comm) return { ok: false, error: "that session isn't running any more" };
+    // Accept the CLI (claude) and shim hosts (npm/node, bun) so pausing works
+    // regardless of install method, while still refusing an obviously-unrelated
+    // recycled pid (e.g. a browser).
+    const base = comm.split("/").pop() ?? comm;
+    const hosts = new Set(["claude", "node", "bun", "deno"]);
+    if (!hosts.has(comm) && !hosts.has(base)) {
+      return { ok: false, error: "that session isn't running any more" };
+    }
   } catch {
     return { ok: false, error: "could not verify the session" };
   }

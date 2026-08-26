@@ -271,6 +271,25 @@ body{background:transparent}
   padding:2px 5px;border:2px solid var(--bone);line-height:1;
 }
 
+/* drawer tabs */
+.drawer-tabs{display:flex;gap:0;border-bottom:var(--px) solid var(--bone)}
+.drawer-tabs .tab{flex:1;font-family:"Press Start 2P",ui-monospace,monospace;font-size:8px;letter-spacing:.5px;
+  background:var(--box-lo);color:var(--dim);border:none;border-right:2px solid var(--bevel);padding:10px 0;cursor:pointer}
+.drawer-tabs .tab:last-child{border-right:none}
+.drawer-tabs .tab:hover{color:var(--bone)}
+.drawer-tabs .tab.on{background:var(--box);color:var(--gold)}
+
+/* INFO tab */
+.drawer-body.info{gap:6px}
+.info-row{display:flex;gap:10px;font-size:11px;align-items:baseline}
+.info-k{flex:0 0 60px;font-family:"Press Start 2P",ui-monospace,monospace;font-size:8px;color:var(--dim)}
+.info-v{flex:1;min-width:0;color:var(--bone);word-break:break-all}
+.info-sec{font-size:8px;letter-spacing:.5px;color:var(--gold);margin-top:12px;border-top:2px solid var(--bevel);padding-top:9px}
+.info-file{font-size:11px;color:var(--bone);display:flex;gap:8px}
+.info-code{color:var(--clay);flex:0 0 22px;font-family:ui-monospace,monospace}
+.info-commit{font-size:11px;color:var(--bone);display:flex;gap:9px;line-height:1.5}
+.info-hash{color:var(--leaf);flex:0 0 auto;font-family:ui-monospace,monospace}
+
 /* subagents strip in the conversation drawer */
 .subagents{border-bottom:var(--px) solid var(--bone);padding:10px 14px;display:flex;flex-direction:column;gap:7px;max-height:34%;overflow-y:auto}
 .subagents-head{font-size:8px;letter-spacing:.5px;color:var(--dim)}
