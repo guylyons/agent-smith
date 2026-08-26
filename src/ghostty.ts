@@ -73,15 +73,13 @@ export function focusSession(t: Target): Promise<ActionResult> {
   return runOnTerminal(t, "focus term\n            activate", true);
 }
 
-/** Type a prompt/answer into the session and submit it (Enter), then focus it so
- *  the user sees it land. Only precise targets — never the cwd fallback — so a
- *  prompt can't be sent to the wrong session. */
+/** Type a prompt/answer into the session and submit it (Enter). Does NOT focus or
+ *  activate the terminal — the user stays in the web UI. Only precise targets are
+ *  used (never the cwd fallback), so a prompt can't be sent to the wrong session. */
 export async function sendPrompt(t: Target, text: string): Promise<ActionResult> {
   const body = `input text ${asStr(text)} to term
             delay 0.1
-            send key "enter" to term
-            focus term
-            activate`;
+            send key "enter" to term`;
   const r = await runOnTerminal(t, body, false);
   if (!r.ok && !t.tty && !t.title) {
     return { ok: false, error: "can't pinpoint this session's terminal — run `bun run install-hooks` to enable sending prompts" };
