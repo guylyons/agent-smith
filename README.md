@@ -14,7 +14,9 @@ It connects to your sessions two ways, working together:
   so activity, permission prompts, and questions show up the instant they happen.
 - **Transcript scanner** (fills the gaps) — the server periodically reads your
   session transcripts under `~/.claude/projects`, so windows you already have
-  open appear immediately, without waiting for them to act or be restarted.
+  open appear immediately, without waiting for them to act or be restarted. It
+  only surfaces a session if a matching **running `claude` process** exists, so
+  old transcripts and internal sub-sessions don't show up as phantom agents.
 
 Both write one status file per session to `~/.agent-status/<session_id>.json`,
 keyed by the real session id so they never double-count a session.
@@ -76,6 +78,24 @@ session to "need you" the moment they appear.
 - **state** — `working` while active; `waiting` for a permission prompt or a
   question it ended its turn on; `idle` otherwise.
 
+## Controls
+
+The desks are interactive:
+
+- **Click a desk → jump to that session's Ghostty terminal.** The server focuses
+  the exact terminal (it writes a one-shot title marker to the session's tty and
+  matches it via Ghostty's AppleScript dictionary; falls back to matching the
+  working directory). macOS + Ghostty only.
+- **✎ (hover) → rename** the agent. The custom name is stored in
+  `~/.agent-status/.overrides.json` and survives restarts.
+- **⏸ (hover) → pause** the agent — interrupts its current turn (like pressing
+  Esc/Ctrl-C once). The session stays open; resume by typing in it. Confirmed
+  before it fires.
+
+Precise focus and pause need the **pid + tty the hooks capture**, so they work
+best with `install-hooks`. A scanner-only session (no hooks) falls back to
+cwd-level focus and can't be paused (the button reports this).
+
 ### Branch resolution (no `jq` needed)
 
 Claude Code's hook payload doesn't include the git branch, so `hooks/status.ts`
@@ -106,11 +126,13 @@ ls ~/.agent-status/smoke1.json      # gone
 `bun run scan` runs one scan pass over your real transcripts and reports how many
 open sessions it wrote.
 
-## v1 limitation: THE LINE only shows backlog / working / needs-you
+## THE LINE
 
-THE LINE populates its `backlog`, `working`, and `needs-you` columns from live
-session state. `review` and `merged` stay empty — filling them needs PR/MR and
-merge state from GitHub/GitLab, beyond what sessions expose. Out of scope for v1.
+THE LINE places each session's current work item — labelled by ticket (`#123`)
+if the branch has a number, else a short branch name, else the repo — into
+`backlog` (idle), `working`, or `needs-you` (waiting) from live session state.
+`review` and `merged` stay empty: filling them needs PR/MR and merge state from
+GitHub/GitLab, beyond what sessions expose. Out of scope for v1.
 
 ## Testing
 
