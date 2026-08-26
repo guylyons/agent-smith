@@ -15,7 +15,8 @@ export type HookEvent = {
   branch: string | null;
   tool_name?: string;
   tool_input?: Record<string, unknown>;
-  last_message?: string;
+  last_assistant_message?: string; // real Claude Code field on Stop
+  last_message?: string;           // back-compat alias
 };
 
 function seed(e: HookEvent, now: number): AgentStatus {
@@ -40,7 +41,8 @@ export function applyEvent(prev: AgentStatus | null, e: HookEvent, now: number):
     case "Notification":
       return { ...base, state: "waiting", waitingReason: "permission", updatedAt: now };
     case "Stop": {
-      const asking = !!e.last_message && QUESTION.test(e.last_message.trim());
+      const msg = e.last_assistant_message ?? e.last_message;
+      const asking = !!msg && QUESTION.test(msg.trim());
       return { ...base, state: asking ? "waiting" : "idle",
         waitingReason: asking ? "question" : undefined, updatedAt: now };
     }
