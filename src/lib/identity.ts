@@ -8,7 +8,11 @@ import { inferRole } from "./role";
 
 const CODENAMES = [
   "NOVA", "RELAY", "ANVIL", "EMBER", "QUILL", "VOLT", "MASON", "PIXEL",
-  "ROOK", "SABLE", "TALLY", "FLINT", "Wren", "ONYX", "CLOVE", "DELTA",
+  "ROOK", "SABLE", "TALLY", "FLINT", "WREN", "ONYX", "CLOVE", "DELTA",
+  "ORBIT", "GLYPH", "AXLE", "CEDAR", "VERGE", "MICA", "SLATE", "HAZEL",
+  "JUNO", "LOOM", "MOSS", "OTTER", "PACER", "QUARK", "RIVET", "TIDE",
+  "UMBER", "VESPER", "WILLOW", "XENO", "YARROW", "ZEPHYR", "BRIO", "COBALT",
+  "DRIFT", "FABLE", "GROVE", "HALO", "INDIGO", "KESTREL", "LUMEN", "MARLOW",
 ].map((n) => n.toUpperCase());
 
 function hash(s: string): number {
