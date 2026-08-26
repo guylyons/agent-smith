@@ -52,6 +52,16 @@ export function applyEvent(prev: AgentStatus | null, e: HookEvent, now: number):
 }
 
 // --- I/O glue (not unit-tested; exercised in the integration smoke test) ---
+function resolveBranch(cwd: string): string | null {
+  try {
+    const proc = Bun.spawnSync(["git", "-C", cwd, "branch", "--show-current"]);
+    const out = proc.stdout.toString("utf8").trim();
+    return out.length > 0 ? out : null;
+  } catch {
+    return null; // not a git repo, git missing, etc.
+  }
+}
+
 async function main() {
   const raw = await Bun.stdin.text();
   let e: HookEvent;
@@ -59,6 +69,9 @@ async function main() {
     e = JSON.parse(raw) as HookEvent;
   } catch {
     return; // malformed event on stdin; never crash the hook
+  }
+  if (e.branch === undefined || e.branch === null) {
+    e = { ...e, branch: resolveBranch(e.cwd) };
   }
   const dir = ensureStatusDir();
   const file = join(dir, `${e.session_id}.json`);
