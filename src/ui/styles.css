@@ -386,3 +386,8 @@ body{background:transparent}
 }
 .alertbtn:hover{color:var(--gold)}
 .alertbtn:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
+
+/* a11y: keyboard-focus outline for the "jump to terminal" button on a crew
+   card, mirroring .desk:focus-visible so both the card and its button get a
+   visible focus ring when tabbed to. */
+.deskbtn:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
