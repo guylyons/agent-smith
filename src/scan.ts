@@ -46,7 +46,10 @@ export async function runningClaudeCounts(): Promise<{ counts: Map<string, numbe
   const pids: string[] = [];
   for (const line of psout.split("\n")) {
     const m = line.trim().match(/^(\d+)\s+(.*)$/);
-    if (m && m[2].trim() === "claude") pids.push(m[1]); // exact comm "claude" = the CLI (not the desktop app)
+    // exact comm "claude" = the CLI (not the desktop app). NOTE: an npm-shim
+    // install invoked via node/bun would report "node"/"bun" here and match
+    // nothing -> ok:false -> chooseLive falls back to all-fresh (pre-fix behavior).
+    if (m && m[2].trim() === "claude") pids.push(m[1]);
   }
   if (!pids.length) return { counts, ok: false };
   for (const pid of pids) {
@@ -59,7 +62,10 @@ export async function runningClaudeCounts(): Promise<{ counts: Map<string, numbe
     if (!cwd || isEphemeralCwd(cwd)) continue;
     counts.set(cwd, (counts.get(cwd) ?? 0) + 1);
   }
-  return { counts, ok: true };
+  // If we resolved no cwds at all (e.g. lsof unavailable/failed for every pid),
+  // report ok:false so callers FALL BACK rather than blanking the dashboard and
+  // deleting tracked sessions.
+  return { counts, ok: counts.size > 0 };
 }
 
 /** Read the last ~TAIL_BYTES of a file and return its lines (bounded, for large transcripts). */
@@ -104,7 +110,13 @@ export function mergeForWrite(existing: AgentStatus | null, derived: AgentStatus
   if (existing && existing.waitingReason === "permission") {
     return { ...existing, updatedAt: now };
   }
-  return derived;
+  // Transcript-derived status never carries pid/tty (only the hook captures them);
+  // carry them forward so a routine scan pass doesn't erase the hook's work and
+  // break focus/pause for a session that's just quietly thinking.
+  const carried = { ...derived };
+  if (carried.pid === undefined && existing?.pid !== undefined) carried.pid = existing.pid;
+  if (carried.tty === undefined && existing?.tty !== undefined) carried.tty = existing.tty;
+  return carried;
 }
 
 type Candidate = { derived: AgentStatus; mtime: number };

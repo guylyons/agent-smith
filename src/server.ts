@@ -11,9 +11,13 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
 
+// sessionId comes from the client; keep it to a single, safe path/key segment.
+function validSessionId(sessionId: unknown): sessionId is string {
+  return typeof sessionId === "string" && /^[A-Za-z0-9-]+$/.test(sessionId);
+}
+
 function loadStatus(dir: string, sessionId: string): AgentStatus | null {
-  // sessionId comes from the client; keep it to a single path segment
-  if (!/^[A-Za-z0-9._-]+$/.test(sessionId)) return null;
+  if (!validSessionId(sessionId)) return null;
   try { return parseStatus(JSON.parse(readFileSync(join(dir, `${sessionId}.json`), "utf8"))); }
   catch { return null; }
 }
@@ -90,16 +94,22 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
       }
       // commands: act on a real session
       if (req.method === "POST" && url.pathname.startsWith("/action/")) {
+        // Block cross-site POSTs (localhost-CSRF from another local tab). Our own
+        // page sends same-origin; direct clients (curl) send no such header.
+        const site = req.headers.get("sec-fetch-site");
+        if (site && site !== "same-origin" && site !== "none") {
+          return json({ ok: false, error: "cross-site blocked" }, 403);
+        }
         const action = url.pathname.slice("/action/".length);
         let body: { sessionId?: string; name?: string };
         try { body = await req.json(); } catch { return json({ ok: false, error: "bad body" }, 400); }
-        const status = body.sessionId ? loadStatus(dir, body.sessionId) : null;
+        if (!validSessionId(body.sessionId)) return json({ ok: false, error: "bad sessionId" }, 400);
         if (action === "rename") {
-          if (!body.sessionId) return json({ ok: false, error: "no sessionId" }, 400);
           setNameOverride(dir, body.sessionId, body.name ?? null);
           push();
           return json({ ok: true });
         }
+        const status = loadStatus(dir, body.sessionId);
         if (!status) return json({ ok: false, error: "unknown session" }, 404);
         if (action === "focus") return json(await focusSession(status));
         if (action === "pause") return json(interruptSession(status));

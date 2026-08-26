@@ -23,7 +23,7 @@ const S = (o: Partial<AgentStatus>): AgentStatus => ({
 
 test("mergeForWrite: writes the derived status when nothing exists", () => {
   const derived = S({ state: "idle" });
-  expect(mergeForWrite(null, derived, 1000)).toBe(derived);
+  expect(mergeForWrite(null, derived, 1000)).toEqual(derived);
 });
 
 test("mergeForWrite: preserves a hook-set permission wait, only refreshing liveness", () => {
@@ -36,9 +36,13 @@ test("mergeForWrite: preserves a hook-set permission wait, only refreshing liven
   expect(out.updatedAt).toBe(999_999); // liveness refreshed so it doesn't age out
 });
 
-test("mergeForWrite: an ordinary existing status is replaced by the derived one", () => {
-  const derived = S({ state: "working" });
-  expect(mergeForWrite(S({ state: "idle" }), derived, 1000)).toBe(derived);
+test("mergeForWrite: carries hook-set pid/tty forward when the derived status lacks them", () => {
+  const existing = S({ state: "waiting", pid: 4242, tty: "/dev/ttys006" });
+  const derived = S({ state: "working" }); // transcript-derived, no pid/tty
+  const out = mergeForWrite(existing, derived, 1000);
+  expect(out.state).toBe("working"); // state still tracks the transcript
+  expect(out.pid).toBe(4242);        // but the hook's pid/tty survive
+  expect(out.tty).toBe("/dev/ttys006");
 });
 
 function writeTranscript(proj: string, sid: string, lines: object[], mtimeSecAgo = 0, now = Date.now()) {
