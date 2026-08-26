@@ -6,12 +6,15 @@ import { Header } from "./Header";
 import { Crew } from "./Crew";
 import { TheLine } from "./TheLine";
 import { ConversationDrawer } from "./ConversationDrawer";
+import { NewAgentModal } from "./NewAgentModal";
 import { Toaster } from "./Toaster";
 import type { AgentStatus } from "../schema";
 
 export function App() {
   const snap = useSnapshot();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [newAgentOpen, setNewAgentOpen] = useState(false);
+  const recentFolders = [...new Set(snap.agents.map((a) => a.cwd).filter(Boolean))];
 
   // Keep the last-known agent so the drawer doesn't slam shut (losing unsent
   // input) if the session ages out of the snapshot mid-conversation.
@@ -25,12 +28,13 @@ export function App() {
     <>
       <Backdrop />
       <Crt />
-      <Header snap={snap} />
+      <Header snap={snap} onNewAgent={() => setNewAgentOpen(true)} />
       <Crew agents={snap.agents} onOpen={setSelectedId} />
       <TheLine line={snap.line} />
       {selected && selected.sessionId === selectedId && (
         <ConversationDrawer agent={selected} ended={ended} onClose={() => setSelectedId(null)} />
       )}
+      {newAgentOpen && <NewAgentModal recentFolders={recentFolders} onClose={() => setNewAgentOpen(false)} />}
       <Toaster />
     </>
   );

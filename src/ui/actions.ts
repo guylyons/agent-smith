@@ -39,6 +39,13 @@ export function sendPromptTo(sessionId: string, text: string): Promise<boolean> 
   return act("prompt", { sessionId, text });
 }
 
+/** Launch a new Claude agent in `cwd` with `task` as its opening prompt. */
+export async function spawnAgent(cwd: string, task: string): Promise<boolean> {
+  const r = await post("spawn", { cwd, text: task });
+  if (!r.ok) toast(r.error ?? "could not launch");
+  return r.ok;
+}
+
 export type ChatMessage = { role: "user" | "assistant" | "tool"; text: string };
 
 export async function fetchConversation(sessionId: string): Promise<ChatMessage[]> {

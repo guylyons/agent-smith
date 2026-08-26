@@ -87,6 +87,27 @@ export async function sendPrompt(t: Target, text: string): Promise<ActionResult>
   return r;
 }
 
+/** Launch a NEW Claude session in `cwd` with `task` as its opening prompt — a new
+ *  Ghostty tab (or window) that runs `claude '<task>'`. Does not steal focus. The
+ *  new session appears on the board via the scanner once it starts. */
+export async function spawnAgent(cwd: string, task: string): Promise<ActionResult> {
+  const quotedTask = "'" + task.replace(/'/g, "'\\''") + "'"; // shell-quote for the claude arg
+  const input = `claude ${quotedTask}\n`;
+  const script = `tell application "Ghostty"
+    set cfg to new surface configuration
+    set initial working directory of cfg to ${asStr(cwd)}
+    set initial input of cfg to ${asStr(input)}
+    if (count of windows) > 0 then
+      new tab in front window with configuration cfg
+    else
+      new window with configuration cfg
+    end if
+    return "ok"
+  end tell`;
+  const out = await osa(script);
+  return out === "ok" ? { ok: true } : { ok: false, error: "could not launch a new terminal (is Ghostty running?)" };
+}
+
 /** Interrupt the session's current turn — equivalent to pressing Esc/Ctrl-C once.
  *  The session stays alive and waiting; resume by typing in it. Verifies the pid
  *  is still a live `claude` process first, so a crashed session's recycled pid

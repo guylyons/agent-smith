@@ -5,7 +5,7 @@ function projectName(cwd: string): string {
   return parts[parts.length - 1] ?? cwd;
 }
 
-export function Header({ snap }: { snap: Snapshot }) {
+export function Header({ snap, onNewAgent }: { snap: Snapshot; onNewAgent: () => void }) {
   const { agents, line } = snap;
   const working = agents.filter((a) => a.state === "working").length;
   const waiting = agents.filter((a) => a.state === "waiting").length;
@@ -32,6 +32,7 @@ export function Header({ snap }: { snap: Snapshot }) {
         <span><b>{waiting}</b> NEED YOU</span>
         <span><b>{idle}</b> IDLE</span>
         <span><b>{open}</b> TICKETS OPEN</span>
+        <button className="newagent-btn" onClick={onNewAgent}>+ NEW AGENT</button>
       </div>
     </header>
   );

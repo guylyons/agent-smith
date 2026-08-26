@@ -1,11 +1,11 @@
-import { readdirSync, readFileSync, watch } from "node:fs";
+import { readdirSync, readFileSync, statSync, watch } from "node:fs";
 import { join } from "node:path";
 import { parseStatus, type AgentStatus } from "./schema";
 import { buildSnapshot, type Snapshot } from "./lib/snapshot";
 import { ensureStatusDir, statusDir } from "./lib/paths";
 import { scanLiveSessions, readConversation, readSubagents } from "./scan";
 import { readOverrides, applyOverrides, setNameOverride } from "./lib/overrides";
-import { focusSession, interruptSession, sendPrompt } from "./ghostty";
+import { focusSession, interruptSession, sendPrompt, spawnAgent } from "./ghostty";
 import { readRepo } from "./repo";
 
 function json(body: unknown, status = 200): Response {
@@ -125,8 +125,16 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
           return json({ ok: false, error: "cross-site blocked" }, 403);
         }
         const action = url.pathname.slice("/action/".length);
-        let body: { sessionId?: string; name?: string; text?: string };
+        let body: { sessionId?: string; name?: string; text?: string; cwd?: string };
         try { body = await req.json(); } catch { return json({ ok: false, error: "bad body" }, 400); }
+        // spawn creates a brand-new session — it has a folder + task, not a sessionId
+        if (action === "spawn") {
+          const cwd = typeof body.cwd === "string" ? body.cwd : "";
+          const task = typeof body.text === "string" ? body.text : "";
+          if (!cwd || !task.trim()) return json({ ok: false, error: "folder and task are required" }, 400);
+          try { if (!statSync(cwd).isDirectory()) throw 0; } catch { return json({ ok: false, error: `folder not found: ${cwd}` }, 400); }
+          return json(await spawnAgent(cwd, task));
+        }
         if (!validSessionId(body.sessionId)) return json({ ok: false, error: "bad sessionId" }, 400);
         if (action === "rename") {
           setNameOverride(dir, body.sessionId, body.name ?? null);

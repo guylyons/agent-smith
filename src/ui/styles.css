@@ -202,6 +202,22 @@
 .reply-input:focus{outline:none;border-color:var(--gold)}
 .reply-input::placeholder{color:var(--dim)}
 
+/* new agent */
+.newagent-btn{font-family:"Press Start 2P",ui-monospace,monospace;font-size:8px;letter-spacing:.5px;
+  background:var(--leaf);color:#08130c;border:2px solid var(--bone);padding:6px 9px;cursor:pointer}
+.newagent-btn:hover{background:var(--gold)}
+.newagent{width:min(520px,92vw);max-height:90vh;overflow-y:auto;margin:8vh auto;padding:20px;display:flex;flex-direction:column;gap:9px}
+.newagent-title{font-size:14px;letter-spacing:1px;margin-bottom:6px}
+.newagent-label{font-size:8px;color:var(--dim);margin-top:8px}
+.newagent .reply-input{flex:0 0 auto}
+.newagent-task{resize:vertical;line-height:1.5;min-height:110px}
+.newagent-recent{display:flex;flex-wrap:wrap;gap:6px;margin-top:2px}
+.deskbtn.on{background:var(--bevel);color:#0b1020}
+.deskbtn.primary{background:var(--gold);color:#1a1204;border-color:var(--bone);font-family:"Press Start 2P",ui-monospace,monospace;font-size:9px;padding:9px 12px}
+.deskbtn.primary:hover:not(:disabled){background:var(--leaf)}
+.newagent-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+.newagent-hint{font-size:8px;color:var(--dim);line-height:1.8;margin-top:10px}
+
 /* ---- selectable 2D-art backgrounds ---- */
 /* body has an opaque bg in the mock; make it transparent so the z-index:-1
    art layer shows through (html keeps the --night fallback). */
