@@ -49,7 +49,7 @@ async function closeWhere(matchExpr: string): Promise<boolean> {
       repeat with t in tabs of w
         repeat with term in terminals of t
           if ${matchExpr} then
-            close t
+            close tab t
             return "ok"
           end if
         end repeat
