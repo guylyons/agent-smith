@@ -5,7 +5,7 @@ import { SpritePicker } from "./SpritePicker";
 import { renderMarkdown } from "./markdown";
 import {
   fetchConversation, fetchSubagents, fetchRepo, sendPromptTo, focusSession, pauseSession, renameSession,
-  type ChatMessage, type Subagent, type RepoInfo,
+  type ChatMessage, type Subagent, type RepoInfo, type PendingQuestion,
 } from "./actions";
 
 type Pending = { id: string; text: string; base: number; at: number };
@@ -16,6 +16,8 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
   const [subagents, setSubagents] = useState<Subagent[]>([]);
   const [pending, setPending] = useState<Pending[]>([]); // optimistic, not yet in transcript
   const [repo, setRepo] = useState<RepoInfo | null>(null);
+  const [question, setQuestion] = useState<PendingQuestion | null>(null);
+  const [picks, setPicks] = useState<Record<number, Set<string>>>({});
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -30,10 +32,12 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
   useEffect(() => {
     let alive = true;
     const load = async () => {
-      const [m, s] = await Promise.all([fetchConversation(agent.sessionId), fetchSubagents(agent.sessionId)]);
+      const [conv, s] = await Promise.all([fetchConversation(agent.sessionId), fetchSubagents(agent.sessionId)]);
       if (!alive) return;
+      const m = conv.messages;
       setMessages(m);
       setSubagents(s);
+      setQuestion(conv.question);
       // Drop an optimistic echo once a NEW occurrence of its text lands in the
       // transcript (count exceeds the baseline captured at send time), or after
       // 30s if it never shows — so repeated identical messages aren't swallowed.
@@ -78,6 +82,28 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
     setBusy(false);
     if (!ok) setPending((p) => p.filter((x) => x.id !== id)); // roll back on failure
   }
+
+  async function answer(text: string) {
+    const id = `${Date.now()}-${Math.random()}`;
+    const base = messages.filter((msg) => msg.role === "user" && msg.text.trim() === text.trim()).length;
+    setPending((p) => [...p, { id, text, base, at: Date.now() }]);
+    setQuestion(null); setPicks({});
+    atBottomRef.current = true;
+    const ok = await sendPromptTo(agent.sessionId, text);
+    if (!ok) setPending((p) => p.filter((x) => x.id !== id));
+  }
+  function togglePick(qi: number, label: string, multi: boolean) {
+    setPicks((p) => {
+      const s = new Set(multi ? p[qi] ?? [] : []); // single-select replaces
+      if (s.has(label)) s.delete(label); else s.add(label);
+      return { ...p, [qi]: s };
+    });
+  }
+  function sendAnswer() {
+    const parts = (question?.questions ?? []).map((_, qi) => [...(picks[qi] ?? [])].join(", ")).filter(Boolean);
+    if (parts.length) void answer(parts.join(" | "));
+  }
+  const singleQ = !!question && question.questions.length === 1 && !question.questions[0].multiSelect;
 
   function commitRename() {
     const n = nameDraft.trim();
@@ -166,6 +192,29 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
                 </div>
               ))}
             </div>
+
+            {question && (
+              <div className="qpanel">
+                {question.questions.map((q, qi) => (
+                  <div key={qi} className="qblock">
+                    {q.header && <div className="pix qheader">{q.header}</div>}
+                    <div className="qtext">{q.question}</div>
+                    <div className="qoptions">
+                      {q.options.map((o) => {
+                        const selected = picks[qi]?.has(o.label);
+                        return (
+                          <button key={o.label} className={`deskbtn qopt ${selected ? "on" : ""}`} title={o.description}
+                            onClick={() => (singleQ ? void answer(o.label) : togglePick(qi, o.label, q.multiSelect))}>
+                            {!singleQ && (q.multiSelect ? (selected ? "☑ " : "☐ ") : (selected ? "◉ " : "○ "))}{o.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+                {!singleQ && <button className="deskbtn primary" onClick={sendAnswer}>▸ SEND ANSWER</button>}
+              </div>
+            )}
 
             <div className="drawer-foot">
               <input

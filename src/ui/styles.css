@@ -340,6 +340,13 @@ body{background:transparent}
 .msg-tool .msg-text::before{content:"⚙ "}
 .msg-empty{color:var(--dim);font-size:11px;text-align:center;margin:auto}
 .drawer-foot{display:flex;gap:6px;padding:12px 14px;border-top:var(--px) solid var(--bone)}
+/* pending AskUserQuestion — answer inline */
+.qpanel{padding:12px 14px;border-top:var(--px) solid var(--gold);background:var(--box-lo);display:flex;flex-direction:column;gap:10px;max-height:40%;overflow-y:auto}
+.qblock{display:flex;flex-direction:column;gap:6px}
+.qheader{font-size:8px;color:var(--gold);letter-spacing:.5px}
+.qtext{font-size:12px;color:var(--bone);line-height:1.5}
+.qoptions{display:flex;flex-wrap:wrap;gap:6px}
+.qopt{text-align:left;max-width:100%;white-space:normal}
 .name-click{cursor:pointer}
 .name-click:hover{color:var(--gold)}
 .name-input{font-size:12px;padding:3px 6px;max-width:200px}

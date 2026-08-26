@@ -93,11 +93,11 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
           "cache-control": "no-cache",
         }});
       }
-      // a session's full conversation
+      // a session's full conversation (+ any pending question)
       if (url.pathname === "/conversation") {
         const sid = url.searchParams.get("sessionId") ?? "";
-        if (!validSessionId(sid)) return json({ messages: [] }, 400);
-        return json({ messages: await readConversation(sid) });
+        if (!validSessionId(sid)) return json({ messages: [], question: null }, 400);
+        return json(await readConversation(sid));
       }
 
       // a session's live subagents

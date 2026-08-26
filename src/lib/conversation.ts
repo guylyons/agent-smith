@@ -4,6 +4,45 @@ import { humanizeTool } from "./humanize";
 
 export type ChatMessage = { role: "user" | "assistant" | "tool"; text: string };
 
+export type QuestionOption = { label: string; description?: string };
+export type Question = { header?: string; question: string; multiSelect: boolean; options: QuestionOption[] };
+export type PendingQuestion = { questions: Question[] };
+
+/**
+ * Find an AskUserQuestion the session is still waiting on — a tool_use with that
+ * name whose tool_use_id has no matching tool_result yet. Lets the dashboard show
+ * the options and answer them, instead of forcing the user to the terminal.
+ */
+export function findPendingQuestion(lines: string[]): PendingQuestion | null {
+  const resolved = new Set<string>();
+  let last: { id: string; questions: Question[] } | null = null;
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+    let e: Record<string, unknown>;
+    try { e = JSON.parse(line); } catch { continue; }
+    for (const c of contentArray(e)) {
+      if (c.type === "tool_result" && typeof (c as { tool_use_id?: string }).tool_use_id === "string") {
+        resolved.add((c as { tool_use_id: string }).tool_use_id);
+      }
+      if (c.type === "tool_use" && c.name === "AskUserQuestion" && typeof (c as { id?: string }).id === "string") {
+        const input = (c as { input?: { questions?: Question[] } }).input;
+        const questions = Array.isArray(input?.questions) ? input!.questions! : [];
+        if (questions.length) last = { id: (c as { id: string }).id, questions };
+      }
+    }
+  }
+  if (last && !resolved.has(last.id)) {
+    return {
+      questions: last.questions.map((q) => ({
+        header: q.header, question: q.question, multiSelect: !!q.multiSelect,
+        options: (q.options ?? []).map((o) => ({ label: o.label, description: o.description })),
+      })),
+    };
+  }
+  return null;
+}
+
 type Content = { type?: string; text?: string; name?: string; input?: Record<string, unknown> };
 
 function contentArray(entry: Record<string, unknown>): Content[] {

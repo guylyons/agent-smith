@@ -51,14 +51,18 @@ export async function spawnAgent(cwd: string, task: string): Promise<boolean> {
 }
 
 export type ChatMessage = { role: "user" | "assistant" | "tool"; text: string };
+export type QuestionOption = { label: string; description?: string };
+export type Question = { header?: string; question: string; multiSelect: boolean; options: QuestionOption[] };
+export type PendingQuestion = { questions: Question[] };
+export type Conversation = { messages: ChatMessage[]; question: PendingQuestion | null };
 
-export async function fetchConversation(sessionId: string): Promise<ChatMessage[]> {
+export async function fetchConversation(sessionId: string): Promise<Conversation> {
   try {
     const res = await fetch(`/conversation?sessionId=${encodeURIComponent(sessionId)}`);
-    const body = (await res.json()) as { messages?: ChatMessage[] };
-    return body.messages ?? [];
+    const body = (await res.json()) as Partial<Conversation>;
+    return { messages: body.messages ?? [], question: body.question ?? null };
   } catch {
-    return [];
+    return { messages: [], question: null };
   }
 }
 

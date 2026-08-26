@@ -13,7 +13,7 @@ import type { AgentStatus } from "./schema";
 import { parseStatus } from "./schema";
 import { ensureStatusDir } from "./lib/paths";
 import { deriveStatusFromTranscript } from "./lib/transcript";
-import { parseConversation, type ChatMessage } from "./lib/conversation";
+import { parseConversation, findPendingQuestion, type ChatMessage, type PendingQuestion } from "./lib/conversation";
 import { deriveSubagent, type Subagent } from "./lib/subagents";
 
 const FRESH_MS = Number(process.env.AGENT_SCAN_FRESH_MS ?? 15 * 60_000);
@@ -84,20 +84,20 @@ async function tailLinesOf(file: string, bytes: number): Promise<string[]> {
 }
 const tailLines = (file: string) => tailLinesOf(file, TAIL_BYTES);
 
-/** Find a session's transcript and parse it into a chat log (last ~maxBytes). */
-export async function readConversation(sessionId: string, maxBytes = 512 * 1024): Promise<ChatMessage[]> {
+/** Find a session's transcript and parse it into a chat log + any pending question. */
+export async function readConversation(sessionId: string, maxBytes = 512 * 1024): Promise<{ messages: ChatMessage[]; question: PendingQuestion | null }> {
   const root = projectsDir();
   let projects: import("node:fs").Dirent[];
-  try { projects = await readdir(root, { withFileTypes: true }); } catch { return []; }
+  try { projects = await readdir(root, { withFileTypes: true }); } catch { return { messages: [], question: null }; }
   for (const proj of projects) {
     if (!proj.isDirectory()) continue;
     const file = join(root, proj.name, `${sessionId}.jsonl`);
     try {
       const lines = await tailLinesOf(file, maxBytes);
-      return parseConversation(lines);
+      return { messages: parseConversation(lines), question: findPendingQuestion(lines) };
     } catch { /* not in this project dir */ }
   }
-  return [];
+  return { messages: [], question: null };
 }
 
 /** Count subagents actively writing (mtime < 90s) in a session's subagents dir. */
