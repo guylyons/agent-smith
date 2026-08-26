@@ -4,7 +4,7 @@ import { parseStatus, type AgentStatus } from "./schema";
 import { buildSnapshot, type Snapshot } from "./lib/snapshot";
 import { ensureStatusDir, statusDir } from "./lib/paths";
 import { scanLiveSessions, readConversation, readSubagents } from "./scan";
-import { readOverrides, applyOverrides, setNameOverride } from "./lib/overrides";
+import { readOverrides, applyOverrides, setNameOverride, setSpriteOverride } from "./lib/overrides";
 import { focusSession, interruptSession, sendPrompt, spawnAgent } from "./ghostty";
 import { readRepo } from "./repo";
 
@@ -125,7 +125,7 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
           return json({ ok: false, error: "cross-site blocked" }, 403);
         }
         const action = url.pathname.slice("/action/".length);
-        let body: { sessionId?: string; name?: string; text?: string; cwd?: string };
+        let body: { sessionId?: string; name?: string; text?: string; cwd?: string; palette?: number; gear?: string };
         try { body = await req.json(); } catch { return json({ ok: false, error: "bad body" }, 400); }
         // spawn creates a brand-new session — it has a folder + task, not a sessionId
         if (action === "spawn") {
@@ -138,6 +138,14 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
         if (!validSessionId(body.sessionId)) return json({ ok: false, error: "bad sessionId" }, 400);
         if (action === "rename") {
           setNameOverride(dir, body.sessionId, body.name ?? null);
+          push();
+          return json({ ok: true });
+        }
+        if (action === "sprite") {
+          if (typeof body.palette !== "number" || typeof body.gear !== "string") {
+            return json({ ok: false, error: "palette and gear are required" }, 400);
+          }
+          setSpriteOverride(dir, body.sessionId, { palette: body.palette, gear: body.gear });
           push();
           return json({ ok: true });
         }

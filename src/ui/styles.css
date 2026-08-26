@@ -391,3 +391,15 @@ body{background:transparent}
    card, mirroring .desk:focus-visible so both the card and its button get a
    visible focus ring when tabbed to. */
 .deskbtn:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+
+/* sprite picker modal */
+.spritepicker{width:min(460px,92vw);max-height:90vh;overflow-y:auto;margin:8vh auto;padding:20px;display:flex;flex-direction:column;gap:9px}
+.spritepicker-title{font-size:14px;letter-spacing:1px;margin-bottom:6px}
+.spritepicker-label{font-size:8px;color:var(--dim);margin-top:8px}
+.spritepicker-preview{display:flex;justify-content:center;padding:14px;background:var(--night);border:2px solid var(--bevel)}
+.spritepicker-preview .sprite{width:64px;height:96px}
+.sprite-grid{display:flex;flex-wrap:wrap;gap:6px;margin-top:2px}
+.sprite-option{display:flex;align-items:center;justify-content:center;background:var(--box-lo);border:2px solid var(--bevel);cursor:pointer;padding:4px}
+.sprite-option:hover{border-color:var(--gold)}
+.sprite-option.selected{border-color:var(--gold);background:var(--box)}
+.sprite-option .sprite{width:28px;height:42px}
