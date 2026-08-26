@@ -62,6 +62,21 @@ function resolveBranch(cwd: string): string | null {
   }
 }
 
+// The Claude process that spawned this hook is our parent; capture it and its
+// controlling terminal so the dashboard can focus/interrupt the real session.
+function resolveProcess(): { pid?: number; tty?: string } {
+  const pid = process.ppid;
+  if (!pid) return {};
+  try {
+    const proc = Bun.spawnSync(["ps", "-o", "tty=", "-p", String(pid)]);
+    const t = proc.stdout.toString("utf8").trim(); // e.g. "ttys006" or "??"
+    const tty = t && t !== "??" ? `/dev/${t}` : undefined;
+    return { pid, tty };
+  } catch {
+    return { pid };
+  }
+}
+
 async function main() {
   const raw = await Bun.stdin.text();
   let e: HookEvent;
@@ -85,6 +100,9 @@ async function main() {
   }
   const next = applyEvent(prev, e, Date.now());
   if (next === null) { rmSync(file, { force: true }); return; }
+  const { pid, tty } = resolveProcess();
+  if (pid) next.pid = pid;
+  if (tty) next.tty = tty;
   const tmp = `${file}.tmp`;
   writeFileSync(tmp, JSON.stringify(next));
   renameSync(tmp, file); // atomic

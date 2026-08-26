@@ -1,0 +1,38 @@
+// Per-session user overrides (currently just a custom name), stored next to the
+// status files so a rename survives restarts. Applied when building the snapshot.
+import { join } from "node:path";
+import { readFileSync, writeFileSync, renameSync } from "node:fs";
+import type { AgentStatus } from "../schema";
+
+export type Overrides = Record<string, { name?: string }>;
+
+function file(dir: string): string {
+  return join(dir, ".overrides.json");
+}
+
+export function readOverrides(dir: string): Overrides {
+  try {
+    const o = JSON.parse(readFileSync(file(dir), "utf8"));
+    return o && typeof o === "object" ? (o as Overrides) : {};
+  } catch {
+    return {}; // missing or corrupt — no overrides
+  }
+}
+
+export function setNameOverride(dir: string, sessionId: string, name: string | null): void {
+  const all = readOverrides(dir);
+  const trimmed = (name ?? "").trim();
+  if (trimmed) all[sessionId] = { ...all[sessionId], name: trimmed };
+  else if (all[sessionId]) { delete all[sessionId].name; if (!Object.keys(all[sessionId]).length) delete all[sessionId]; }
+  const tmp = file(dir) + ".tmp";
+  writeFileSync(tmp, JSON.stringify(all));
+  renameSync(tmp, file(dir));
+}
+
+/** Return agents with any custom name applied. Never mutates the inputs. */
+export function applyOverrides(agents: AgentStatus[], overrides: Overrides): AgentStatus[] {
+  return agents.map((a) => {
+    const name = overrides[a.sessionId]?.name;
+    return name ? { ...a, name } : a;
+  });
+}

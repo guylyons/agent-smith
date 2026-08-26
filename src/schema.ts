@@ -11,6 +11,10 @@ export const AgentStatusSchema = z.object({
   cwd: z.string(),
   branch: z.string().nullable(),
   updatedAt: z.number(),
+  // Set by the hook (not the transcript scanner) so the dashboard can act on the
+  // real session: pid = the Claude process to signal; tty = its terminal device.
+  pid: z.number().optional(),
+  tty: z.string().optional(),
 });
 
 export type AgentStatus = z.infer<typeof AgentStatusSchema>;

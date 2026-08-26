@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
-import { mergeForWrite, scanLiveSessions, freshTranscripts } from "../src/scan";
+import { mergeForWrite, scanLiveSessions, freshTranscripts, chooseLive, isEphemeralCwd } from "../src/scan";
 import type { AgentStatus } from "../src/schema";
-import { mkdirSync, writeFileSync, rmSync, readFileSync, utimesSync } from "node:fs";
+import { mkdirSync, writeFileSync, rmSync, readFileSync, utimesSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
 const base = "/tmp/aw-scan-test";
@@ -72,7 +72,8 @@ test("scanLiveSessions writes a status file per fresh session, keyed by sessionI
     { type: "user", sessionId: "sess1", cwd: "/repo", gitBranch: "feature/4412-card", message: { content: [{ type: "text", text: "go" }] } },
     { type: "assistant", sessionId: "sess1", cwd: "/repo", gitBranch: "feature/4412-card", message: { content: [{ type: "tool_use", name: "Edit", input: { file_path: "/repo/card.twig" } }] } },
   ], 30, now);
-  const n = await scanLiveSessions(now, 15 * 60_000);
+  const counts = { counts: new Map([["/repo", 1]]), ok: true };
+  const n = await scanLiveSessions(now, 15 * 60_000, counts);
   expect(n).toBe(1);
   const written = JSON.parse(readFileSync(join(status, "sess1.json"), "utf8"));
   expect(written.sessionId).toBe("sess1");
@@ -90,9 +91,60 @@ test("scanLiveSessions keeps a fresh permission prompt alive without downgrading
   ], 30, now);
   // a hook already marked it needs-you (permission) a while ago
   writeFileSync(join(status, "sess2.json"), JSON.stringify(S({ sessionId: "sess2", state: "waiting", waitingReason: "permission", updatedAt: now - 500_000 })));
-  await scanLiveSessions(now, 15 * 60_000);
+  await scanLiveSessions(now, 15 * 60_000, { counts: new Map([["/repo", 1]]), ok: true });
   const after = JSON.parse(readFileSync(join(status, "sess2.json"), "utf8"));
   expect(after.state).toBe("waiting");
   expect(after.waitingReason).toBe("permission");
   expect(after.updatedAt).toBe(now); // refreshed so it stays on the dashboard
+});
+
+const C = (sid: string, cwd: string, mtime: number) => ({ derived: S({ sessionId: sid, cwd }), mtime });
+
+test("isEphemeralCwd flags tmp/scratchpad dirs", () => {
+  expect(isEphemeralCwd("/private/tmp/claude-501/x/scratchpad")).toBe(true);
+  expect(isEphemeralCwd("/tmp/whatever")).toBe(true);
+  expect(isEphemeralCwd("/Users/glyons/github/mho-drupal")).toBe(false);
+});
+
+test("chooseLive caps sessions per cwd at the running-process count (newest win)", () => {
+  const cands = [
+    C("old", "/repo/a", 100),
+    C("new", "/repo/a", 200),
+    C("solo", "/repo/b", 50),
+  ];
+  const chosen = chooseLive(cands, new Map([["/repo/a", 1], ["/repo/b", 1]]), true);
+  const ids = chosen.map((c) => c.sessionId).sort();
+  expect(ids).toEqual(["new", "solo"]); // "old" dropped: only 1 process in /repo/a
+});
+
+test("chooseLive drops cwds with no running process, and ephemeral dirs", () => {
+  const cands = [
+    C("live", "/repo/a", 100),
+    C("dead", "/repo/ghost", 100),
+    C("tmp", "/private/tmp/claude-501/x/scratchpad", 100),
+  ];
+  const chosen = chooseLive(cands, new Map([["/repo/a", 1]]), true);
+  expect(chosen.map((c) => c.sessionId)).toEqual(["live"]);
+});
+
+test("chooseLive falls back to all non-ephemeral when process info is unavailable", () => {
+  const cands = [C("a", "/repo/a", 1), C("b", "/private/tmp/x", 1)];
+  const chosen = chooseLive(cands, new Map(), false);
+  expect(chosen.map((c) => c.sessionId)).toEqual(["a"]);
+});
+
+test("scanLiveSessions removes scanner-written phantoms but keeps hook-owned files", async () => {
+  reset();
+  const now = 40_000_000;
+  writeTranscript("-repo", "live1", [
+    { type: "assistant", sessionId: "live1", cwd: "/repo", gitBranch: "b", message: { content: [{ type: "text", text: "hi." }] } },
+  ], 30, now);
+  // a stale scanner-written phantom (no pid) with no running process
+  writeFileSync(join(status, "phantom.json"), JSON.stringify(S({ sessionId: "phantom", cwd: "/gone" })));
+  // a hook-owned session (has pid) not in this scan — must be preserved
+  writeFileSync(join(status, "hooked.json"), JSON.stringify(S({ sessionId: "hooked", cwd: "/elsewhere", pid: 1234 })));
+  await scanLiveSessions(now, 15 * 60_000, { counts: new Map([["/repo", 1]]), ok: true });
+  expect(existsSync(join(status, "live1.json"))).toBe(true);
+  expect(existsSync(join(status, "phantom.json"))).toBe(false); // removed
+  expect(existsSync(join(status, "hooked.json"))).toBe(true);   // hook-owned, kept
 });

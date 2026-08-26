@@ -3,10 +3,12 @@
 // waiting for each to fire a hook. Runs periodically alongside the hooks;
 // hooks remain the real-time authority (they alone see permission prompts).
 //
-// Async throughout so a scan pass never blocks the server's event loop.
+// A transcript is only surfaced if it maps to an actually-running, top-level
+// Claude process — otherwise old/abandoned transcripts and internal sub-sessions
+// (subagents, scratchpad work under /private/tmp) show up as phantom agents.
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { open, stat, readdir, readFile, writeFile, rename } from "node:fs/promises";
+import { open, stat, readdir, readFile, writeFile, rename, unlink } from "node:fs/promises";
 import type { AgentStatus } from "./schema";
 import { parseStatus } from "./schema";
 import { ensureStatusDir } from "./lib/paths";
@@ -17,6 +19,47 @@ const TAIL_BYTES = 64 * 1024;
 
 export function projectsDir(): string {
   return process.env.AGENT_PROJECTS_DIR ?? join(homedir(), ".claude", "projects");
+}
+
+/** Ephemeral / internal working dirs that are never a real user window. */
+export function isEphemeralCwd(cwd: string): boolean {
+  return cwd.startsWith("/private/tmp/") || cwd.startsWith("/tmp/") || cwd.includes("/claude-501/");
+}
+
+async function run(cmd: string[]): Promise<string> {
+  const p = Bun.spawn(cmd, { stdout: "pipe", stderr: "ignore" });
+  const out = await new Response(p.stdout).text();
+  await p.exited;
+  return out;
+}
+
+/**
+ * Count running top-level `claude` CLI processes per working directory.
+ * Returns { counts, ok }: ok=false means we couldn't read process info at all
+ * (ps failed / no claude found), in which case callers fall back rather than
+ * blank the dashboard. Ephemeral cwds are dropped.
+ */
+export async function runningClaudeCounts(): Promise<{ counts: Map<string, number>; ok: boolean }> {
+  const counts = new Map<string, number>();
+  let psout = "";
+  try { psout = await run(["ps", "ax", "-o", "pid=,comm="]); } catch { return { counts, ok: false }; }
+  const pids: string[] = [];
+  for (const line of psout.split("\n")) {
+    const m = line.trim().match(/^(\d+)\s+(.*)$/);
+    if (m && m[2].trim() === "claude") pids.push(m[1]); // exact comm "claude" = the CLI (not the desktop app)
+  }
+  if (!pids.length) return { counts, ok: false };
+  for (const pid of pids) {
+    let cwd = "";
+    try {
+      const l = await run(["lsof", "-a", "-p", pid, "-d", "cwd", "-Fn"]);
+      const nline = l.split("\n").find((x) => x.startsWith("n"));
+      cwd = nline ? nline.slice(1) : "";
+    } catch { /* skip this pid */ }
+    if (!cwd || isEphemeralCwd(cwd)) continue;
+    counts.set(cwd, (counts.get(cwd) ?? 0) + 1);
+  }
+  return { counts, ok: true };
 }
 
 /** Read the last ~TAIL_BYTES of a file and return its lines (bounded, for large transcripts). */
@@ -64,24 +107,76 @@ export function mergeForWrite(existing: AgentStatus | null, derived: AgentStatus
   return derived;
 }
 
-/** One scan pass: derive open sessions from fresh transcripts and write their status files. */
-export async function scanLiveSessions(now: number, freshMs = FRESH_MS): Promise<number> {
+type Candidate = { derived: AgentStatus; mtime: number };
+
+/**
+ * Choose which sessions to surface: only cwds with a running claude process,
+ * capped at the number of processes there (newest transcripts win). When process
+ * info is unavailable, fall back to all fresh non-ephemeral transcripts.
+ */
+export function chooseLive(cands: Candidate[], counts: Map<string, number>, ok: boolean): AgentStatus[] {
+  if (!ok) return cands.filter((c) => !isEphemeralCwd(c.derived.cwd)).map((c) => c.derived);
+  const byCwd = new Map<string, Candidate[]>();
+  for (const c of cands) {
+    if (isEphemeralCwd(c.derived.cwd)) continue;
+    (byCwd.get(c.derived.cwd) ?? byCwd.set(c.derived.cwd, []).get(c.derived.cwd)!).push(c);
+  }
+  const chosen: AgentStatus[] = [];
+  for (const [cwd, list] of byCwd) {
+    const n = counts.get(cwd) ?? 0;
+    if (n <= 0) continue; // no running process for this cwd -> not a live window
+    list.sort((a, b) => b.mtime - a.mtime);
+    for (const c of list.slice(0, n)) chosen.push(c.derived);
+  }
+  return chosen;
+}
+
+/** One scan pass: derive open sessions from fresh transcripts, keep only those with a
+ *  running process, write their status files, and clean up scanner-written phantoms. */
+export async function scanLiveSessions(
+  now: number,
+  freshMs = FRESH_MS,
+  countsOverride?: { counts: Map<string, number>; ok: boolean },
+): Promise<number> {
   const dir = ensureStatusDir();
-  let written = 0;
+  const { counts, ok } = countsOverride ?? (await runningClaudeCounts());
+
+  const cands: Candidate[] = [];
   for (const file of await freshTranscripts(now, freshMs)) {
-    let derived: AgentStatus | null;
-    try { derived = deriveStatusFromTranscript(await tailLines(file), now); } catch { continue; }
-    if (!derived) continue;
-    const target = join(dir, `${derived.sessionId}.json`);
+    try {
+      const derived = deriveStatusFromTranscript(await tailLines(file), now);
+      if (!derived) continue;
+      cands.push({ derived, mtime: (await stat(file)).mtimeMs });
+    } catch { /* skip */ }
+  }
+
+  const chosen = chooseLive(cands, counts, ok);
+  const chosenIds = new Set(chosen.map((c) => c.sessionId));
+
+  for (const status of chosen) {
+    const target = join(dir, `${status.sessionId}.json`);
     let existing: AgentStatus | null = null;
     try { existing = parseStatus(JSON.parse(await readFile(target, "utf8"))); } catch { existing = null; }
-    const final = mergeForWrite(existing, derived, now);
+    const final = mergeForWrite(existing, status, now);
     const tmp = `${target}.tmp`;
     await writeFile(tmp, JSON.stringify(final));
     await rename(tmp, target); // atomic
-    written++;
   }
-  return written;
+
+  // Remove scanner-written status files (no pid — hooks set pid) that are no longer live.
+  let names: string[] = [];
+  try { names = await readdir(dir); } catch { /* none */ }
+  for (const name of names) {
+    if (!name.endsWith(".json") || name.startsWith(".")) continue;
+    const sid = name.slice(0, -5);
+    if (chosenIds.has(sid)) continue;
+    try {
+      const st = parseStatus(JSON.parse(await readFile(join(dir, name), "utf8")));
+      if (st && st.pid === undefined) await unlink(join(dir, name)); // scanner-origin phantom
+    } catch { /* leave unreadable files for the reader to skip */ }
+  }
+
+  return chosen.length;
 }
 
 if (import.meta.main) {

@@ -1,21 +1,23 @@
 import { readdirSync, readFileSync, watch } from "node:fs";
 import { join } from "node:path";
-import { parseStatus } from "./schema";
+import { parseStatus, type AgentStatus } from "./schema";
 import { buildSnapshot, type Snapshot } from "./lib/snapshot";
 import { ensureStatusDir, statusDir } from "./lib/paths";
 import { scanLiveSessions } from "./scan";
+import { readOverrides, applyOverrides } from "./lib/overrides";
 
 export function readSnapshot(dir: string, now: number): Snapshot {
-  const agents = [];
+  const agents: AgentStatus[] = [];
   let names: string[] = [];
-  try { names = readdirSync(dir).filter((f) => f.endsWith(".json")); } catch { /* no dir yet */ }
+  // status files are <sessionId>.json; skip dotfiles like .overrides.json
+  try { names = readdirSync(dir).filter((f) => f.endsWith(".json") && !f.startsWith(".")); } catch { /* no dir yet */ }
   for (const f of names) {
     try {
       const s = parseStatus(JSON.parse(readFileSync(join(dir, f), "utf8")));
       if (s) agents.push(s);
     } catch { /* half-written; skip */ }
   }
-  return buildSnapshot(agents, now);
+  return buildSnapshot(applyOverrides(agents, readOverrides(dir)), now);
 }
 
 export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?: number } = {}) {
