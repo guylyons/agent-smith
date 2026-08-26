@@ -1,0 +1,446 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AGENT WORKSHOP</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --night:#0d1424;
+    --box:#243059;
+    --box-lo:#161f3d;
+    --bevel:#6e8ce0;
+    --bone:#f2e9d8;
+    --dim:#8a97bd;
+    --gold:#f2b134;
+    --leaf:#4fbf6a;
+    --clay:#e0533d;
+    --px:4px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:var(--night);color:var(--bone)}
+  body{
+    font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    padding:24px 20px 40px;
+    -webkit-font-smoothing:none;
+    position:relative;
+    min-height:100vh;
+  }
+  body::after{content:none}
+
+  /* ---- CRT stack ---- */
+  .crt{position:fixed;inset:0;pointer-events:none;z-index:90}
+
+  /* horizontal scanlines — soft-edged so they don't moiré, and sized
+     to land on whole device pixels at 1x and 2x */
+  .crt-scan{
+    background-image:linear-gradient(to bottom,
+      rgba(0,0,0,.44) 0%,
+      rgba(0,0,0,.44) 34%,
+      rgba(0,0,0,0)   62%,
+      rgba(0,0,0,0)   100%);
+    background-size:100% 3px;
+    mix-blend-mode:multiply;
+  }
+  @media (min-resolution:2dppx){
+    .crt-scan{background-size:100% 2px}
+  }
+
+  /* aperture grille — the vertical triad is what actually reads as CRT */
+  .crt-grille{
+    background-image:repeating-linear-gradient(90deg,
+      rgba(255,40,90,.07)  0 1px,
+      rgba(40,255,140,.07) 1px 2px,
+      rgba(70,130,255,.07) 2px 3px);
+    mix-blend-mode:screen;
+  }
+
+  /* tube glow + corner falloff */
+  .crt-glow{
+    background:
+      radial-gradient(90% 55% at 50% -4%, rgba(150,185,255,.09), transparent 62%),
+      radial-gradient(125% 105% at 50% 50%, transparent 54%, rgba(0,0,0,.6) 100%);
+  }
+
+  /* slow hum bar drifting down the tube */
+  .crt-hum{
+    top:-24vh;left:0;right:0;bottom:auto;height:24vh;
+    background:linear-gradient(to bottom,
+      transparent 0%, rgba(200,220,255,.05) 42%,
+      rgba(200,220,255,.05) 58%, transparent 100%);
+    mix-blend-mode:screen;
+    animation:hum 11s linear infinite;
+  }
+  @keyframes hum{to{transform:translateY(124vh)}}
+
+  html.crt-off  .crt{display:none}
+  html.crt-soft .crt-grille,
+  html.crt-soft .crt-hum{display:none}
+  html.crt-soft .crt-scan{opacity:.5}
+
+  /* ---- tube control ---- */
+  .tube{
+    position:fixed;top:16px;right:16px;z-index:100;
+    font-family:"Press Start 2P",ui-monospace,monospace;font-size:8px;
+    background:var(--box);color:var(--bone);
+    border:3px solid var(--bone);
+    box-shadow:inset 0 0 0 2px var(--bevel),0 3px 0 rgba(0,0,0,.55);
+    padding:9px 11px;cursor:pointer;letter-spacing:.5px;
+  }
+  .tube:hover{color:var(--gold)}
+  .tube:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
+  .pix{font-family:"Press Start 2P",ui-monospace,monospace;line-height:1.6}
+
+  /* ---- SNES window chrome ---- */
+  .win{
+    background:var(--box);
+    border:var(--px) solid var(--bone);
+    box-shadow:
+      inset 0 0 0 var(--px) var(--bevel),
+      inset 0 var(--px) 0 calc(var(--px)*2) rgba(255,255,255,.10),
+      0 var(--px) 0 0 rgba(0,0,0,.55);
+    position:relative;
+  }
+
+  /* ---- header ---- */
+  header{max-width:1080px;margin:0 auto 20px}
+  .title{font-size:20px;letter-spacing:1px;text-shadow:0 var(--px) 0 #000}
+  .sub{font-size:9px;color:var(--dim);margin-top:10px}
+  .statline{display:flex;flex-wrap:wrap;gap:16px;margin-top:14px;font-size:9px}
+  .statline b{color:var(--gold)}
+  .caret{display:inline-block;width:8px;height:12px;background:var(--gold);vertical-align:-2px;animation:blink 1s steps(2) infinite}
+  @keyframes blink{50%{opacity:0}}
+
+  /* ---- crew ---- */
+  .crew{
+    max-width:1080px;margin:0 auto;
+    display:grid;gap:14px;
+    grid-template-columns:repeat(auto-fit,minmax(300px,1fr));
+  }
+  .desk{padding:14px;display:flex;gap:14px;align-items:flex-start}
+  .desk.is-idle{opacity:.55}
+  .sprite-wrap{position:relative;flex:0 0 auto;width:56px}
+  .sprite{width:56px;height:84px;display:block;image-rendering:pixelated}
+  .desk.is-working .sprite{animation:bob .5s steps(2) infinite}
+  @keyframes bob{50%{transform:translateY(-3px)}}
+  .bubble{
+    position:absolute;top:-10px;right:-6px;
+    background:var(--clay);color:#fff;font-size:10px;
+    padding:5px 7px;border:3px solid var(--bone);
+    animation:pop .8s steps(2) infinite;
+  }
+  @keyframes pop{50%{transform:translateY(-3px)}}
+  .who{flex:1;min-width:0}
+  .name{font-size:11px;letter-spacing:.5px}
+  .spec{font-size:9px;color:var(--dim);margin-top:7px;text-transform:uppercase}
+  .ticket{
+    display:inline-block;margin-top:11px;font-size:10px;
+    background:var(--box-lo);border:2px solid var(--bevel);padding:4px 7px;
+  }
+  .doing{font-size:11px;color:var(--bone);margin-top:10px;line-height:1.5;min-height:2.4em}
+  .doing::before{content:"> ";color:var(--gold)}
+  .state{display:flex;align-items:center;gap:7px;margin-top:10px;font-size:9px}
+  .lamp{width:10px;height:10px;flex:0 0 auto}
+  .lamp.working{background:var(--gold);animation:blink 1.1s steps(2) infinite}
+  .lamp.waiting{background:var(--clay)}
+  .lamp.idle{background:var(--dim)}
+  .lamp.done{background:var(--leaf)}
+
+  /* ---- the line ---- */
+  .line{max-width:1080px;margin:26px auto 0;padding:16px 16px 0}
+  .line h2{font-size:12px;letter-spacing:.5px}
+  .line .hint{font-size:9px;color:var(--dim);margin-top:9px}
+  .stages{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-top:16px}
+  .stage{min-width:0}
+  .stage-head{
+    font-size:8px;text-align:center;padding:7px 2px;
+    background:var(--box-lo);border:2px solid var(--bevel);color:var(--dim);
+  }
+  .stage[data-key="needs"] .stage-head{color:var(--clay);border-color:var(--clay)}
+  .stage[data-key="merged"] .stage-head{color:var(--leaf);border-color:var(--leaf)}
+  .slot{min-height:112px;padding:10px 0;display:flex;flex-direction:column;gap:8px;align-items:center}
+  .crate{
+    width:100%;background:var(--box-lo);
+    border:3px solid var(--bone);
+    box-shadow:inset 0 0 0 2px rgba(110,140,224,.5),0 3px 0 rgba(0,0,0,.5);
+    padding:8px 6px;text-align:center;
+  }
+  .crate .num{font-size:9px}
+  .crate .own{height:5px;margin-top:7px}
+  .crate.hop{animation:hop .45s steps(3) 1}
+  @keyframes hop{50%{transform:translateY(-14px)}}
+
+  /* signature: the belt */
+  .belt{margin:6px -16px 0;height:22px;border-top:var(--px) solid var(--bone);background:var(--box-lo);overflow:hidden}
+  .tread{
+    height:100%;
+    background:repeating-linear-gradient(90deg,var(--bevel) 0 10px,var(--box-lo) 10px 20px);
+    animation:roll 1.4s linear infinite;
+    width:200%;
+  }
+  @keyframes roll{to{transform:translateX(-20px)}}
+
+  footer{max-width:1080px;margin:22px auto 0;font-size:9px;color:var(--dim);line-height:2}
+
+  @media (max-width:720px){
+    .stages{grid-template-columns:repeat(5,minmax(96px,1fr));overflow-x:auto}
+    .title{font-size:14px}
+  }
+  @media (prefers-reduced-motion:reduce){
+    *{animation:none !important}
+    .crt-hum{display:none}
+  }
+</style>
+
+<button class="tube" id="tube" aria-live="polite">TUBE: CRT</button>
+
+<div class="crt crt-scan"></div>
+<div class="crt crt-grille"></div>
+<div class="crt crt-glow"></div>
+<div class="crt crt-hum"></div>
+
+<header>
+  <div class="pix title">AGENT WORKSHOP</div>
+  <div class="pix sub">5 ON SHIFT — mho-drupal · gitlab<span class="caret"></span></div>
+  <div class="pix statline">
+    <span><b id="s-work">0</b> WORKING</span>
+    <span><b id="s-wait">0</b> NEED YOU</span>
+    <span><b id="s-idle">0</b> IDLE</span>
+    <span><b id="s-open">0</b> TICKETS OPEN</span>
+  </div>
+</header>
+
+<main class="crew" id="crew"></main>
+
+<section class="win line">
+  <h2 class="pix">THE LINE</h2>
+  <p class="pix hint">WHERE EVERY TICKET IS BEFORE IT LANDS</p>
+  <div class="stages" id="stages"></div>
+  <div class="belt"><div class="tread"></div></div>
+</section>
+
+<footer class="pix">
+  MOCKUP — FAKE DATA ON A TIMER<br>
+  REAL VERSION READS ~/.agent-status/*.json WRITTEN BY CLAUDE CODE HOOKS
+</footer>
+
+<script>
+const AGENTS = [
+  {id:'scout',  name:'SCOUT',   spec:'Ticket triage',      gear:'headset',
+   hair:'#3f2b1e', body:'#4a7ec9', accent:'#8fc0ff', pants:'#26406b', out:'#101a2e',
+   state:'working', ticket:'#4412',
+   lines:['reading issue #4412 acceptance criteria','mapping affected modules','checking mainehealth theme templates','listing admin paths to test']},
+  {id:'forge',  name:'FORGE',   spec:'Component build',    gear:'goggles',
+   hair:'#7a2f2f', body:'#c9673a', accent:'#f2b134', pants:'#6e3a22', out:'#2a1410',
+   state:'working', ticket:'#4398',
+   lines:['pulling card variant from Figma','writing card--featured.twig','wiring BEM classes to tokens','compiling SCSS']},
+  {id:'shift',  name:'SHIFT',   spec:'D10 → D11 migration',gear:'hood',
+   hair:'#2b2b3d', body:'#6a5acd', accent:'#b7a8ff', pants:'#3a3168', out:'#171238',
+   state:'waiting', ticket:'#4271',
+   lines:['media IDs will change — confirm before I write','waiting on your call']},
+  {id:'probe',  name:'PROBE',   spec:'Test & profile',     gear:'visor',
+   hair:'#4a3a1e', body:'#3f8f6a', accent:'#4fbf6a', pants:'#245140', out:'#0e2a20',
+   state:'working', ticket:'#4405',
+   lines:['running xhprof on /patients','node/1284 renders in 840ms','diffing against last profile','flagging 3 slow twig loops']},
+  {id:'scribe', name:'SCRIBE',  spec:'Docs & changelog',   gear:'topknot',
+   hair:'#4a4a4a', body:'#8a8fa8', accent:'#d8dcf0', pants:'#4c5068', out:'#1d2030',
+   state:'idle',    ticket:'—',
+   lines:['nothing queued']}
+];
+
+/* 16x24 base body.
+   O outline · H hair · S skin · s skin shadow · E eye · W white
+   B shirt · G trim · P pants · F boot */
+const BASE = [
+  "................",
+  "................",
+  "....OOOOOOO.....",
+  "...OHHHHHHHO....",
+  "..OHHHHHHHHHO...",
+  "..OHSSSSSSSHO...",
+  "..OSSSSSSSSSO...",
+  "..OSSEWSSEWSO...",
+  "..OSSEWSSEWSO...",
+  "..OSSSSSSSSSO...",
+  "..OSssSSSssSO...",
+  "...OSSSSSSSO....",
+  "....OSSSSSO.....",
+  "...OBBBBBBBO....",
+  "..OBBBGGGBBBO...",
+  ".OSBBGGGGGBBSO..",
+  ".OSBBBGGGBBBSO..",
+  ".OOBBBBBBBBBOO..",
+  "...OPPPPPPPO....",
+  "...OPPPPPPPO....",
+  "...OPPPOPPPO....",
+  "...OPPO.OPPO....",
+  "..OFFFO.OFFFO...",
+  "..OOOOO.OOOOO..."
+];
+
+/* headgear overlays — '.' leaves the base pixel alone */
+const GEAR = {
+  headset:[
+    {at:1, rows:[
+      "....OOOOOOO.....",
+      "...OGGGGGGGO....",
+      "...OGOOOOOGO...."]},
+    {at:6, rows:[
+      ".GG..........GG.",
+      ".GG..........GG.",
+      ".GG..........GG.",
+      "..G.............",
+      "...G............"]}
+  ],
+  goggles:[
+    {at:2, rows:[
+      "....OOOOOOO.....",
+      "...OGGGGGGGO....",
+      "..OGWWGGGWWGO..."]}
+  ],
+  hood:[
+    {at:1, rows:[
+      "....OOOOOOO.....",
+      "...OGGGGGGGO....",
+      "..OGGGGGGGGGO...",
+      "..OGGSSSSSGGO...",
+      "..OGSSSSSSSGO..."]},
+    {at:6, rows:[
+      ".OG.........GO..",
+      ".OG.........GO..",
+      ".OG.........GO..",
+      "..O.........O..."]}
+  ],
+  visor:[
+    {at:3, rows:[
+      "...OOOOOOOOO....",
+      "..OGGGGGGGGGO..."]},
+    {at:6, rows:[
+      ".........OOO....",
+      ".........OGO....",
+      ".........OOO...."]}
+  ],
+  topknot:[
+    {at:0, rows:[
+      ".......GG.......",
+      "......OGGO......",
+      "....OOOHHHOO...."]},
+    {at:5, rows:[
+      "............GO..",
+      "............GO.."]}
+  ]
+};
+
+function sprite(a){
+  const pal = {O:a.out, H:a.hair, S:'#f0c6a0', s:'#d49f79', E:a.out, W:'#ffffff',
+               B:a.body, G:a.accent, P:a.pants, F:'#2a2118'};
+  const grid = BASE.map(r=>[...r]);
+  (GEAR[a.gear]||[]).forEach(layer=>{
+    layer.rows.forEach((row,i)=>{
+      [...row].forEach((c,x)=>{ if(c!=='.') grid[layer.at+i][x]=c; });
+    });
+  });
+  let r='';
+  grid.forEach((row,y)=>row.forEach((c,x)=>{
+    if(pal[c]) r+=`<rect x="${x}" y="${y}" width="1" height="1" fill="${pal[c]}"/>`;
+  }));
+  return `<svg class="sprite" viewBox="0 0 16 24" shape-rendering="crispEdges" aria-hidden="true">${r}</svg>`;
+}
+
+const STAGES = [
+  {key:'backlog', label:'BACKLOG'},
+  {key:'working', label:'WORKING'},
+  {key:'needs',   label:'NEEDS YOU'},
+  {key:'review',  label:'REVIEW'},
+  {key:'merged',  label:'MERGED'}
+];
+
+let tickets = [
+  {num:'#4441', stage:'backlog', own:'#8fc0ff'},
+  {num:'#4437', stage:'backlog', own:'#d8dcf0'},
+  {num:'#4412', stage:'working', own:'#8fc0ff'},
+  {num:'#4398', stage:'working', own:'#f2b134'},
+  {num:'#4405', stage:'working', own:'#4fbf6a'},
+  {num:'#4271', stage:'needs',   own:'#b7a8ff'},
+  {num:'#4360', stage:'review',  own:'#f2b134'},
+  {num:'#4344', stage:'merged',  own:'#4fbf6a'}
+];
+
+function drawCrew(){
+  document.getElementById('crew').innerHTML = AGENTS.map(a=>`
+    <article class="win desk is-${a.state}" id="d-${a.id}">
+      <div class="sprite-wrap">
+        ${sprite(a)}
+        ${a.state==='waiting'?'<div class="pix bubble">!</div>':''}
+      </div>
+      <div class="who">
+        <div class="pix name">${a.name}</div>
+        <div class="pix spec">${a.spec}</div>
+        <div class="pix ticket" style="color:${a.accent}">${a.ticket}</div>
+        <div class="doing" id="do-${a.id}">${a.lines[0]}</div>
+        <div class="pix state"><span class="lamp ${a.state}"></span>${a.state.toUpperCase()}</div>
+      </div>
+    </article>`).join('');
+}
+
+function drawLine(){
+  document.getElementById('stages').innerHTML = STAGES.map(s=>`
+    <div class="stage" data-key="${s.key}">
+      <div class="pix stage-head">${s.label}</div>
+      <div class="slot">
+        ${tickets.filter(t=>t.stage===s.key).map(t=>`
+          <div class="crate" data-num="${t.num}">
+            <div class="pix num">${t.num}</div>
+            <div class="own" style="background:${t.own}"></div>
+          </div>`).join('')}
+      </div>
+    </div>`).join('');
+  document.getElementById('s-work').textContent = AGENTS.filter(a=>a.state==='working').length;
+  document.getElementById('s-wait').textContent = AGENTS.filter(a=>a.state==='waiting').length;
+  document.getElementById('s-idle').textContent = AGENTS.filter(a=>a.state==='idle').length;
+  document.getElementById('s-open').textContent = tickets.filter(t=>t.stage!=='merged').length;
+}
+
+// tube modes
+const MODES = [
+  {cls:'',         label:'TUBE: CRT'},
+  {cls:'crt-soft', label:'TUBE: SOFT'},
+  {cls:'crt-off',  label:'TUBE: OFF'}
+];
+let mode = 0;
+document.getElementById('tube').addEventListener('click', e=>{
+  mode = (mode+1) % MODES.length;
+  document.documentElement.className = MODES[mode].cls;
+  e.currentTarget.textContent = MODES[mode].label;
+});
+
+drawCrew(); drawLine();
+
+// chatter
+setInterval(()=>{
+  const live = AGENTS.filter(a=>a.state==='working');
+  if(!live.length) return;
+  const a = live[Math.floor(Math.random()*live.length)];
+  const el = document.getElementById('do-'+a.id);
+  const next = a.lines[Math.floor(Math.random()*a.lines.length)];
+  if(el) el.textContent = next;
+}, 2600);
+
+// the line advances
+const ORDER = ['backlog','working','review','merged'];
+setInterval(()=>{
+  const movable = tickets.filter(t=>ORDER.indexOf(t.stage) > -1 && t.stage !== 'merged');
+  if(!movable.length) return;
+  const t = movable[Math.floor(Math.random()*movable.length)];
+  t.stage = ORDER[ORDER.indexOf(t.stage)+1];
+  const merged = tickets.filter(x=>x.stage==='merged');
+  if(merged.length > 2){
+    const old = merged[0];
+    old.stage = 'backlog';
+    old.num = '#' + (4450 + Math.floor(Math.random()*40));
+  }
+  drawLine();
+  const c = document.querySelector(`.crate[data-num="${t.num}"]`);
+  if(c) c.classList.add('hop');
+}, 6500);
+</script>
