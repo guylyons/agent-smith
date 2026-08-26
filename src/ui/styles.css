@@ -313,6 +313,29 @@ body{background:transparent}
 .msg.is-pending{opacity:.55}
 .msg.is-pending .msg-text::after{content:" ⏳"}
 
+/* markdown rendering inside chat messages */
+.msg-text p{margin:0 0 8px}
+.msg-text p:last-child{margin-bottom:0}
+.msg-text strong{color:var(--gold);font-weight:700}
+.msg-text em{font-style:italic}
+.msg-text code{font-family:ui-monospace,Menlo,monospace;font-size:.92em;background:var(--box-lo);border:1px solid var(--bevel);padding:1px 4px;border-radius:2px;word-break:break-word}
+.msg-text pre.md-code{
+  background:var(--box-lo);border:2px solid var(--bevel);
+  padding:8px 10px;margin:6px 0;overflow-x:auto;
+  font-family:ui-monospace,Menlo,monospace;font-size:11px;line-height:1.45;
+  white-space:pre;
+}
+.msg-text pre.md-code:last-child{margin-bottom:0}
+.msg-text pre.md-code code{background:none;border:none;padding:0;font-size:1em}
+.msg-text .md-list{margin:0 0 8px;padding-left:18px}
+.msg-text .md-list:last-child{margin-bottom:0}
+.msg-text .md-list li{margin:2px 0}
+.msg-text .md-table-wrap{display:block;overflow-x:auto;margin:6px 0;max-width:100%}
+.msg-text .md-table-wrap:last-child{margin-bottom:0}
+.msg-text table{border-collapse:collapse;font-size:11px}
+.msg-text th,.msg-text td{border:1px solid var(--bevel);padding:4px 8px;text-align:left}
+.msg-text th{background:var(--box-lo);color:var(--gold)}
+
 /* toasts */
 .toaster{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:120;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}
 .toast{background:var(--clay);color:#fff;border:3px solid var(--bone);box-shadow:0 3px 0 rgba(0,0,0,.55);padding:9px 13px;font-size:10px;max-width:80vw}

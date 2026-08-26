@@ -5,6 +5,7 @@ import {
   fetchConversation, fetchSubagents, sendPromptTo, focusSession, pauseSession, renameSession,
   type ChatMessage, type Subagent,
 } from "./actions";
+import { renderMarkdown } from "./markdown";
 
 export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStatus; ended: boolean; onClose: () => void }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -121,7 +122,7 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
           {messages.map((m, i) => (
             <div key={i} className={`msg msg-${m.role}`}>
               <span className="msg-who">{m.role === "user" ? "YOU" : m.role === "assistant" ? agent.name : "»"}</span>
-              <span className="msg-text">{m.text}</span>
+              <span className="msg-text">{m.role === "tool" ? m.text : renderMarkdown(m.text)}</span>
             </div>
           ))}
           {pending.map((p, i) => (
