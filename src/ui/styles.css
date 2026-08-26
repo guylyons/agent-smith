@@ -196,3 +196,8 @@
 .desk:hover .desk-actions,.desk:focus-within .desk-actions{opacity:1}
 .deskbtn{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--box-lo);color:var(--bone);border:2px solid var(--bevel);cursor:pointer;padding:2px 6px;line-height:1.2}
 .deskbtn:hover{color:var(--gold);border-color:var(--gold)}
+.deskbtn:disabled{opacity:.5;cursor:default}
+.reply{display:flex;gap:6px;margin-top:10px}
+.reply-input{flex:1;min-width:0;font-family:ui-monospace,Menlo,monospace;font-size:11px;background:var(--night);color:var(--bone);border:2px solid var(--bevel);padding:5px 7px}
+.reply-input:focus{outline:none;border-color:var(--gold)}
+.reply-input::placeholder{color:var(--dim)}

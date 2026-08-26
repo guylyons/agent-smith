@@ -33,3 +33,11 @@ export function renameSession(sessionId: string, current: string): void {
   if (name === null) return; // cancelled
   void act("rename", { sessionId, name });
 }
+
+// Returns whether the prompt was delivered, so the caller can keep the input
+// open (and show the error) on failure.
+export async function sendPromptTo(sessionId: string, text: string): Promise<boolean> {
+  const r = await post("prompt", { sessionId, text });
+  if (!r.ok) alert(r.error ?? "could not send");
+  return r.ok;
+}

@@ -60,6 +60,13 @@ test("sidechain/meta entries are ignored", () => {
   expect(s.state).toBe("idle");
 });
 
+test("captures aiTitle as the session title (used to target the Ghostty tab)", () => {
+  const lines = [
+    L({ type: "assistant", sessionId: "s1", cwd: "/repo", gitBranch: "b", aiTitle: "Primary nav menu panels links", message: { content: [{ type: "text", text: "done." }] } }),
+  ];
+  expect(deriveStatusFromTranscript(lines, 1)!.title).toBe("Primary nav menu panels links");
+});
+
 test("null/empty gitBranch -> null ticket", () => {
   const lines = [
     L({ type: "assistant", sessionId: "s1", cwd: "/repo", gitBranch: "", message: { content: [{ type: "text", text: "done." }] } }),

@@ -26,6 +26,7 @@ export function deriveStatusFromTranscript(lines: string[], updatedAt: number): 
   let sessionId: string | null = null;
   let cwd = "";
   let branch: string | null = null;
+  let title: string | undefined;
   let lastToolUse: { name: string; input?: Record<string, unknown> } | null = null;
   let lastAssistantText: string | null = null;
   // Did the session end its turn on assistant text (turn complete), or is it
@@ -42,6 +43,7 @@ export function deriveStatusFromTranscript(lines: string[], updatedAt: number): 
     if (typeof e.sessionId === "string") sessionId = e.sessionId;
     if (typeof e.cwd === "string") cwd = e.cwd;
     if (typeof e.gitBranch === "string") branch = e.gitBranch.length ? e.gitBranch : null;
+    if (typeof e.aiTitle === "string" && e.aiTitle.trim()) title = e.aiTitle.trim();
 
     const type = e.type;
     if (type === "assistant") {
@@ -84,6 +86,6 @@ export function deriveStatusFromTranscript(lines: string[], updatedAt: number): 
   return {
     sessionId, name, role,
     ticket: parseTicket(branch), state, waitingReason,
-    doing, cwd, branch, updatedAt,
+    doing, cwd, branch, updatedAt, title,
   };
 }

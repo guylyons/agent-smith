@@ -5,7 +5,7 @@ import { buildSnapshot, type Snapshot } from "./lib/snapshot";
 import { ensureStatusDir, statusDir } from "./lib/paths";
 import { scanLiveSessions } from "./scan";
 import { readOverrides, applyOverrides, setNameOverride } from "./lib/overrides";
-import { focusSession, interruptSession } from "./ghostty";
+import { focusSession, interruptSession, sendPrompt } from "./ghostty";
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -101,7 +101,7 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
           return json({ ok: false, error: "cross-site blocked" }, 403);
         }
         const action = url.pathname.slice("/action/".length);
-        let body: { sessionId?: string; name?: string };
+        let body: { sessionId?: string; name?: string; text?: string };
         try { body = await req.json(); } catch { return json({ ok: false, error: "bad body" }, 400); }
         if (!validSessionId(body.sessionId)) return json({ ok: false, error: "bad sessionId" }, 400);
         if (action === "rename") {
@@ -113,6 +113,12 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
         if (!status) return json({ ok: false, error: "unknown session" }, 404);
         if (action === "focus") return json(await focusSession(status));
         if (action === "pause") return json(interruptSession(status));
+        if (action === "prompt") {
+          const text = typeof body.text === "string" ? body.text : "";
+          if (!text.trim()) return json({ ok: false, error: "empty prompt" }, 400);
+          if (text.length > 10_000) return json({ ok: false, error: "prompt too long" }, 400);
+          return json(await sendPrompt(status, text));
+        }
         return json({ ok: false, error: "unknown action" }, 404);
       }
 

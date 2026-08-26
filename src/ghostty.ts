@@ -1,11 +1,12 @@
-// OS actions on a real Claude session: focus its Ghostty terminal, or interrupt
-// it. macOS + Ghostty specific (uses Ghostty's AppleScript dictionary, which
-// works without Accessibility permission). Best-effort: every call resolves to a
-// {ok, error?} result and never throws.
+// OS actions on a real Claude session: focus its Ghostty terminal, send it a
+// prompt/answer, or interrupt it. macOS + Ghostty specific (uses Ghostty's
+// AppleScript dictionary, which works without Accessibility permission).
+// Best-effort: every call resolves to a {ok, error?} result and never throws.
 import { writeFile } from "node:fs/promises";
 import type { AgentStatus } from "./schema";
 
 export type ActionResult = { ok: boolean; error?: string };
+type Target = Pick<AgentStatus, "tty" | "cwd" | "title">;
 
 function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -23,14 +24,13 @@ function asStr(s: string): string {
   return '"' + s.replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"';
 }
 
-function focusScript(match: string): string {
-  return `tell application "Ghostty"
+async function runWhere(matchExpr: string, body: string): Promise<boolean> {
+  const script = `tell application "Ghostty"
     repeat with w in windows
       repeat with t in tabs of w
         repeat with term in terminals of t
-          if ${match} then
-            focus term
-            activate
+          if ${matchExpr} then
+            ${body}
             return "ok"
           end if
         end repeat
@@ -38,6 +38,7 @@ function focusScript(match: string): string {
     end repeat
     return "no"
   end tell`;
+  return (await osa(script)) === "ok";
 }
 
 let markerSeq = 0;
@@ -46,23 +47,46 @@ function newMarker(): string {
   return `AWF-${Date.now().toString(36)}-${markerSeq.toString(36)}`;
 }
 
-/** Focus the exact terminal for a session: write a one-shot title marker to its
- *  tty and match on it (precise). Falls back to matching the working directory. */
-export async function focusSession(status: Pick<AgentStatus, "tty" | "cwd">): Promise<ActionResult> {
-  if (status.tty) {
+/**
+ * Run an AppleScript `body` (with `term` bound) on the session's exact terminal.
+ * Targeting, most precise first: a one-shot title marker written to the tty
+ * (hooks) → Claude's task title, which equals the Ghostty tab title (scanner) →
+ * working directory. cwd is imprecise (many tabs share one), so it's only used
+ * when `allowCwd` is set — never for sending input.
+ */
+async function runOnTerminal(t: Target, body: string, allowCwd: boolean): Promise<ActionResult> {
+  if (t.tty) {
     const marker = newMarker();
     try {
-      await writeFile(status.tty, `\x1b]2;${marker}\x07`); // OSC 2 = set window title
+      await writeFile(t.tty, `\x1b]2;${marker}\x07`); // OSC 2 = set window title
       await delay(70);
-      const out = await osa(focusScript(`(name of term) contains ${asStr(marker)}`));
-      if (out === "ok") return { ok: true };
-    } catch { /* fall through to cwd match */ }
+      if (await runWhere(`(name of term) contains ${asStr(marker)}`, body)) return { ok: true };
+    } catch { /* fall through */ }
   }
-  if (status.cwd) {
-    const out = await osa(focusScript(`(working directory of term) is ${asStr(status.cwd)}`));
-    if (out === "ok") return { ok: true };
+  if (t.title && (await runWhere(`(name of term) contains ${asStr(t.title)}`, body))) return { ok: true };
+  if (allowCwd && t.cwd && (await runWhere(`(working directory of term) is ${asStr(t.cwd)}`, body))) return { ok: true };
+  return { ok: false, error: "could not pinpoint the terminal (is it still open?)" };
+}
+
+/** Bring the session's terminal to the front. */
+export function focusSession(t: Target): Promise<ActionResult> {
+  return runOnTerminal(t, "focus term\n            activate", true);
+}
+
+/** Type a prompt/answer into the session and submit it (Enter), then focus it so
+ *  the user sees it land. Only precise targets — never the cwd fallback — so a
+ *  prompt can't be sent to the wrong session. */
+export async function sendPrompt(t: Target, text: string): Promise<ActionResult> {
+  const body = `input text ${asStr(text)} to term
+            delay 0.1
+            send key "enter" to term
+            focus term
+            activate`;
+  const r = await runOnTerminal(t, body, false);
+  if (!r.ok && !t.tty && !t.title) {
+    return { ok: false, error: "can't pinpoint this session's terminal — run `bun run install-hooks` to enable sending prompts" };
   }
-  return { ok: false, error: "could not find the terminal (is it still open?)" };
+  return r;
 }
 
 /** Interrupt the session's current turn — equivalent to pressing Esc/Ctrl-C once.
