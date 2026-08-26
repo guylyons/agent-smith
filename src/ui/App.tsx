@@ -8,6 +8,7 @@ import { TheLine } from "./TheLine";
 import { ConversationDrawer } from "./ConversationDrawer";
 import { NewAgentModal } from "./NewAgentModal";
 import { Toaster } from "./Toaster";
+import { Notifier } from "./Notifier";
 import type { AgentStatus } from "../schema";
 
 export function App() {
@@ -36,6 +37,7 @@ export function App() {
       )}
       {newAgentOpen && <NewAgentModal recentFolders={recentFolders} onClose={() => setNewAgentOpen(false)} />}
       <Toaster />
+      <Notifier snap={snap} />
     </>
   );
 }
