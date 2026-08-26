@@ -43,12 +43,14 @@ export function buildSnapshot(agents: AgentStatus[], now: number, staleMs = 5 * 
       .sort((a, b) => a.name.localeCompare(b.name)),
   );
 
-  // Best state per work item (ticket or branch/repo): waiting > working > idle.
-  const best = new Map<string, AgentStatus["state"]>();
+  // Best state per work item, keyed by repo+label so the SAME ticket number in
+  // two different repos stays two separate crates (waiting > working > idle).
+  const best = new Map<string, { state: AgentStatus["state"]; label: string }>();
   for (const a of live) {
     const label = workLabel(a);
-    const cur = best.get(label);
-    if (!cur || rank[a.state] > rank[cur]) best.set(label, a.state);
+    const key = `${repoTail(a.cwd)}|${label}`;
+    const cur = best.get(key);
+    if (!cur || rank[a.state] > rank[cur.state]) best.set(key, { state: a.state, label });
   }
 
   const stageFor = (s: AgentStatus["state"]) =>
@@ -57,7 +59,7 @@ export function buildSnapshot(agents: AgentStatus[], now: number, staleMs = 5 * 
   const line: LineStage[] = (["backlog", "working", "needs", "review", "merged"] as const)
     .map((stage) => ({ stage, tickets: [] as string[] }));
   const byStage = new Map(line.map((l) => [l.stage, l]));
-  for (const [label, state] of best) byStage.get(stageFor(state))!.tickets.push(label);
+  for (const { state, label } of best.values()) byStage.get(stageFor(state))!.tickets.push(label);
   for (const l of line) l.tickets.sort();
 
   return { agents: live, line };

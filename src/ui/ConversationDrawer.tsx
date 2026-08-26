@@ -6,12 +6,16 @@ import {
   type ChatMessage, type Subagent,
 } from "./actions";
 
-export function ConversationDrawer({ agent, onClose }: { agent: AgentStatus; onClose: () => void }) {
+export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStatus; ended: boolean; onClose: () => void }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [subagents, setSubagents] = useState<Subagent[]>([]);
+  const [pending, setPending] = useState<string[]>([]); // optimistic, not yet in transcript
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState(agent.name);
+  const [confirmPause, setConfirmPause] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
   const atBottomRef = useRef(true);
 
@@ -23,6 +27,8 @@ export function ConversationDrawer({ agent, onClose }: { agent: AgentStatus; onC
       if (!alive) return;
       setMessages(m);
       setSubagents(s);
+      // drop optimistic echoes once they show up in the real transcript
+      setPending((prev) => prev.filter((p) => !m.some((msg) => msg.role === "user" && msg.text.trim() === p.trim())));
       setLoaded(true);
     };
     void load();
@@ -34,14 +40,24 @@ export function ConversationDrawer({ agent, onClose }: { agent: AgentStatus; onC
   useEffect(() => {
     const el = bodyRef.current;
     if (el && atBottomRef.current) el.scrollTop = el.scrollHeight;
-  }, [messages]);
+  }, [messages, pending]);
 
   async function send() {
-    if (!text.trim() || busy) return;
+    const t = text.trim();
+    if (!t || busy) return;
     setBusy(true);
-    const ok = await sendPromptTo(agent.sessionId, text);
+    setText("");
+    setPending((p) => [...p, t]); // optimistic echo
+    atBottomRef.current = true;
+    const ok = await sendPromptTo(agent.sessionId, t);
     setBusy(false);
-    if (ok) { setText(""); atBottomRef.current = true; }
+    if (!ok) setPending((p) => p.filter((x) => x !== t)); // roll back on failure
+  }
+
+  function commitRename() {
+    const n = nameDraft.trim();
+    if (n && n !== agent.name) renameSession(agent.sessionId, n);
+    setEditingName(false);
   }
 
   return (
@@ -50,14 +66,34 @@ export function ConversationDrawer({ agent, onClose }: { agent: AgentStatus; onC
         <header className="drawer-head">
           <div className="drawer-sprite"><Sprite sessionId={agent.sessionId} role={agent.role} state={agent.state} /></div>
           <div className="drawer-id">
-            <div className="pix name">{agent.name}</div>
+            {editingName ? (
+              <input className="reply-input name-input" autoFocus value={nameDraft}
+                onChange={(e) => setNameDraft(e.target.value)}
+                onBlur={commitRename}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") commitRename();
+                  if (e.key === "Escape") { setNameDraft(agent.name); setEditingName(false); }
+                }} />
+            ) : (
+              <div className="pix name name-click" title="Click to rename"
+                onClick={() => { setNameDraft(agent.name); setEditingName(true); }}>{agent.name}</div>
+            )}
             <div className="pix spec">{agent.role}{agent.ticket ? ` · ${agent.ticket}` : ""}</div>
-            <div className="pix state"><span className={`lamp ${agent.state}`}></span>{agent.state.toUpperCase()}</div>
+            <div className="pix state">
+              <span className={`lamp ${ended ? "idle" : agent.state}`}></span>
+              {ended ? "ENDED" : agent.state.toUpperCase()}
+            </div>
           </div>
           <div className="drawer-btns">
             <button className="deskbtn" title="Jump to this terminal in Ghostty" onClick={() => focusSession(agent.sessionId)}>↗ TERMINAL</button>
-            <button className="deskbtn" title="Rename" onClick={() => renameSession(agent.sessionId, agent.name)}>✎</button>
-            <button className="deskbtn" title="Pause (interrupt)" onClick={() => pauseSession(agent.sessionId, agent.name)}>⏸</button>
+            {confirmPause ? (
+              <>
+                <button className="deskbtn danger" onClick={() => { pauseSession(agent.sessionId); setConfirmPause(false); }}>CONFIRM ⏸</button>
+                <button className="deskbtn" onClick={() => setConfirmPause(false)}>✕</button>
+              </>
+            ) : (
+              <button className="deskbtn" title="Pause (interrupt) this agent" onClick={() => setConfirmPause(true)}>⏸</button>
+            )}
             <button className="deskbtn" title="Close" onClick={onClose}>✕</button>
           </div>
         </header>
@@ -81,11 +117,17 @@ export function ConversationDrawer({ agent, onClose }: { agent: AgentStatus; onC
             atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
           }}>
           {!loaded && <div className="msg-empty">loading conversation…</div>}
-          {loaded && messages.length === 0 && <div className="msg-empty">No conversation yet.</div>}
+          {loaded && messages.length === 0 && pending.length === 0 && <div className="msg-empty">No conversation yet.</div>}
           {messages.map((m, i) => (
             <div key={i} className={`msg msg-${m.role}`}>
               <span className="msg-who">{m.role === "user" ? "YOU" : m.role === "assistant" ? agent.name : "»"}</span>
               <span className="msg-text">{m.text}</span>
+            </div>
+          ))}
+          {pending.map((p, i) => (
+            <div key={`p${i}`} className="msg msg-user is-pending">
+              <span className="msg-who">YOU</span>
+              <span className="msg-text">{p}</span>
             </div>
           ))}
         </div>
@@ -94,7 +136,7 @@ export function ConversationDrawer({ agent, onClose }: { agent: AgentStatus; onC
           <input
             className="reply-input"
             autoFocus
-            placeholder={`Message ${agent.name}… (Enter to send)`}
+            placeholder={ended ? "Session ended" : `Message ${agent.name}… (Enter to send)`}
             value={text}
             disabled={busy}
             onChange={(e) => setText(e.target.value)}

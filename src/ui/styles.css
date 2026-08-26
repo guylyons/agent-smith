@@ -305,3 +305,14 @@ body{background:transparent}
 .msg-tool .msg-text::before{content:"⚙ "}
 .msg-empty{color:var(--dim);font-size:11px;text-align:center;margin:auto}
 .drawer-foot{display:flex;gap:6px;padding:12px 14px;border-top:var(--px) solid var(--bone)}
+.name-click{cursor:pointer}
+.name-click:hover{color:var(--gold)}
+.name-input{font-size:12px;padding:3px 6px;max-width:200px}
+.deskbtn.danger{color:var(--clay);border-color:var(--clay)}
+.deskbtn.danger:hover{color:#fff;background:var(--clay)}
+.msg.is-pending{opacity:.55}
+.msg.is-pending .msg-text::after{content:" ⏳"}
+
+/* toasts */
+.toaster{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:120;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}
+.toast{background:var(--clay);color:#fff;border:3px solid var(--bone);box-shadow:0 3px 0 rgba(0,0,0,.55);padding:9px 13px;font-size:10px;max-width:80vw}

@@ -35,6 +35,15 @@ test("workLabel: ticket > short branch > repo", () => {
   expect(workLabel(A({ ticket: null, branch: "HEAD", cwd: "/Users/x/agentsmith" }))).toBe("agentsmith");
 });
 
+test("the same ticket in two different repos stays two separate crates", () => {
+  const snap = buildSnapshot([
+    A({ sessionId: "1", ticket: "#117", cwd: "/x/mho-drupal", state: "working" }),
+    A({ sessionId: "2", ticket: "#117", cwd: "/x/design-system", state: "working" }),
+  ], 1000);
+  const working = snap.line.find((s) => s.stage === "working")!;
+  expect(working.tickets).toEqual(["#117", "#117"]); // two crates, not merged into one
+});
+
 test("duplicate codenames are made unique within the view", () => {
   const snap = buildSnapshot([
     A({ sessionId: "aaaa1111", name: "SABLE", cwd: "/a" }),
