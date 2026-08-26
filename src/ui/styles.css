@@ -1,0 +1,189 @@
+  :root{
+    --night:#0d1424;
+    --box:#243059;
+    --box-lo:#161f3d;
+    --bevel:#6e8ce0;
+    --bone:#f2e9d8;
+    --dim:#8a97bd;
+    --gold:#f2b134;
+    --leaf:#4fbf6a;
+    --clay:#e0533d;
+    --px:4px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:var(--night);color:var(--bone)}
+  body{
+    font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    padding:24px 20px 40px;
+    -webkit-font-smoothing:none;
+    position:relative;
+    min-height:100vh;
+  }
+  body::after{content:none}
+
+  /* ---- CRT stack ---- */
+  .crt{position:fixed;inset:0;pointer-events:none;z-index:90}
+
+  /* horizontal scanlines — soft-edged so they don't moiré, and sized
+     to land on whole device pixels at 1x and 2x */
+  .crt-scan{
+    background-image:linear-gradient(to bottom,
+      rgba(0,0,0,.44) 0%,
+      rgba(0,0,0,.44) 34%,
+      rgba(0,0,0,0)   62%,
+      rgba(0,0,0,0)   100%);
+    background-size:100% 3px;
+    mix-blend-mode:multiply;
+  }
+  @media (min-resolution:2dppx){
+    .crt-scan{background-size:100% 2px}
+  }
+
+  /* aperture grille — the vertical triad is what actually reads as CRT */
+  .crt-grille{
+    background-image:repeating-linear-gradient(90deg,
+      rgba(255,40,90,.07)  0 1px,
+      rgba(40,255,140,.07) 1px 2px,
+      rgba(70,130,255,.07) 2px 3px);
+    mix-blend-mode:screen;
+  }
+
+  /* tube glow + corner falloff */
+  .crt-glow{
+    background:
+      radial-gradient(90% 55% at 50% -4%, rgba(150,185,255,.09), transparent 62%),
+      radial-gradient(125% 105% at 50% 50%, transparent 54%, rgba(0,0,0,.6) 100%);
+  }
+
+  /* slow hum bar drifting down the tube */
+  .crt-hum{
+    top:-24vh;left:0;right:0;bottom:auto;height:24vh;
+    background:linear-gradient(to bottom,
+      transparent 0%, rgba(200,220,255,.05) 42%,
+      rgba(200,220,255,.05) 58%, transparent 100%);
+    mix-blend-mode:screen;
+    animation:hum 11s linear infinite;
+  }
+  @keyframes hum{to{transform:translateY(124vh)}}
+
+  html.crt-off  .crt{display:none}
+  html.crt-soft .crt-grille,
+  html.crt-soft .crt-hum{display:none}
+  html.crt-soft .crt-scan{opacity:.5}
+
+  /* ---- tube control ---- */
+  .tube{
+    position:fixed;top:16px;right:16px;z-index:100;
+    font-family:"Press Start 2P",ui-monospace,monospace;font-size:8px;
+    background:var(--box);color:var(--bone);
+    border:3px solid var(--bone);
+    box-shadow:inset 0 0 0 2px var(--bevel),0 3px 0 rgba(0,0,0,.55);
+    padding:9px 11px;cursor:pointer;letter-spacing:.5px;
+  }
+  .tube:hover{color:var(--gold)}
+  .tube:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
+  .pix{font-family:"Press Start 2P",ui-monospace,monospace;line-height:1.6}
+
+  /* ---- SNES window chrome ---- */
+  .win{
+    background:var(--box);
+    border:var(--px) solid var(--bone);
+    box-shadow:
+      inset 0 0 0 var(--px) var(--bevel),
+      inset 0 var(--px) 0 calc(var(--px)*2) rgba(255,255,255,.10),
+      0 var(--px) 0 0 rgba(0,0,0,.55);
+    position:relative;
+  }
+
+  /* ---- header ---- */
+  header{max-width:1080px;margin:0 auto 20px}
+  .title{font-size:20px;letter-spacing:1px;text-shadow:0 var(--px) 0 #000}
+  .sub{font-size:9px;color:var(--dim);margin-top:10px}
+  .statline{display:flex;flex-wrap:wrap;gap:16px;margin-top:14px;font-size:9px}
+  .statline b{color:var(--gold)}
+  .caret{display:inline-block;width:8px;height:12px;background:var(--gold);vertical-align:-2px;animation:blink 1s steps(2) infinite}
+  @keyframes blink{50%{opacity:0}}
+
+  /* ---- crew ---- */
+  .crew{
+    max-width:1080px;margin:0 auto;
+    display:grid;gap:14px;
+    grid-template-columns:repeat(auto-fit,minmax(300px,1fr));
+  }
+  .desk{padding:14px;display:flex;gap:14px;align-items:flex-start}
+  .desk.is-idle{opacity:.55}
+  .sprite-wrap{position:relative;flex:0 0 auto;width:56px}
+  .sprite{width:56px;height:84px;display:block;image-rendering:pixelated}
+  .desk.is-working .sprite{animation:bob .5s steps(2) infinite}
+  @keyframes bob{50%{transform:translateY(-3px)}}
+  .bubble{
+    position:absolute;top:-10px;right:-6px;
+    background:var(--clay);color:#fff;font-size:10px;
+    padding:5px 7px;border:3px solid var(--bone);
+    animation:pop .8s steps(2) infinite;
+  }
+  @keyframes pop{50%{transform:translateY(-3px)}}
+  .who{flex:1;min-width:0}
+  .name{font-size:11px;letter-spacing:.5px}
+  .spec{font-size:9px;color:var(--dim);margin-top:7px;text-transform:uppercase}
+  .ticket{
+    display:inline-block;margin-top:11px;font-size:10px;
+    background:var(--box-lo);border:2px solid var(--bevel);padding:4px 7px;
+  }
+  .doing{font-size:11px;color:var(--bone);margin-top:10px;line-height:1.5;min-height:2.4em}
+  .doing::before{content:"> ";color:var(--gold)}
+  .state{display:flex;align-items:center;gap:7px;margin-top:10px;font-size:9px}
+  .lamp{width:10px;height:10px;flex:0 0 auto}
+  .lamp.working{background:var(--gold);animation:blink 1.1s steps(2) infinite}
+  .lamp.waiting{background:var(--clay)}
+  .lamp.idle{background:var(--dim)}
+  .lamp.done{background:var(--leaf)}
+
+  /* ---- the line ---- */
+  .line{max-width:1080px;margin:26px auto 0;padding:16px 16px 0}
+  .line h2{font-size:12px;letter-spacing:.5px}
+  .line .hint{font-size:9px;color:var(--dim);margin-top:9px}
+  .stages{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-top:16px}
+  .stage{min-width:0}
+  .stage-head{
+    font-size:8px;text-align:center;padding:7px 2px;
+    background:var(--box-lo);border:2px solid var(--bevel);color:var(--dim);
+  }
+  .stage[data-key="needs"] .stage-head{color:var(--clay);border-color:var(--clay)}
+  .stage[data-key="merged"] .stage-head{color:var(--leaf);border-color:var(--leaf)}
+  .slot{min-height:112px;padding:10px 0;display:flex;flex-direction:column;gap:8px;align-items:center}
+  .crate{
+    width:100%;background:var(--box-lo);
+    border:3px solid var(--bone);
+    box-shadow:inset 0 0 0 2px rgba(110,140,224,.5),0 3px 0 rgba(0,0,0,.5);
+    padding:8px 6px;text-align:center;
+  }
+  .crate .num{font-size:9px}
+  .crate .own{height:5px;margin-top:7px}
+  .crate.hop{animation:hop .45s steps(3) 1}
+  @keyframes hop{50%{transform:translateY(-14px)}}
+
+  /* signature: the belt */
+  .belt{margin:6px -16px 0;height:22px;border-top:var(--px) solid var(--bone);background:var(--box-lo);overflow:hidden}
+  .tread{
+    height:100%;
+    background:repeating-linear-gradient(90deg,var(--bevel) 0 10px,var(--box-lo) 10px 20px);
+    animation:roll 1.4s linear infinite;
+    width:200%;
+  }
+  @keyframes roll{to{transform:translateX(-20px)}}
+
+  footer{max-width:1080px;margin:22px auto 0;font-size:9px;color:var(--dim);line-height:2}
+
+  @media (max-width:720px){
+    .stages{grid-template-columns:repeat(5,minmax(96px,1fr));overflow-x:auto}
+    .title{font-size:14px}
+  }
+  @media (prefers-reduced-motion:reduce){
+    *{animation:none !important}
+    .crt-hum{display:none}
+  }
+
+/* React sprite bob: mock animated .desk.is-working .sprite via drawCrew();
+   our Sprite component sets this class directly when state==='working'. */
+.sprite.is-bobbing{animation:bob .5s steps(2) infinite}

@@ -1,11 +1,11 @@
 {
   "name": "agentsmith",
-  "module": "index.ts",
+  "module": "src/ui/index.tsx",
   "type": "module",
   "private": true,
   "scripts": {
     "dev": "bun run src/server.ts",
-    "build": "bun build src/ui/index.tsx --outdir dist --minify",
+    "build": "bun build src/ui/index.html --outdir dist --minify",
     "test": "bun test"
   },
   "devDependencies": {
