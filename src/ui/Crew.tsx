@@ -18,7 +18,13 @@ const AgentCard = memo(function AgentCard({ a, onOpen }: { a: AgentStatus; onOpe
       tabIndex={0}
       title="Click to open this agent's conversation"
       onClick={() => onOpen(a.sessionId)}
-      onKeyDown={(e) => { if (e.key === "Enter") onOpen(a.sessionId); }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") onOpen(a.sessionId);
+        // Space activates on keyup per the ARIA button pattern, but scrolling
+        // must be prevented here on keydown or the page jumps before then.
+        else if (e.key === " " || e.key === "Spacebar") e.preventDefault();
+      }}
+      onKeyUp={(e) => { if (e.key === " " || e.key === "Spacebar") onOpen(a.sessionId); }}
     >
       <div className="desk-actions" onClick={stop}>
         <button className="deskbtn" title="Jump to this terminal in Ghostty"

@@ -63,7 +63,11 @@ async function runOnTerminal(t: Target, body: string, allowCwd: boolean): Promis
       if (await runWhere(`(name of term) contains ${asStr(marker)}`, body)) return { ok: true };
     } catch { /* fall through */ }
   }
-  if (t.title && (await runWhere(`(name of term) contains ${asStr(t.title)}`, body))) return { ok: true };
+  // A Ghostty tab title is "<prefix-symbol> <aiTitle>"; t.title is the bare
+  // aiTitle. Match exactly, or as a suffix (tolerating the prefix symbol),
+  // rather than "contains" — a substring match could hit the wrong terminal
+  // when one session's title happens to be a substring of another's.
+  if (t.title && (await runWhere(`(name of term) is ${asStr(t.title)} or (name of term) ends with ${asStr(t.title)}`, body))) return { ok: true };
   if (allowCwd && t.cwd && (await runWhere(`(working directory of term) is ${asStr(t.cwd)}`, body))) return { ok: true };
   return { ok: false, error: "could not pinpoint the terminal (is it still open?)" };
 }

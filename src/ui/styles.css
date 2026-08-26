@@ -374,3 +374,8 @@ body{background:transparent}
 /* toasts */
 .toaster{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:120;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}
 .toast{background:var(--clay);color:#fff;border:3px solid var(--bone);box-shadow:0 3px 0 rgba(0,0,0,.55);padding:9px 13px;font-size:10px;max-width:80vw}
+
+/* a11y: keyboard-focus outline for the "jump to terminal" button on a crew
+   card, mirroring .desk:focus-visible so both the card and its button get a
+   visible focus ring when tabbed to. */
+.deskbtn:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
