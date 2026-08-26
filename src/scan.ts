@@ -235,7 +235,14 @@ export async function scanLiveSessions(
       if (!base) continue;
       const derived: AgentStatus = { ...base, updatedAt: now }; // refresh liveness
       const subs = await countActiveSubagents(file, now);
-      if (subs > 0) derived.subagents = subs;
+      if (subs > 0) {
+        derived.subagents = subs;
+        // A parent delegating to subagents isn't "idle" — its work is happening.
+        if (derived.state === "idle") {
+          derived.state = "working";
+          derived.doing = `${subs} subagent${subs > 1 ? "s" : ""} working`;
+        }
+      }
       cands.push({ derived, mtime });
     } catch { /* skip */ }
   }
