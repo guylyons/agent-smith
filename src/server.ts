@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { parseStatus } from "./schema";
 import { buildSnapshot, type Snapshot } from "./lib/snapshot";
 import { ensureStatusDir, statusDir } from "./lib/paths";
+import { scanLiveSessions } from "./scan";
 
 export function readSnapshot(dir: string, now: number): Snapshot {
   const agents = [];
@@ -17,7 +18,8 @@ export function readSnapshot(dir: string, now: number): Snapshot {
   return buildSnapshot(agents, now);
 }
 
-export function makeServer(port: number) {
+export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?: number } = {}) {
+  const { scan = false, scanIntervalMs = 20_000 } = opts;
   const dir = ensureStatusDir();
   const clients = new Set<(s: Snapshot) => void>();
 
@@ -35,6 +37,15 @@ export function makeServer(port: number) {
     }
   };
   const watcher = watch(dir, () => { if (timer) clearTimeout(timer); timer = setTimeout(push, 150); });
+
+  // Surface currently-open Claude Code sessions by scanning their transcripts,
+  // on startup and on an interval. Hooks handle real-time deltas in between.
+  let scanTimer: ReturnType<typeof setInterval> | null = null;
+  if (scan) {
+    const runScan = () => { try { scanLiveSessions(Date.now()); } catch { /* keep serving */ } push(); };
+    runScan();
+    scanTimer = setInterval(runScan, scanIntervalMs);
+  }
 
   const server = Bun.serve({
     port,
@@ -69,6 +80,7 @@ export function makeServer(port: number) {
   const baseStop = server.stop.bind(server);
   server.stop = ((closeActiveConnections?: boolean) => {
     watcher.close();
+    if (scanTimer) clearInterval(scanTimer);
     return baseStop(closeActiveConnections);
   }) as typeof server.stop;
 
@@ -76,6 +88,6 @@ export function makeServer(port: number) {
 }
 
 if (import.meta.main) {
-  const server = makeServer(Number(process.env.PORT ?? 4173));
-  console.log(`Agent Workshop → http://localhost:${server.port}  (watching ${statusDir()})`);
+  const server = makeServer(Number(process.env.PORT ?? 4173), { scan: true });
+  console.log(`Agent Workshop → http://localhost:${server.port}  (watching ${statusDir()}, scanning open sessions)`);
 }

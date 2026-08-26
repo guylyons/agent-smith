@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync, renameSync, rmSync, existsSync } from "nod
 import type { AgentStatus } from "../src/schema";
 import { parseStatus } from "../src/schema";
 import { parseTicket } from "../src/lib/ticket";
-import { inferRole } from "../src/lib/role";
+import { identify } from "../src/lib/identity";
 import { humanizeTool } from "../src/lib/humanize";
 import { ensureStatusDir } from "../src/lib/paths";
 
@@ -20,7 +20,7 @@ export type HookEvent = {
 };
 
 function seed(e: HookEvent, now: number): AgentStatus {
-  const { role, name } = inferRole(e.branch, e.cwd);
+  const { role, name } = identify(e.session_id, e.branch, e.cwd);
   return {
     sessionId: e.session_id, name, role,
     ticket: parseTicket(e.branch), state: "working",

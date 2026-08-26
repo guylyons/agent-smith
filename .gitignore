@@ -3,4 +3,4 @@ dist/
 
 # verification artifacts
 .playwright-mcp/
-agent-workshop-live.png
+agent-workshop-live*.png
