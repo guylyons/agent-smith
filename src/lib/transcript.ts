@@ -32,6 +32,9 @@ export function deriveStatusFromTranscript(lines: string[], updatedAt: number): 
   // Did the session end its turn on assistant text (turn complete), or is it
   // still active (a user prompt or a tool in flight came last)?
   let endedOnAssistantText = false;
+  // True when the newest content block is a thinking block — so the card shows
+  // "thinking" instead of a leftover tool action from earlier in the turn.
+  let thinkingLast = false;
 
   for (const raw of lines) {
     const line = raw.trim();
@@ -48,19 +51,23 @@ export function deriveStatusFromTranscript(lines: string[], updatedAt: number): 
     const type = e.type;
     if (type === "assistant") {
       for (const c of contentArray(e)) {
+        if (c.type === "thinking") { thinkingLast = true; endedOnAssistantText = false; }
         if (c.type === "text" && typeof c.text === "string" && c.text.trim()) {
           lastAssistantText = c.text.trim();
           endedOnAssistantText = true;
+          thinkingLast = false;
         }
         if (c.type === "tool_use" && typeof c.name === "string") {
           lastToolUse = { name: c.name, input: c.input };
           endedOnAssistantText = false; // a tool_use after text means the turn continued
+          thinkingLast = false;
         }
       }
     } else if (type === "user") {
       // Both a real prompt and a tool_result arrive as user-type entries; either
       // way the assistant is now the one who should act next -> still active.
       endedOnAssistantText = false;
+      thinkingLast = false;
     }
   }
 
@@ -79,7 +86,7 @@ export function deriveStatusFromTranscript(lines: string[], updatedAt: number): 
     doing = asking ? "waiting on your answer" : "idle";
   } else {
     state = "working";
-    doing = lastToolUse ? humanizeTool(lastToolUse.name, lastToolUse.input) : "thinking";
+    doing = thinkingLast || !lastToolUse ? "thinking" : humanizeTool(lastToolUse.name, lastToolUse.input);
   }
 
   const { role, name } = identify(sessionId, branch, cwd);

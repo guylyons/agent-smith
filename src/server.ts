@@ -126,7 +126,7 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
         const status = loadStatus(dir, body.sessionId);
         if (!status) return json({ ok: false, error: "unknown session" }, 404);
         if (action === "focus") return json(await focusSession(status));
-        if (action === "pause") return json(interruptSession(status));
+        if (action === "pause") return json(await interruptSession(status));
         if (action === "prompt") {
           const text = typeof body.text === "string" ? body.text : "";
           if (!text.trim()) return json({ ok: false, error: "empty prompt" }, 400);

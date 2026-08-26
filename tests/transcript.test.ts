@@ -31,6 +31,17 @@ test("tool_result (user entry) still counts as working", () => {
   expect(s.doing).toBe("running bun test");
 });
 
+test("a thinking block after a tool_use shows 'thinking', not the stale tool action", () => {
+  const lines = [
+    L({ type: "assistant", sessionId: "s1", cwd: "/r", gitBranch: "b", message: { content: [{ type: "tool_use", name: "Edit", input: { file_path: "/r/a.ts" } }] } }),
+    L({ type: "user", sessionId: "s1", cwd: "/r", gitBranch: "b", message: { content: [{ type: "tool_result", content: "ok" }] } }),
+    L({ type: "assistant", sessionId: "s1", cwd: "/r", gitBranch: "b", message: { content: [{ type: "thinking", thinking: "hmm" }] } }),
+  ];
+  const s = deriveStatusFromTranscript(lines, 1)!;
+  expect(s.state).toBe("working");
+  expect(s.doing).toBe("thinking");
+});
+
 test("assistant ended turn with a question -> waiting/question", () => {
   const lines = [
     L({ type: "assistant", sessionId: "s1", cwd: "/repo", gitBranch: "b", message: { content: [{ type: "text", text: "Which variant should I use — featured or compact?" }] } }),

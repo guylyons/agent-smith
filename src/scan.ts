@@ -54,13 +54,15 @@ export async function runningClaudeCounts(): Promise<{ counts: Map<string, numbe
     if (m && m[2].trim() === "claude") pids.push(m[1]);
   }
   if (!pids.length) return { counts, ok: false };
-  for (const pid of pids) {
-    let cwd = "";
+  // Resolve every pid's cwd in parallel (serial lsof was ~37ms/pid).
+  const cwds = await Promise.all(pids.map(async (pid) => {
     try {
       const l = await run(["lsof", "-a", "-p", pid, "-d", "cwd", "-Fn"]);
       const nline = l.split("\n").find((x) => x.startsWith("n"));
-      cwd = nline ? nline.slice(1) : "";
-    } catch { /* skip this pid */ }
+      return nline ? nline.slice(1) : "";
+    } catch { return ""; }
+  }));
+  for (const cwd of cwds) {
     if (!cwd || isEphemeralCwd(cwd)) continue;
     counts.set(cwd, (counts.get(cwd) ?? 0) + 1);
   }
@@ -181,6 +183,10 @@ export function mergeForWrite(existing: AgentStatus | null, derived: AgentStatus
 
 type Candidate = { derived: AgentStatus; mtime: number };
 
+// Cache derived status by transcript path+mtime so an unchanged transcript isn't
+// re-read (64KB) and re-parsed every 20s tick. Bounded to avoid unbounded growth.
+const deriveCache = new Map<string, { mtime: number; base: AgentStatus }>();
+
 /**
  * Choose which sessions to surface: only cwds with a running claude process,
  * capped at the number of processes there (newest transcripts win). When process
@@ -214,13 +220,23 @@ export async function scanLiveSessions(
   const { counts, ok } = countsOverride ?? (await runningClaudeCounts());
 
   const cands: Candidate[] = [];
+  if (deriveCache.size > 200) deriveCache.clear();
   for (const file of await freshTranscripts(now, freshMs)) {
     try {
-      const derived = deriveStatusFromTranscript(await tailLines(file), now);
-      if (!derived) continue;
+      const mtime = (await stat(file)).mtimeMs;
+      const cached = deriveCache.get(file);
+      let base: AgentStatus | null;
+      if (cached && cached.mtime === mtime) {
+        base = cached.base; // unchanged transcript — reuse, no re-read/parse
+      } else {
+        base = deriveStatusFromTranscript(await tailLines(file), now);
+        if (base) deriveCache.set(file, { mtime, base });
+      }
+      if (!base) continue;
+      const derived: AgentStatus = { ...base, updatedAt: now }; // refresh liveness
       const subs = await countActiveSubagents(file, now);
       if (subs > 0) derived.subagents = subs;
-      cands.push({ derived, mtime: (await stat(file)).mtimeMs });
+      cands.push({ derived, mtime });
     } catch { /* skip */ }
   }
 

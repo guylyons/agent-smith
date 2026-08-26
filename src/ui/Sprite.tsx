@@ -1,8 +1,14 @@
+import { memo, useMemo } from "react";
 import { spriteRects, paletteFor } from "./sprite-data";
 
-export function Sprite({ sessionId, role, state }: { sessionId: string; role: string; state: string }) {
-  const { palette, gear } = paletteFor(sessionId, role);
-  const rects = spriteRects({ gear, palette });
+// The pixel grid depends only on sessionId+role, and building it is the priciest
+// bit of a card render — memoize the rects, and memo the component so it doesn't
+// re-render on every SSE snapshot unless its props actually change.
+function SpriteImpl({ sessionId, role, state }: { sessionId: string; role: string; state: string }) {
+  const rects = useMemo(() => {
+    const { palette, gear } = paletteFor(sessionId, role);
+    return spriteRects({ gear, palette });
+  }, [sessionId, role]);
   return (
     <svg className={`sprite ${state === "working" ? "is-bobbing" : ""}`}
          viewBox="0 0 16 24" shapeRendering="crispEdges" aria-hidden="true">
@@ -12,3 +18,5 @@ export function Sprite({ sessionId, role, state }: { sessionId: string; role: st
     </svg>
   );
 }
+
+export const Sprite = memo(SpriteImpl);

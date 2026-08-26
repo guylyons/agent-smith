@@ -90,13 +90,24 @@ export async function sendPrompt(t: Target, text: string): Promise<ActionResult>
 }
 
 /** Interrupt the session's current turn — equivalent to pressing Esc/Ctrl-C once.
- *  The session stays alive and waiting; resume by typing in it. */
-export function interruptSession(status: Pick<AgentStatus, "pid">): ActionResult {
-  if (!status.pid) return { ok: false, error: "no pid — run `bun run install-hooks` to enable pausing" };
+ *  The session stays alive and waiting; resume by typing in it. Verifies the pid
+ *  is still a live `claude` process first, so a crashed session's recycled pid
+ *  can't be signaled by mistake. */
+export async function interruptSession(status: Pick<AgentStatus, "pid">): Promise<ActionResult> {
+  const pid = status.pid;
+  if (!pid) return { ok: false, error: "no pid — run `bun run install-hooks` to enable pausing" };
   try {
-    process.kill(status.pid, "SIGINT");
+    const p = Bun.spawn(["ps", "-o", "comm=", "-p", String(pid)], { stdout: "pipe", stderr: "ignore" });
+    const comm = (await new Response(p.stdout).text()).trim();
+    await p.exited;
+    if (comm !== "claude") return { ok: false, error: "that session isn't running any more" };
+  } catch {
+    return { ok: false, error: "could not verify the session" };
+  }
+  try {
+    process.kill(pid, "SIGINT");
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: `could not signal pid ${status.pid}: ${String(e)}` };
+    return { ok: false, error: `could not signal pid ${pid}: ${String(e)}` };
   }
 }

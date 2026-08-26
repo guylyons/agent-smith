@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { MouseEvent } from "react";
 import type { AgentStatus } from "../schema";
 import { Sprite } from "./Sprite";
@@ -6,7 +7,9 @@ import { focusSession } from "./actions";
 
 const stop = (e: MouseEvent) => e.stopPropagation();
 
-function AgentCard({ a, onOpen }: { a: AgentStatus; onOpen: (id: string) => void }) {
+// A fresh snapshot arrives every ~20s with new agent objects; only re-render a
+// card when a field it actually shows changed.
+const AgentCard = memo(function AgentCard({ a, onOpen }: { a: AgentStatus; onOpen: (id: string) => void }) {
   const { palette } = paletteFor(a.sessionId, a.role);
   return (
     <article
@@ -40,7 +43,13 @@ function AgentCard({ a, onOpen }: { a: AgentStatus; onOpen: (id: string) => void
       </div>
     </article>
   );
-}
+}, (prev, next) => {
+  const x = prev.a, y = next.a;
+  return prev.onOpen === next.onOpen &&
+    x.sessionId === y.sessionId && x.name === y.name && x.role === y.role &&
+    x.ticket === y.ticket && x.state === y.state && x.doing === y.doing &&
+    x.subagents === y.subagents;
+});
 
 export function Crew({ agents, onOpen }: { agents: AgentStatus[]; onOpen: (id: string) => void }) {
   return (
