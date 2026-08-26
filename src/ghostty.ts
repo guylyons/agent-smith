@@ -41,6 +41,25 @@ async function runWhere(matchExpr: string, body: string): Promise<boolean> {
   return (await osa(script)) === "ok";
 }
 
+// Like runWhere, but closes the containing TAB (`t` in scope, not `term`) on a
+// match rather than running a body against the terminal — used by killAgent.
+async function closeWhere(matchExpr: string): Promise<boolean> {
+  const script = `tell application "Ghostty"
+    repeat with w in windows
+      repeat with t in tabs of w
+        repeat with term in terminals of t
+          if ${matchExpr} then
+            close t
+            return "ok"
+          end if
+        end repeat
+      end repeat
+    end repeat
+    return "no"
+  end tell`;
+  return (await osa(script)) === "ok";
+}
+
 let markerSeq = 0;
 function newMarker(): string {
   markerSeq = (markerSeq + 1) % 1e6;
@@ -91,12 +110,25 @@ export async function sendPrompt(t: Target, text: string): Promise<ActionResult>
   return r;
 }
 
+export const ALLOWED_MODELS = new Set(["opus", "sonnet", "haiku"]);
+export const ALLOWED_PERMISSION_MODES = new Set(["default", "plan", "acceptEdits", "bypassPermissions"]);
+
 /** Launch a NEW Claude session in `cwd` with `task` as its opening prompt — a new
  *  Ghostty tab (or window) that runs `claude '<task>'`. Does not steal focus. The
- *  new session appears on the board via the scanner once it starts. */
-export async function spawnAgent(cwd: string, task: string): Promise<ActionResult> {
+ *  new session appears on the board via the scanner once it starts.
+ *  `opts.model` and `opts.permissionMode` are checked against a fixed allowlist
+ *  before being interpolated into the shell command — unknown values are
+ *  silently ignored rather than passed through. */
+export async function spawnAgent(
+  cwd: string,
+  task: string,
+  opts?: { model?: string; permissionMode?: string },
+): Promise<ActionResult> {
   const quotedTask = "'" + task.replace(/'/g, "'\\''") + "'"; // shell-quote for the claude arg
-  const input = `claude ${quotedTask}\n`;
+  let flags = "";
+  if (opts?.model && ALLOWED_MODELS.has(opts.model)) flags += ` --model ${opts.model}`;
+  if (opts?.permissionMode && ALLOWED_PERMISSION_MODES.has(opts.permissionMode)) flags += ` --permission-mode ${opts.permissionMode}`;
+  const input = `claude${flags} ${quotedTask}\n`;
   const script = `tell application "Ghostty"
     set cfg to new surface configuration
     set initial working directory of cfg to ${asStr(cwd)}
@@ -141,4 +173,22 @@ export async function interruptSession(status: Pick<AgentStatus, "pid">): Promis
   } catch (e) {
     return { ok: false, error: `could not signal pid ${pid}: ${String(e)}` };
   }
+}
+
+/** Kill (end) the session by closing its Ghostty tab. Targeting is deliberately
+ *  narrower than runOnTerminal's: a one-shot title marker (hooks) → Claude's
+ *  task title. No cwd fallback — cwd is shared by many tabs, and closing the
+ *  wrong one is destructive, so an ambiguous match is refused rather than
+ *  guessed at. */
+export async function killAgent(t: Target): Promise<ActionResult> {
+  if (t.tty) {
+    const marker = newMarker();
+    try {
+      await writeFile(t.tty, `\x1b]2;${marker}\x07`); // OSC 2 = set window title
+      await delay(70);
+      if (await closeWhere(`(name of term) contains ${asStr(marker)}`)) return { ok: true };
+    } catch { /* fall through */ }
+  }
+  if (t.title && (await closeWhere(`(name of term) is ${asStr(t.title)} or (name of term) ends with ${asStr(t.title)}`))) return { ok: true };
+  return { ok: false, error: "couldn't find the terminal" };
 }

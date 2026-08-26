@@ -10,12 +10,17 @@ function repoName(cwd: string): string {
 export function NewAgentModal({ recentFolders, onClose }: { recentFolders: string[]; onClose: () => void }) {
   const [folder, setFolder] = useState(recentFolders[0] ?? "");
   const [task, setTask] = useState("");
+  const [model, setModel] = useState("");
+  const [permissionMode, setPermissionMode] = useState("");
   const [busy, setBusy] = useState(false);
 
   async function launch() {
     if (!folder.trim() || !task.trim() || busy) return;
     setBusy(true);
-    const ok = await spawnAgent(folder.trim(), task.trim());
+    const ok = await spawnAgent(folder.trim(), task.trim(), {
+      model: model || undefined,
+      permissionMode: permissionMode || undefined,
+    });
     setBusy(false);
     if (ok) { toast("Launching new agent…"); onClose(); }
   }
@@ -35,6 +40,27 @@ export function NewAgentModal({ recentFolders, onClose }: { recentFolders: strin
             ))}
           </div>
         )}
+
+        <div className="newagent-opts">
+          <div className="newagent-opt">
+            <label className="pix newagent-label">MODEL</label>
+            <select className="reply-input newagent-select" value={model} onChange={(e) => setModel(e.target.value)}>
+              <option value="">Default</option>
+              <option value="opus">Opus</option>
+              <option value="sonnet">Sonnet</option>
+              <option value="haiku">Haiku</option>
+            </select>
+          </div>
+          <div className="newagent-opt">
+            <label className="pix newagent-label">PERMISSIONS</label>
+            <select className="reply-input newagent-select" value={permissionMode} onChange={(e) => setPermissionMode(e.target.value)}>
+              <option value="">Default</option>
+              <option value="plan">Plan</option>
+              <option value="acceptEdits">Accept edits</option>
+              <option value="bypassPermissions">Bypass</option>
+            </select>
+          </div>
+        </div>
 
         <label className="pix newagent-label">TASK</label>
         <textarea className="reply-input newagent-task" rows={5}
