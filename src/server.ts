@@ -115,7 +115,7 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
       // a session's full conversation (+ any pending question)
       if (url.pathname === "/conversation") {
         const sid = url.searchParams.get("sessionId") ?? "";
-        if (!validSessionId(sid)) return json({ messages: [], question: null }, 400);
+        if (!validSessionId(sid)) return json({ messages: [], question: null, blocked: null }, 400);
         return json(await readConversation(sid));
       }
 
