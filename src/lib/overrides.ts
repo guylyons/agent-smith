@@ -19,23 +19,24 @@ export function readOverrides(dir: string): Overrides {
   }
 }
 
-export function setNameOverride(dir: string, sessionId: string, name: string | null): void {
+// Set (or clear, with a nullish value) one override field for a session, then
+// atomically rewrite the file. Removing the last field drops the session entry.
+function setField<K extends "name" | "sprite">(dir: string, sessionId: string, key: K, value: Overrides[string][K] | null): void {
   const all = readOverrides(dir);
-  const trimmed = (name ?? "").trim();
-  if (trimmed) all[sessionId] = { ...all[sessionId], name: trimmed };
-  else if (all[sessionId]) { delete all[sessionId].name; if (!Object.keys(all[sessionId]).length) delete all[sessionId]; }
+  if (value) all[sessionId] = { ...all[sessionId], [key]: value };
+  else if (all[sessionId]) { delete all[sessionId][key]; if (!Object.keys(all[sessionId]).length) delete all[sessionId]; }
   const tmp = file(dir) + ".tmp";
   writeFileSync(tmp, JSON.stringify(all));
   renameSync(tmp, file(dir));
 }
 
+export function setNameOverride(dir: string, sessionId: string, name: string | null): void {
+  const trimmed = (name ?? "").trim();
+  setField(dir, sessionId, "name", trimmed || null);
+}
+
 export function setSpriteOverride(dir: string, sessionId: string, sprite: { palette: number; gear: string; body?: string } | null): void {
-  const all = readOverrides(dir);
-  if (sprite) all[sessionId] = { ...all[sessionId], sprite };
-  else if (all[sessionId]) { delete all[sessionId].sprite; if (!Object.keys(all[sessionId]).length) delete all[sessionId]; }
-  const tmp = file(dir) + ".tmp";
-  writeFileSync(tmp, JSON.stringify(all));
-  renameSync(tmp, file(dir));
+  setField(dir, sessionId, "sprite", sprite);
 }
 
 /** Return agents with any custom name/sprite applied. Never mutates the inputs. */

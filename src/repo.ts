@@ -20,16 +20,6 @@ async function git(cwd: string, args: string[]): Promise<string> {
   }
 }
 
-/** Count commits reachable from HEAD but from no remote-tracking branch — i.e.
- *  committed work not yet pushed anywhere. Works for tracked and brand-new
- *  never-pushed branches alike. Best-effort: non-git dir / no git -> 0. */
-export async function countUnpushed(cwd: string): Promise<number> {
-  if (!cwd) return 0;
-  const out = await git(cwd, ["rev-list", "--count", "HEAD", "--not", "--remotes"]);
-  const n = parseInt(out.trim(), 10);
-  return Number.isFinite(n) ? n : 0;
-}
-
 export async function readRepo(cwd: string): Promise<RepoInfo> {
   if (!cwd) return { cwd, branch: "", commits: [], status: [] };
   const [branch, log, status] = await Promise.all([

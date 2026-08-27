@@ -43,7 +43,6 @@ export const AgentStatusSchema = z.object({
 });
 
 export type AgentStatus = z.infer<typeof AgentStatusSchema>;
-export type AgentState = AgentStatus["state"];
 
 export function parseStatus(input: unknown): AgentStatus | null {
   const r = AgentStatusSchema.safeParse(input);

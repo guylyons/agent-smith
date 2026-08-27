@@ -295,15 +295,6 @@
    art layer shows through (html keeps the --night fallback). */
 body{background:transparent}
 .artbg{position:fixed;inset:0;z-index:-1;background:var(--night);pointer-events:none;overflow:hidden}
-.bgbtn{
-  position:fixed;top:58px;right:16px;z-index:100;
-  font-family:"Press Start 2P",ui-monospace,monospace;font-size:8px;
-  background:var(--box);color:var(--bone);border:3px solid var(--bone);
-  box-shadow:inset 0 0 0 2px var(--bevel),0 3px 0 rgba(0,0,0,.55);
-  padding:9px 11px;cursor:pointer;letter-spacing:.5px;
-}
-.bgbtn:hover{color:var(--gold)}
-.bgbtn:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
 
 /* STARS — pixel starfield + faint nebula */
 :root[data-bg="stars"] .artbg{
@@ -504,18 +495,6 @@ body{background:transparent}
 /* toasts */
 .toaster{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:120;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}
 .toast{background:var(--clay);color:#fff;border:3px solid var(--bone);box-shadow:0 3px 0 rgba(0,0,0,.55);padding:9px 13px;font-size:10px;max-width:80vw}
-
-/* ---- desktop alerts toggle (stacks under TUBE/BG) ---- */
-.alertbtn{
-  position:fixed;top:100px;right:16px;z-index:100;
-  font-family:"Press Start 2P",ui-monospace,monospace;font-size:8px;
-  background:var(--box);color:var(--bone);
-  border:3px solid var(--bone);
-  box-shadow:inset 0 0 0 2px var(--bevel),0 3px 0 rgba(0,0,0,.55);
-  padding:9px 11px;cursor:pointer;letter-spacing:.5px;
-}
-.alertbtn:hover{color:var(--gold)}
-.alertbtn:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
 
 /* a11y: keyboard-focus outline for the "jump to terminal" button on a crew
    card, mirroring .desk:focus-visible so both the card and its button get a

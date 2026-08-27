@@ -4,6 +4,10 @@ import { toast } from "./toast";
 import { flashSend } from "./flash";
 import { playSubmit } from "./sounds";
 import type { Board } from "../lib/board";
+// Shared with the UI as types only — nothing server-side is bundled into the browser.
+import type { ChatMessage, QuestionOption, Question, PendingQuestion, BlockingTool } from "../lib/conversation";
+import type { Subagent } from "../lib/subagents";
+import type { RepoInfo } from "../repo";
 
 type Result = { ok: boolean; error?: string; path?: string };
 
@@ -94,69 +98,40 @@ export async function spawnAgent(cwd: string, task: string, opts?: { model?: str
 
 export type PersonaInfo = { id: string; name: string; role: string; skills: string[] };
 
-/** The personas the server offers. Returns [] on any failure so a blip degrades
- *  to "no persona choice" rather than a broken modal. */
-export async function fetchPersonas(): Promise<PersonaInfo[]> {
-  try {
-    const res = await fetch("/personas");
-    if (!res.ok) return [];
-    return (await res.json()) as PersonaInfo[];
-  } catch {
-    return [];
-  }
-}
-
-export type ChatMessage = { role: "user" | "assistant" | "tool"; text: string };
-export type QuestionOption = { label: string; description?: string };
-export type Question = { header?: string; question: string; multiSelect: boolean; options: QuestionOption[] };
-export type PendingQuestion = { questions: Question[] };
-export type BlockingTool = { name: string; summary: string };
+// Re-exported (imported at the top) so components keep importing them from "./actions".
+export type { ChatMessage, QuestionOption, Question, PendingQuestion, BlockingTool, Subagent, RepoInfo };
 export type Conversation = { messages: ChatMessage[]; question: PendingQuestion | null; blocked: BlockingTool | null };
 
-// Returns null on any failure (network error, non-2xx, unparseable body) so a
-// transient blip doesn't blank an open chat. Callers keep their prior state.
+// GET a JSON endpoint, returning null on any failure (network error, non-2xx, or
+// unparseable body) so a transient blip leaves the caller's current state intact
+// rather than blanking it. A non-2xx (e.g. /repo's 404) reads as null too.
+async function getJson<T>(url: string): Promise<T | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    return (await res.json()) as T;
+  } catch {
+    return null;
+  }
+}
+
+/** The personas the server offers. [] on any failure so a blip degrades to "no
+ *  persona choice" rather than a broken modal. */
+export async function fetchPersonas(): Promise<PersonaInfo[]> {
+  return (await getJson<PersonaInfo[]>("/personas")) ?? [];
+}
+
 export async function fetchConversation(sessionId: string): Promise<Conversation | null> {
-  try {
-    const res = await fetch(`/conversation?sessionId=${encodeURIComponent(sessionId)}`);
-    if (!res.ok) return null;
-    const body = (await res.json()) as Partial<Conversation>;
-    return { messages: body.messages ?? [], question: body.question ?? null, blocked: body.blocked ?? null };
-  } catch {
-    return null;
-  }
+  const body = await getJson<Partial<Conversation>>(`/conversation?sessionId=${encodeURIComponent(sessionId)}`);
+  if (!body) return null;
+  return { messages: body.messages ?? [], question: body.question ?? null, blocked: body.blocked ?? null };
 }
 
-export type Subagent = {
-  agentId: string; description: string; agentType: string; model?: string;
-  doing: string; active: boolean; updatedAt: number;
-};
-
-// null on failure (see fetchConversation) so a failed poll leaves the current
-// subagent list in place rather than clearing it.
 export async function fetchSubagents(sessionId: string): Promise<Subagent[] | null> {
-  try {
-    const res = await fetch(`/subagents?sessionId=${encodeURIComponent(sessionId)}`);
-    if (!res.ok) return null;
-    const body = (await res.json()) as { subagents?: Subagent[] };
-    return body.subagents ?? [];
-  } catch {
-    return null;
-  }
+  const body = await getJson<{ subagents?: Subagent[] }>(`/subagents?sessionId=${encodeURIComponent(sessionId)}`);
+  return body ? body.subagents ?? [] : null;
 }
-
-export type RepoInfo = {
-  cwd: string; branch: string;
-  commits: { hash: string; subject: string }[];
-  status: { code: string; file: string }[];
-};
 
 export async function fetchRepo(sessionId: string): Promise<RepoInfo | null> {
-  try {
-    const res = await fetch(`/repo?sessionId=${encodeURIComponent(sessionId)}`);
-    const body = (await res.json()) as RepoInfo & { error?: string };
-    if (body.error) return null;
-    return body;
-  } catch {
-    return null;
-  }
+  return getJson<RepoInfo>(`/repo?sessionId=${encodeURIComponent(sessionId)}`);
 }
