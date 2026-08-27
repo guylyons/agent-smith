@@ -3,9 +3,10 @@ import type { DragEvent } from "react";
 import type { Board, Column, Card } from "../lib/board";
 import {
   addColumn, renameColumn, setInstruction, deleteColumn, reorderColumn,
-  addCard, renameCard, deleteCard, moveCard,
+  addCard, deleteCard, moveCard,
 } from "../lib/board";
 import { updateBoard } from "./actions";
+import { CardModal } from "./CardModal";
 
 const CARD_MIME = "application/x-line-card";
 const COL_MIME = "application/x-line-column";
@@ -22,6 +23,7 @@ type Mutate = (fn: (b: Board) => Board) => void;
 export function TheLine({ board: incoming }: { board: Board }) {
   const [board, setBoard] = useState(incoming);
   const [addingCol, setAddingCol] = useState(false);
+  const [openCardId, setOpenCardId] = useState<string | null>(null);
 
   // Adopt snapshots from the server (our own echoes, or edits from another tab
   // / an agent). Active text fields keep their own draft, so this never yanks a
@@ -36,10 +38,15 @@ export function TheLine({ board: incoming }: { board: Board }) {
     mutate((b) => addColumn(b, "")); // blank name -> its input auto-focuses
   }
 
+  // The card behind an open modal, resolved fresh each render so live edits (and
+  // SSE echoes) flow in. If it's deleted while open, the modal closes itself.
+  const openCard = openCardId ? board.cards.find((c) => c.id === openCardId) ?? null : null;
+  const openColumn = openCard ? board.columns.find((c) => c.id === openCard.columnId) : undefined;
+
   return (
     <section className="win line">
       <h2 className="pix">THE LINE</h2>
-      <p className="pix hint">DRAG WORK ACROSS YOUR STAGES · EACH STAGE CAN INSTRUCT THE AGENT</p>
+      <p className="pix hint">DRAG WORK ACROSS YOUR STAGES · CLICK A CARD TO OPEN IT · EACH STAGE CAN INSTRUCT THE AGENT</p>
       <div className="board">
         {board.columns.map((col, i) => (
           <ColumnView
@@ -50,18 +57,29 @@ export function TheLine({ board: incoming }: { board: Board }) {
             index={i}
             autoFocusName={addingCol && i === board.columns.length - 1}
             onNamed={() => setAddingCol(false)}
+            onOpenCard={setOpenCardId}
           />
         ))}
         <button className="pix add-col" onClick={onAddColumn} title="Add a column">+ COLUMN</button>
       </div>
+
+      {openCard && (
+        <CardModal
+          card={openCard}
+          columnName={openColumn?.name ?? ""}
+          mutate={mutate}
+          onClose={() => setOpenCardId(null)}
+        />
+      )}
     </section>
   );
 }
 
 function ColumnView({
-  board, mutate, column, index, autoFocusName, onNamed,
+  board, mutate, column, index, autoFocusName, onNamed, onOpenCard,
 }: {
-  board: Board; mutate: Mutate; column: Column; index: number; autoFocusName: boolean; onNamed: () => void;
+  board: Board; mutate: Mutate; column: Column; index: number; autoFocusName: boolean;
+  onNamed: () => void; onOpenCard: (id: string) => void;
 }) {
   const [dragOver, setDragOver] = useState(false);
 
@@ -112,7 +130,7 @@ function ColumnView({
 
       <div className="cards">
         {board.cards.filter((c) => c.columnId === column.id).map((card) => (
-          <CardView key={card.id} mutate={mutate} card={card} />
+          <CardView key={card.id} mutate={mutate} card={card} onOpen={() => onOpenCard(card.id)} />
         ))}
       </div>
 
@@ -121,24 +139,49 @@ function ColumnView({
   );
 }
 
-function CardView({ mutate, card }: { mutate: Mutate; card: Card }) {
-  const [editing, setEditing] = useState(false);
+// A card face: click anywhere to open the detail modal. Kept deliberately
+// sparse — just the title and, only when there's something to show, a footer
+// with the assignee's initials and a comment count. Detail lives in the modal.
+function CardView({ mutate, card, onOpen }: { mutate: Mutate; card: Card; onOpen: () => void }) {
+  const commentCount = card.comments?.length ?? 0;
+  const hasMeta = !!card.assignee || commentCount > 0 || !!card.description;
+
   return (
     <div
       className="card"
-      draggable={!editing}
+      role="button"
+      tabIndex={0}
+      draggable
+      onClick={onOpen}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } }}
       onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData(CARD_MIME, card.id); }}
     >
-      <InlineText
-        className="card-title"
-        value={card.title}
-        placeholder="Card…"
-        onEditingChange={setEditing}
-        onCommit={(v) => mutate((b) => renameCard(b, card.id, v))}
-      />
-      <button className="card-del" title="Delete card" onClick={() => mutate((b) => deleteCard(b, card.id))}>✕</button>
+      <div className="card-main">
+        <span className="card-title-text">{card.title || "Untitled"}</span>
+        {hasMeta && (
+          <div className="card-meta">
+            {card.assignee && <span className="card-assignee" title={card.assignee.name}>{initials(card.assignee.name)}</span>}
+            {card.description && <span className="card-flag" title="Has a description">≡</span>}
+            {commentCount > 0 && <span className="card-flag" title={`${commentCount} comment${commentCount > 1 ? "s" : ""}`}>💬 {commentCount}</span>}
+          </div>
+        )}
+      </div>
+      <button
+        className="card-del"
+        title="Delete card"
+        onClick={(e) => { e.stopPropagation(); mutate((b) => deleteCard(b, card.id)); }}
+      >✕</button>
     </div>
   );
+}
+
+// First letters of the first two words, for the assignee chip (e.g. "Backend
+// Dev" -> "BD"). Falls back to the first character.
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "?";
+  const letters = parts.slice(0, 2).map((p) => p[0]!.toUpperCase()).join("");
+  return letters || "?";
 }
 
 function AddCard({ mutate, columnId }: { mutate: Mutate; columnId: string }) {
