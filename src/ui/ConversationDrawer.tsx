@@ -29,6 +29,7 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
   const bodyRef = useRef<HTMLDivElement>(null);
   const atBottomRef = useRef(true);
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const sendingRef = useRef(false); // synchronous re-entrancy guard; `busy` state lags a render
 
   // Auto-grow the message textarea (up to a cap) as the user types multi-line.
   useEffect(() => {
@@ -42,9 +43,11 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
     const load = async () => {
       const [conv, s] = await Promise.all([fetchConversation(agent.sessionId), fetchSubagents(agent.sessionId)]);
       if (!alive) return;
+      if (s) setSubagents(s);
+      setLoaded(true);
+      if (!conv) return; // a failed poll: keep the chat we already have on screen
       const m = conv.messages;
       setMessages(m);
-      setSubagents(s);
       setQuestion(conv.question);
       // Drop an optimistic echo once a NEW occurrence of its text lands in the
       // transcript (count exceeds the baseline captured at send time), or after
@@ -54,7 +57,6 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
         const count = m.filter((msg) => msg.role === "user" && msg.text.trim() === p.text.trim()).length;
         return count <= p.base && nowT - p.at < 30_000;
       }));
-      setLoaded(true);
     };
     void load();
     const id = setInterval(load, 1500);
@@ -79,7 +81,8 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
 
   async function send() {
     const t = text.trim();
-    if (!t || busy) return;
+    if (!t || sendingRef.current) return; // ref, not `busy`: two Enters in one frame both see busy=false
+    sendingRef.current = true;
     setBusy(true);
     setText("");
     const id = `${Date.now()}-${Math.random()}`;
@@ -87,6 +90,7 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
     setPending((p) => [...p, { id, text: t, base, at: Date.now() }]);
     atBottomRef.current = true;
     const ok = await sendPromptTo(agent.sessionId, t);
+    sendingRef.current = false;
     setBusy(false);
     if (!ok) setPending((p) => p.filter((x) => x.id !== id)); // roll back on failure
   }

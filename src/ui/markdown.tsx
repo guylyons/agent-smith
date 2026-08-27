@@ -112,6 +112,12 @@ function renderParagraph(lines: string[]): ReactNode {
 
 export function renderMarkdown(text: string): ReactNode {
   if (!text) return text;
+  // Reset the key counter so identical text yields identical keys on every
+  // render. Otherwise the module-global counter hands out fresh keys each poll,
+  // and React remounts every message (losing selection, flickering the chat).
+  // Keys only need to be unique among siblings, and each message renders under
+  // its own parent, so restarting from zero per call is safe.
+  keySeed = 0;
   const lines = text.split("\n");
   const blocks: ReactNode[] = [];
   let i = 0;

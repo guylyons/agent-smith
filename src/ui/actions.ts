@@ -69,13 +69,16 @@ export type Question = { header?: string; question: string; multiSelect: boolean
 export type PendingQuestion = { questions: Question[] };
 export type Conversation = { messages: ChatMessage[]; question: PendingQuestion | null };
 
-export async function fetchConversation(sessionId: string): Promise<Conversation> {
+// Returns null on any failure (network error, non-2xx, unparseable body) so a
+// transient blip doesn't blank an open chat. Callers keep their prior state.
+export async function fetchConversation(sessionId: string): Promise<Conversation | null> {
   try {
     const res = await fetch(`/conversation?sessionId=${encodeURIComponent(sessionId)}`);
+    if (!res.ok) return null;
     const body = (await res.json()) as Partial<Conversation>;
     return { messages: body.messages ?? [], question: body.question ?? null };
   } catch {
-    return { messages: [], question: null };
+    return null;
   }
 }
 
@@ -84,13 +87,16 @@ export type Subagent = {
   doing: string; active: boolean; updatedAt: number;
 };
 
-export async function fetchSubagents(sessionId: string): Promise<Subagent[]> {
+// null on failure (see fetchConversation) so a failed poll leaves the current
+// subagent list in place rather than clearing it.
+export async function fetchSubagents(sessionId: string): Promise<Subagent[] | null> {
   try {
     const res = await fetch(`/subagents?sessionId=${encodeURIComponent(sessionId)}`);
+    if (!res.ok) return null;
     const body = (await res.json()) as { subagents?: Subagent[] };
     return body.subagents ?? [];
   } catch {
-    return [];
+    return null;
   }
 }
 

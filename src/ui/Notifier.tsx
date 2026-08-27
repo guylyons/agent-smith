@@ -74,9 +74,12 @@ export function Notifier({ snap, enabled }: { snap: Snapshot; enabled: boolean }
     }
 
     prevWaiting.current = next;
-    // Establish the baseline on the very first snapshot without firing, so we
-    // don't alert for every agent that's already waiting on load.
-    primed.current = true;
+    // Establish the baseline on the first POPULATED snapshot without firing, so
+    // we don't alert for every agent that's already waiting on load. The very
+    // first snapshot from useSnapshot is the empty placeholder (no agents); if we
+    // primed on that, every already-waiting agent in the first real snapshot
+    // would count as a fresh transition and fire.
+    if (snap.agents.length > 0) primed.current = true;
   }, [snap, enabled]);
 
   return null;
