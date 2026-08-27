@@ -12,7 +12,7 @@ export function Header({ snap, onNewAgent }: { snap: Snapshot; onNewAgent: () =>
   const idle = agents.filter((a) => a.state === "idle").length;
   const open = line
     .filter((l) => l.stage !== "merged")
-    .reduce((n, l) => n + l.tickets.length, 0);
+    .reduce((n, l) => n + l.items.length, 0);
 
   const first = agents[0];
   const project = first ? projectName(first.cwd) : null;

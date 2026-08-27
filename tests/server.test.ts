@@ -43,6 +43,38 @@ test("GET /events streams a snapshot", async () => {
   server.stop(true);
 });
 
+test("POST /action/line-stage designates an item, visible in the snapshot", async () => {
+  reset();
+  process.env.AGENT_STATUS_DIR = dir;
+  const { makeServer } = await import("../src/server");
+  const server = makeServer(0);
+  const res = await fetch(`http://localhost:${server.port}/action/line-stage`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ key: "repo|#9", stage: "review", label: "#9", sessionId: "s1" }),
+  });
+  expect((await res.json()).ok).toBe(true);
+  const review = readSnapshot(dir, Date.now()).line.find((s) => s.stage === "review")!;
+  expect(review.items.map((i) => i.label)).toEqual(["#9"]);
+  server.stop(true);
+});
+
+test("POST /action/line-stage with a non-designation stage clears it", async () => {
+  reset();
+  process.env.AGENT_STATUS_DIR = dir;
+  const { makeServer } = await import("../src/server");
+  const server = makeServer(0);
+  const post = (stage: string) => fetch(`http://localhost:${server.port}/action/line-stage`, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ key: "repo|#9", stage, label: "#9" }),
+  });
+  await post("review");
+  await post("done"); // moving back off review/merged clears the designation
+  const merged = readSnapshot(dir, Date.now()).line;
+  expect(merged.flatMap((s) => s.items)).toEqual([]);
+  server.stop(true);
+});
+
 test("scan:true runs a pass and stop() cleans up without leaking a timer", async () => {
   reset();
   process.env.AGENT_STATUS_DIR = dir;
