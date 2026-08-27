@@ -9,6 +9,8 @@ import { z } from "zod";
 import type { AgentStatus } from "../schema";
 import { BODIES, PALETTES } from "../ui/sprite-data";
 
+// Also duplicated in hooks/status.ts: the hook keeps its own copy deliberately
+// so it never has to load this registry.
 export const PERSONA_ID_RE = /^[a-z0-9-]{1,64}$/;
 
 const PersonaMetaSchema = z.object({

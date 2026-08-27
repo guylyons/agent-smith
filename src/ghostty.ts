@@ -5,6 +5,7 @@
 import { writeFile } from "node:fs/promises";
 import type { AgentStatus } from "./schema";
 import { createWorktree } from "./lib/worktree";
+import { composePrompt, getPersona, type Persona } from "./lib/personas";
 
 export type ActionResult = { ok: boolean; error?: string };
 type Target = Pick<AgentStatus, "tty" | "cwd" | "title">;
@@ -114,6 +115,30 @@ export async function sendPrompt(t: Target, text: string): Promise<ActionResult>
 export const ALLOWED_MODELS = new Set(["opus", "sonnet", "haiku"]);
 export const ALLOWED_PERMISSION_MODES = new Set(["default", "plan", "acceptEdits", "bypassPermissions"]);
 
+function shq(s: string): string {
+  return "'" + s.replace(/'/g, "'\\''") + "'";
+}
+
+/** The exact line typed into the new terminal. Pure and exported so the command
+ *  shape is unit-tested without driving AppleScript.
+ *  `model`/`permissionMode` are checked against fixed allowlists — an unknown
+ *  value is dropped, never interpolated. The persona rides in twice: its prompt
+ *  as --append-system-prompt (so it survives compaction and never shows up in
+ *  the CHAT tab), and its id as an env var the session's hooks inherit, which is
+ *  what binds the persona to the real session id. */
+export function buildLaunchInput(
+  task: string,
+  opts: { model?: string; permissionMode?: string },
+  persona: Persona | null,
+): string {
+  let flags = "";
+  if (opts.model && ALLOWED_MODELS.has(opts.model)) flags += ` --model ${opts.model}`;
+  if (opts.permissionMode && ALLOWED_PERMISSION_MODES.has(opts.permissionMode)) flags += ` --permission-mode ${opts.permissionMode}`;
+  if (persona) flags += ` --append-system-prompt ${shq(composePrompt(persona))}`;
+  const env = persona ? `AGENT_PERSONA=${persona.id} ` : "";
+  return `${env}claude${flags} ${shq(task)}\n`;
+}
+
 /** Launch a NEW Claude session in `cwd` with `task` as its opening prompt — a new
  *  Ghostty tab (or window) that runs `claude '<task>'`. Does not steal focus. The
  *  new session appears on the board via the scanner once it starts.
@@ -122,11 +147,14 @@ export const ALLOWED_PERMISSION_MODES = new Set(["default", "plan", "acceptEdits
  *  silently ignored rather than passed through.
  *  `opts.worktree`, when set, creates an isolated git worktree off the folder's
  *  HEAD and launches the session there instead of in `cwd`, so agents never share
- *  a working tree; a worktree failure aborts the launch with its error. */
+ *  a working tree; a worktree failure aborts the launch with its error.
+ *  `opts.persona`, when it names a known persona, binds that persona to the new
+ *  session (see buildLaunchInput); an unknown id resolves to null and is
+ *  ignored, same as an unknown model. */
 export async function spawnAgent(
   cwd: string,
   task: string,
-  opts?: { model?: string; permissionMode?: string; worktree?: string },
+  opts?: { model?: string; permissionMode?: string; worktree?: string; persona?: string },
 ): Promise<ActionResult> {
   let launchCwd = cwd;
   if (opts?.worktree) {
@@ -134,11 +162,10 @@ export async function spawnAgent(
     if (!wt.ok) return { ok: false, error: wt.error ?? "could not create worktree" };
     launchCwd = wt.path!;
   }
-  const quotedTask = "'" + task.replace(/'/g, "'\\''") + "'"; // shell-quote for the claude arg
-  let flags = "";
-  if (opts?.model && ALLOWED_MODELS.has(opts.model)) flags += ` --model ${opts.model}`;
-  if (opts?.permissionMode && ALLOWED_PERMISSION_MODES.has(opts.permissionMode)) flags += ` --permission-mode ${opts.permissionMode}`;
-  const input = `claude${flags} ${quotedTask}\n`;
+  // An unknown persona id resolves to null and is ignored, the same way an
+  // unknown model is — never interpolated into the command.
+  const persona = opts?.persona ? getPersona(opts.persona) : null;
+  const input = buildLaunchInput(task, opts ?? {}, persona);
   const script = `tell application "Ghostty"
     set cfg to new surface configuration
     set initial working directory of cfg to ${asStr(launchCwd)}
