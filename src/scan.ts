@@ -35,6 +35,62 @@ async function run(cmd: string[]): Promise<string> {
   return out;
 }
 
+export type GhosttyTerminal = { cwd: string; name: string };
+
+const GHOSTTY_TERM_SEP = "\t"; // unlikely to appear in a cwd/title
+
+/**
+ * List every open Ghostty terminal (cwd + tab name), once per scan pass, via
+ * a single AppleScript call. Never throws and never launches Ghostty (guarded
+ * by `application "Ghostty" is running`). Returns { terminals: [], ok: false }
+ * on any failure so callers can fall back rather than trust an empty result.
+ */
+export async function ghosttyTerminals(): Promise<{ terminals: GhosttyTerminal[]; ok: boolean }> {
+  const script = `if application "Ghostty" is running then
+    tell application "Ghostty"
+      set out to ""
+      repeat with w in windows
+        repeat with t in tabs of w
+          repeat with term in terminals of t
+            try
+              set out to out & (working directory of term) & "${GHOSTTY_TERM_SEP}" & (name of term) & linefeed
+            end try
+          end repeat
+        end repeat
+      end repeat
+      return out
+    end tell
+  else
+    return "NOTRUNNING"
+  end if`;
+  try {
+    const p = Bun.spawn(["osascript", "-e", script], { stdout: "pipe", stderr: "ignore" });
+    const out = await new Response(p.stdout).text();
+    const code = await p.exited;
+    if (code !== 0) return { terminals: [], ok: false };
+    const trimmed = out.trim();
+    if (trimmed === "NOTRUNNING") return { terminals: [], ok: false };
+    const terminals: GhosttyTerminal[] = [];
+    for (const line of out.split("\n")) {
+      const idx = line.indexOf(GHOSTTY_TERM_SEP);
+      if (idx < 0) continue;
+      const cwd = line.slice(0, idx);
+      const name = line.slice(idx + GHOSTTY_TERM_SEP.length);
+      if (cwd) terminals.push({ cwd, name });
+    }
+    return { terminals, ok: true };
+  } catch {
+    return { terminals: [], ok: false };
+  }
+}
+
+/** Does a Ghostty terminal's tab name correspond to session `title`? Mirrors
+ *  ghostty.ts's own runOnTerminal targeting (exact, or suffix — tolerating a
+ *  leading prefix symbol like "✳ ") so "chosen" always means "focusable". */
+function terminalMatchesTitle(termName: string, title: string): boolean {
+  return termName === title || termName.endsWith(title);
+}
+
 /**
  * Count running top-level `claude` CLI processes per working directory.
  * Returns { counts, ok }: ok=false means we couldn't read process info at all
@@ -187,12 +243,28 @@ type Candidate = { derived: AgentStatus; mtime: number };
 // re-read (64KB) and re-parsed every 20s tick. Bounded to avoid unbounded growth.
 const deriveCache = new Map<string, { mtime: number; base: AgentStatus }>();
 
+const NO_GHOSTTY = { terminals: [] as GhosttyTerminal[], ok: false };
+
 /**
- * Choose which sessions to surface: only cwds with a running claude process,
- * capped at the number of processes there (newest transcripts win). When process
- * info is unavailable, fall back to all fresh non-ephemeral transcripts.
+ * Choose which sessions to surface: only cwds with a running claude process
+ * are ever considered (unchanged safety net). Within such a cwd:
+ *  - if the Ghostty terminal list is available, a titled candidate is kept only
+ *    if its title matches an actually-open terminal in that cwd (a process whose
+ *    tab was closed — orphaned/leaked — is dropped even though `ps` still counts
+ *    it); an untitled candidate falls back to capping by however many terminals
+ *    in that cwd are left unclaimed by a title match (newest first).
+ *  - if the terminal list is unavailable (osascript failed / Ghostty not
+ *    running), falls back to the original behavior: cap at the process count
+ *    for that cwd (newest transcripts win) — never blank the board on an error.
+ * When process info itself is unavailable, fall back to all fresh non-ephemeral
+ * transcripts.
  */
-export function chooseLive(cands: Candidate[], counts: Map<string, number>, ok: boolean): AgentStatus[] {
+export function chooseLive(
+  cands: Candidate[],
+  counts: Map<string, number>,
+  ok: boolean,
+  ghostty: { terminals: GhosttyTerminal[]; ok: boolean } = NO_GHOSTTY,
+): AgentStatus[] {
   if (!ok) return cands.filter((c) => !isEphemeralCwd(c.derived.cwd)).map((c) => c.derived);
   const byCwd = new Map<string, Candidate[]>();
   for (const c of cands) {
@@ -203,8 +275,34 @@ export function chooseLive(cands: Candidate[], counts: Map<string, number>, ok: 
   for (const [cwd, list] of byCwd) {
     const n = counts.get(cwd) ?? 0;
     if (n <= 0) continue; // no running process for this cwd -> not a live window
-    list.sort((a, b) => b.mtime - a.mtime);
-    for (const c of list.slice(0, n)) chosen.push(c.derived);
+
+    if (!ghostty.ok) {
+      // Ghostty terminal list unavailable -- fall back to the process-count cap.
+      list.sort((a, b) => b.mtime - a.mtime);
+      for (const c of list.slice(0, n)) chosen.push(c.derived);
+      continue;
+    }
+
+    const termsHere = ghostty.terminals.filter((t) => t.cwd === cwd);
+    const titled = list.filter((c) => c.derived.title);
+    const untitled = list.filter((c) => !c.derived.title);
+
+    const claimed = new Set<number>(); // indices into termsHere already matched
+    for (const c of titled) {
+      const title = c.derived.title!;
+      const idx = termsHere.findIndex((t, i) => !claimed.has(i) && terminalMatchesTitle(t.name, title));
+      if (idx >= 0) {
+        claimed.add(idx);
+        chosen.push(c.derived);
+      }
+      // no matching open terminal -> tab was closed, process is orphaned -> dropped
+    }
+
+    const remaining = termsHere.length - claimed.size;
+    if (remaining > 0 && untitled.length > 0) {
+      untitled.sort((a, b) => b.mtime - a.mtime);
+      for (const c of untitled.slice(0, remaining)) chosen.push(c.derived);
+    }
   }
   return chosen;
 }
@@ -215,9 +313,13 @@ export async function scanLiveSessions(
   now: number,
   freshMs = FRESH_MS,
   countsOverride?: { counts: Map<string, number>; ok: boolean },
+  ghosttyOverride?: { terminals: GhosttyTerminal[]; ok: boolean },
 ): Promise<number> {
   const dir = ensureStatusDir();
-  const { counts, ok } = countsOverride ?? (await runningClaudeCounts());
+  const [{ counts, ok }, ghostty] = await Promise.all([
+    countsOverride ? Promise.resolve(countsOverride) : runningClaudeCounts(),
+    ghosttyOverride ? Promise.resolve(ghosttyOverride) : ghosttyTerminals(),
+  ]);
 
   const cands: Candidate[] = [];
   if (deriveCache.size > 200) deriveCache.clear();
@@ -247,7 +349,7 @@ export async function scanLiveSessions(
     } catch { /* skip */ }
   }
 
-  const chosen = chooseLive(cands, counts, ok);
+  const chosen = chooseLive(cands, counts, ok, ghostty);
   const chosenIds = new Set(chosen.map((c) => c.sessionId));
 
   for (const status of chosen) {
