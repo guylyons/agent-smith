@@ -33,7 +33,7 @@ export function workLabel(a: AgentStatus): string {
 
 /** Stable identity for a crate: repo + label, so the SAME ticket number in two
  *  repos stays two crates and a designation keys to the right one. */
-export function itemKey(cwd: string, label: string): string {
+function itemKey(cwd: string, label: string): string {
   return `${repoTail(cwd)}|${label}`;
 }
 

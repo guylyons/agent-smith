@@ -15,8 +15,6 @@ export type HookEvent = {
   branch: string | null;
   tool_name?: string;
   tool_input?: Record<string, unknown>;
-  last_assistant_message?: string; // real Claude Code field on Stop
-  last_message?: string;           // back-compat alias
 };
 
 function seed(e: HookEvent, now: number): AgentStatus {

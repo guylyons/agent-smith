@@ -18,6 +18,9 @@ test("Bash -> long multi-line command is clipped to one short line", () => {
 test("Read -> reading basename", () => {
   expect(humanizeTool("Read", { file_path: "/a/issue.md" })).toBe("reading issue.md");
 });
+test("NotebookEdit -> editing basename from notebook_path", () => {
+  expect(humanizeTool("NotebookEdit", { notebook_path: "/a/analysis.ipynb" })).toBe("editing analysis.ipynb");
+});
 test("unknown tool -> lowercased name", () => {
   expect(humanizeTool("Glob", {})).toBe("glob");
 });

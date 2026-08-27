@@ -12,9 +12,11 @@ function clip(s: string, max = 48): string {
 export function humanizeTool(name: string, input: Record<string, unknown> | undefined): string {
   const i = input ?? {};
   switch (name) {
+    case "NotebookEdit":
+      // NotebookEdit's path parameter is notebook_path, not file_path.
+      return i.notebook_path ? `editing ${base(i.notebook_path)}` : name.toLowerCase();
     case "Edit":
     case "Write":
-    case "NotebookEdit":
       return i.file_path ? `editing ${base(i.file_path)}` : name.toLowerCase();
     case "Read":
       return i.file_path ? `reading ${base(i.file_path)}` : name.toLowerCase();
