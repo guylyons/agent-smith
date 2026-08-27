@@ -1,6 +1,7 @@
 // tests/server.test.ts
 import { test, expect } from "bun:test";
 import { readSnapshot } from "../src/server";
+import { setNameOverride } from "../src/lib/overrides";
 import { mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -136,6 +137,16 @@ test("readSnapshot leaves a persona-less agent alone", () => {
   reset();
   writeFileSync(join(dir, "a.json"), valid({ sessionId: "a", name: "NOVA", role: "General" }));
   expect(readSnapshot(dir, Date.now()).agents[0].name).toBe("NOVA");
+});
+
+test("readSnapshot: a name override on a persona'd agent wins the name but not the role", () => {
+  reset();
+  writeFileSync(join(dir, "a.json"), valid({ sessionId: "a", persona: "backend-dev", name: "NOVA", role: "General" }));
+  setNameOverride(dir, "a", "CUSTOM-NAME");
+  const [agent] = readSnapshot(dir, Date.now()).agents;
+  expect(agent.name).toBe("CUSTOM-NAME");
+  expect(agent.name).not.toBe("ANVIL");
+  expect(agent.role).toBe("Backend Dev");
 });
 
 test("scan:true runs a pass and stop() cleans up without leaking a timer", async () => {
