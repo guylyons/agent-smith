@@ -243,7 +243,10 @@ export function mergeForWrite(existing: AgentStatus | null, derived: AgentStatus
   if (carried.pid === undefined && existing?.pid !== undefined) carried.pid = existing.pid;
   if (carried.tty === undefined && existing?.tty !== undefined) carried.tty = existing.tty;
 
-  if (existing && existing.waitingReason === "permission") {
+  // A hook-set block on the USER is invisible to the transcript: the session sits
+  // on an unresolved tool_use, which derives as "working". Don't let that
+  // overwrite it. (`question` is excluded — the scanner derives it independently.)
+  if (existing && (existing.waitingReason === "permission" || existing.waitingReason === "plan")) {
     const provenStale = derived.state === "idle" || derived.waitingReason === "question";
     if (!provenStale) return { ...existing, updatedAt: now };
   }

@@ -85,6 +85,23 @@ test("mergeForWrite: carries hook-set pid/tty forward when the derived status la
   expect(out.tty).toBe("/dev/ttys006");
 });
 
+test("mergeForWrite: a hook-set plan block survives a scanner-derived working", () => {
+  const existing = S({ state: "waiting", waitingReason: "plan", updatedAt: 1000, doing: "waiting on plan approval" });
+  const derived = S({ state: "working", waitingReason: undefined, doing: "exitplanmode" });
+  const out = mergeForWrite(existing, derived, 5000);
+  expect(out.state).toBe("waiting");
+  expect(out.waitingReason).toBe("plan");
+  expect(out.updatedAt).toBe(5000);
+});
+
+test("mergeForWrite: a plan block IS released once the transcript goes idle", () => {
+  const existing = S({ state: "waiting", waitingReason: "plan", updatedAt: 1000, doing: "waiting on plan approval" });
+  const derived = S({ state: "idle", waitingReason: undefined, doing: "idle", updatedAt: 999_999 });
+  const out = mergeForWrite(existing, derived, 5000);
+  expect(out.state).toBe("idle");
+  expect(out.waitingReason).toBeUndefined();
+});
+
 function writeTranscript(proj: string, sid: string, lines: object[], mtimeSecAgo = 0, now = Date.now()) {
   const dir = join(projects, proj);
   mkdirSync(dir, { recursive: true });
