@@ -129,8 +129,14 @@ Click a desk to open its pane, with two tabs:
   bold). Send a message any time; it's echoed optimistically before the
   transcript confirms it. If the session ended a turn on a multiple-choice
   question (`AskUserQuestion`), the options render inline so you can answer
-  without switching to the terminal. A **subagents** section lists the
-  session's live subagents with their description and current activity.
+  without switching to the terminal. When it's blocked on something else — a
+  permission prompt, a plan approval — the pane names the exact tool and
+  input it's stuck on (`Bash · rm -rf build/`) and offers
+  **↗ ANSWER IN TERMINAL**. Permission prompts are answered in the terminal
+  by design: the dashboard is an unauthenticated local page, so it will show
+  you the command but never approve it for you. A **subagents** section
+  lists the session's live subagents with their description and current
+  activity.
 - **INFO** — pwd, branch (+ ticket), working-tree status, and recent commits.
 
 ![conversation pane](docs/drawer.png)

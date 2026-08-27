@@ -5,7 +5,7 @@ import { SpritePicker } from "./SpritePicker";
 import { renderMarkdown } from "./markdown";
 import {
   fetchConversation, fetchSubagents, fetchRepo, fetchPersonas, sendPromptTo, uploadImage, focusSession, pauseSession, renameSession, killAgent,
-  type ChatMessage, type Subagent, type RepoInfo, type PendingQuestion, type PersonaInfo,
+  type ChatMessage, type Subagent, type RepoInfo, type PendingQuestion, type PersonaInfo, type BlockingTool,
 } from "./actions";
 
 type Pending = { id: string; text: string; base: number; at: number };
@@ -24,6 +24,7 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
   const [repo, setRepo] = useState<RepoInfo | null>(null);
   const [personas, setPersonas] = useState<PersonaInfo[]>([]);
   const [question, setQuestion] = useState<PendingQuestion | null>(null);
+  const [blocked, setBlocked] = useState<BlockingTool | null>(null);
   const [picks, setPicks] = useState<Record<number, Set<string>>>({});
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -59,6 +60,7 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
       const m = conv.messages;
       setMessages(m);
       setQuestion(conv.question);
+      setBlocked(conv.blocked);
       // Drop an optimistic echo once a NEW occurrence of its text lands in the
       // transcript (count exceeds the baseline captured at send time), or after
       // 30s if it never shows — so repeated identical messages aren't swallowed.
@@ -288,6 +290,18 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
                   </div>
                 ))}
                 {!singleQ && <button className="deskbtn primary" onClick={sendAnswer}>▸ SEND ANSWER</button>}
+              </div>
+            )}
+
+            {!question && blocked && !ended && agent.state === "waiting" && (
+              <div className="qpanel">
+                <div className="pix qheader">
+                  {agent.waitingReason === "plan" ? "PLAN APPROVAL" : "NEEDS PERMISSION"}
+                </div>
+                <div className="qtext">{blocked.name} · {blocked.summary}</div>
+                <button className="deskbtn primary" onClick={() => focusSession(agent.sessionId)}>
+                  ↗ ANSWER IN TERMINAL
+                </button>
               </div>
             )}
 
