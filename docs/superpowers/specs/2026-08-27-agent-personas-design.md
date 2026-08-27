@@ -107,7 +107,7 @@ read as four different people. Assignments are cosmetic and easy to re-pick.
 export function listPersonas(): Persona[];          // for the modal + validation
 export function getPersona(id: string): Persona | null;
 export function composePrompt(p: Persona): string;  // body + generated skills line
-export function applyPersonas(agents: AgentStatus[], byId: Map<string, Persona>): AgentStatus[];
+export function applyPersonas(agents: AgentStatus[], personas: Persona[]): AgentStatus[];
 ```
 
 Loads `personas/*.md` relative to `import.meta.dir`, validated with zod. A
