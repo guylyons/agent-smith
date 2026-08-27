@@ -117,3 +117,50 @@ test("Notification sets doing, not just state (no stale tool line)", () => {
   expect(s.waitingReason).toBe("permission");
   expect(s.doing).toBe("needs permission");
 });
+
+// A pending AskUserQuestion is NEVER in the transcript while it blocks — Claude Code
+// flushes it only once answered, backdated. The hook's PreToolUse payload is the only
+// live source, so it must survive onto the status record.
+test("PreToolUse on AskUserQuestion captures the questions and options", () => {
+  const s0 = applyEvent(null, start as any, 1000)!;
+  const s = applyEvent(s0, {
+    hook_event_name: "PreToolUse", session_id: "s1", cwd: "/repo", branch: start.branch,
+    tool_name: "AskUserQuestion",
+    tool_input: { questions: [{ header: "Probe", question: "Which colour?", multiSelect: false,
+      options: [{ label: "Alpha", description: "the first" }, { label: "Beta" }] }] },
+  } as any, 2000)!;
+  expect(s.pendingQuestion!.questions).toHaveLength(1);
+  const q = s.pendingQuestion!.questions[0];
+  expect(q.question).toBe("Which colour?");
+  expect(q.header).toBe("Probe");
+  expect(q.options.map((o) => o.label)).toEqual(["Alpha", "Beta"]);
+  expect(q.options[0].description).toBe("the first");
+});
+
+test("a malformed AskUserQuestion payload yields no pendingQuestion, never a broken record", () => {
+  const s0 = applyEvent(null, start as any, 1000)!;
+  const s = applyEvent(s0, {
+    hook_event_name: "PreToolUse", session_id: "s1", cwd: "/repo", branch: start.branch,
+    tool_name: "AskUserQuestion", tool_input: { questions: "not an array" },
+  } as any, 2000)!;
+  expect(s.state).toBe("waiting");
+  expect(s.pendingQuestion).toBeUndefined();
+});
+
+test("the captured question is cleared once the wait ends", () => {
+  const s0 = applyEvent(null, start as any, 1000)!;
+  const asked = applyEvent(s0, {
+    hook_event_name: "PreToolUse", session_id: "s1", cwd: "/repo", branch: start.branch,
+    tool_name: "AskUserQuestion",
+    tool_input: { questions: [{ question: "q", options: [{ label: "A" }] }] },
+  } as any, 2000)!;
+  expect(asked.pendingQuestion).toBeDefined();
+  // answered -> the session moves on to another tool
+  const next = applyEvent(asked, {
+    hook_event_name: "PreToolUse", session_id: "s1", cwd: "/repo", branch: start.branch,
+    tool_name: "Edit", tool_input: { file_path: "/a/b.ts" },
+  } as any, 3000)!;
+  expect(next.pendingQuestion).toBeUndefined();
+  // and a turn that simply ends also clears it
+  expect(applyEvent(asked, { hook_event_name: "Stop", session_id: "s1", cwd: "/repo", branch: start.branch } as any, 3000)!.pendingQuestion).toBeUndefined();
+});

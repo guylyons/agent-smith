@@ -165,10 +165,21 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
     });
   }
   function sendAnswer() {
-    const parts = (question?.questions ?? []).map((_, qi) => [...(picks[qi] ?? [])].join(", ")).filter(Boolean);
+    const parts = (liveQ?.questions ?? []).map((_, qi) => [...(picks[qi] ?? [])].join(", ")).filter(Boolean);
     if (parts.length) void answer(parts.join(" | "));
   }
-  const singleQ = !!question && question.questions.length === 1 && !question.questions[0].multiSelect;
+  // The transcript can NEVER show a question that is currently blocking: Claude Code
+  // flushes a pending AskUserQuestion only once it's answered (backdated). So the
+  // hook's PreToolUse capture on the status record is the live source, and the
+  // transcript's copy is only ever a late confirmation. Prefer whichever exists.
+  // `multiSelect` is optional on the wire (the hook stores what the tool sent) but
+  // required in the UI's Question type — normalise it here, at the boundary.
+  const hookQ: PendingQuestion | null =
+    agent.state === "waiting" && agent.pendingQuestion
+      ? { questions: agent.pendingQuestion.questions.map((q) => ({ ...q, multiSelect: !!q.multiSelect })) }
+      : null;
+  const liveQ: PendingQuestion | null = question ?? hookQ;
+  const singleQ = !!liveQ && liveQ.questions.length === 1 && !liveQ.questions[0].multiSelect;
 
   function commitRename() {
     const n = nameDraft.trim();
@@ -270,9 +281,9 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
               ))}
             </div>
 
-            {question && (
+            {liveQ && (
               <div className="qpanel">
-                {question.questions.map((q, qi) => (
+                {liveQ.questions.map((q, qi) => (
                   <div key={qi} className="qblock">
                     {q.header && <div className="pix qheader">{q.header}</div>}
                     <div className="qtext">{q.question}</div>
@@ -293,12 +304,17 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
               </div>
             )}
 
-            {!question && blocked && !ended && agent.state === "waiting" && (
+            {!liveQ && !ended && agent.state === "waiting" && (
               <div className="qpanel">
                 <div className="pix qheader">
                   {agent.waitingReason === "plan" ? "PLAN APPROVAL" : "NEEDS PERMISSION"}
                 </div>
-                <div className="qtext">{blocked.name} · {blocked.summary}</div>
+                {/* A permission prompt leaves NO trace in the transcript, so there is
+                    often nothing to name. Say so plainly rather than render an empty
+                    panel — the empty panel was the original bug. */}
+                <div className="qtext">
+                  {blocked ? `${blocked.name} · ${blocked.summary}` : "waiting for you in the terminal — it can't be read from here"}
+                </div>
                 <button className="deskbtn primary" onClick={() => focusSession(agent.sessionId)}>
                   ↗ ANSWER IN TERMINAL
                 </button>
