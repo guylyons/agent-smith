@@ -294,7 +294,44 @@ body{background:transparent}
   content:"";position:absolute;left:0;right:0;bottom:0;height:42%;background:#0b1020;
   clip-path:polygon(0 62%,8% 42%,18% 56%,28% 30%,40% 52%,52% 26%,64% 50%,76% 34%,88% 54%,100% 40%,100% 100%,0 100%);
 }
-@media (prefers-reduced-motion:reduce){.artbg::after{animation:none}}
+/* ---- very subtle idle animation for the art layer ----
+   Long durations + tiny deltas so it reads as "alive", never busy. All of it is
+   disabled under prefers-reduced-motion. */
+@keyframes bg-twinkle{0%,100%{opacity:.25}50%{opacity:.9}}
+@keyframes bg-synthscroll{from{background-position:0 0,0 0}to{background-position:0 0,0 16%}}
+@keyframes bg-gridpan{from{background-position:0 0,0 0,50% 0}to{background-position:0 32px,32px 0,50% 0}}
+@keyframes bg-duskbreathe{0%,100%{filter:brightness(1)}50%{filter:brightness(1.06)}}
+@keyframes bg-nebula{0%,100%{transform:translate3d(0,0,0)}50%{transform:translate3d(2%,-1.5%,0)}}
+
+/* STARS — a sparse extra layer twinkles in and out */
+:root[data-bg="stars"] .artbg::after{
+  content:"";position:absolute;inset:0;
+  background:
+    radial-gradient(1px 1px at 20% 30%, #fff 99%, transparent),
+    radial-gradient(1px 1px at 55% 15%, #cfe0ff 99%, transparent),
+    radial-gradient(1px 1px at 72% 55%, #fff 99%, transparent),
+    radial-gradient(1px 1px at 40% 78%, #bcd 99%, transparent),
+    radial-gradient(1px 1px at 85% 42%, #fff 99%, transparent);
+  animation:bg-twinkle 7s ease-in-out infinite;
+}
+/* SYNTH — horizon grid drifts slowly toward the viewer */
+:root[data-bg="synth"] .artbg::after{animation:bg-synthscroll 9s linear infinite}
+/* GRID — blueprint lines pan very slowly */
+:root[data-bg="grid"] .artbg{animation:bg-gridpan 40s linear infinite}
+/* DUSK — sky gently brightens and dims */
+:root[data-bg="dusk"] .artbg{animation:bg-duskbreathe 14s ease-in-out infinite}
+/* NIGHT — a faint nebula drifts across the dark */
+:root[data-bg="night"] .artbg::after,
+:root:not([data-bg]) .artbg::after{
+  content:"";position:absolute;inset:-10%;
+  background:
+    radial-gradient(120% 80% at 25% 15%, rgba(86,64,168,.18), transparent 60%),
+    radial-gradient(120% 90% at 80% 95%, rgba(30,96,150,.16), transparent 60%);
+  animation:bg-nebula 32s ease-in-out infinite;
+}
+@media (prefers-reduced-motion:reduce){
+  .artbg,.artbg::before,.artbg::after{animation:none!important}
+}
 
 /* subagent count badge on a crew sprite */
 .crew-badge{
