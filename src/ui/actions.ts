@@ -57,8 +57,8 @@ export function sendPromptTo(sessionId: string, text: string): Promise<boolean> 
 /** Launch a new Claude agent in `cwd` with `task` as its opening prompt.
  *  `opts.model` and `opts.permissionMode` are forwarded to the server, which
  *  allowlist-checks them again before building the launch command. */
-export async function spawnAgent(cwd: string, task: string, opts?: { model?: string; permissionMode?: string }): Promise<boolean> {
-  const r = await post("spawn", { cwd, text: task, model: opts?.model, permissionMode: opts?.permissionMode });
+export async function spawnAgent(cwd: string, task: string, opts?: { model?: string; permissionMode?: string; worktree?: string }): Promise<boolean> {
+  const r = await post("spawn", { cwd, text: task, model: opts?.model, permissionMode: opts?.permissionMode, worktree: opts?.worktree });
   if (!r.ok) toast(r.error ?? "could not launch");
   return r.ok;
 }

@@ -4,6 +4,7 @@
 // Best-effort: every call resolves to a {ok, error?} result and never throws.
 import { writeFile } from "node:fs/promises";
 import type { AgentStatus } from "./schema";
+import { createWorktree } from "./lib/worktree";
 
 export type ActionResult = { ok: boolean; error?: string };
 type Target = Pick<AgentStatus, "tty" | "cwd" | "title">;
@@ -118,12 +119,21 @@ export const ALLOWED_PERMISSION_MODES = new Set(["default", "plan", "acceptEdits
  *  new session appears on the board via the scanner once it starts.
  *  `opts.model` and `opts.permissionMode` are checked against a fixed allowlist
  *  before being interpolated into the shell command — unknown values are
- *  silently ignored rather than passed through. */
+ *  silently ignored rather than passed through.
+ *  `opts.worktree`, when set, creates an isolated git worktree off the folder's
+ *  HEAD and launches the session there instead of in `cwd`, so agents never share
+ *  a working tree; a worktree failure aborts the launch with its error. */
 export async function spawnAgent(
   cwd: string,
   task: string,
-  opts?: { model?: string; permissionMode?: string },
+  opts?: { model?: string; permissionMode?: string; worktree?: string },
 ): Promise<ActionResult> {
+  let launchCwd = cwd;
+  if (opts?.worktree) {
+    const wt = await createWorktree(cwd, opts.worktree);
+    if (!wt.ok) return { ok: false, error: wt.error ?? "could not create worktree" };
+    launchCwd = wt.path!;
+  }
   const quotedTask = "'" + task.replace(/'/g, "'\\''") + "'"; // shell-quote for the claude arg
   let flags = "";
   if (opts?.model && ALLOWED_MODELS.has(opts.model)) flags += ` --model ${opts.model}`;
@@ -131,7 +141,7 @@ export async function spawnAgent(
   const input = `claude${flags} ${quotedTask}\n`;
   const script = `tell application "Ghostty"
     set cfg to new surface configuration
-    set initial working directory of cfg to ${asStr(cwd)}
+    set initial working directory of cfg to ${asStr(launchCwd)}
     set initial input of cfg to ${asStr(input)}
     if (count of windows) > 0 then
       new tab in front window with configuration cfg

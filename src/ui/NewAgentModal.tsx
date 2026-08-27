@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { spawnAgent } from "./actions";
+import { slugify } from "../lib/slug";
 import { toast } from "./toast";
 
 function repoName(cwd: string): string {
@@ -12,7 +13,15 @@ export function NewAgentModal({ recentFolders, onClose }: { recentFolders: strin
   const [task, setTask] = useState("");
   const [model, setModel] = useState("");
   const [permissionMode, setPermissionMode] = useState("");
+  const [worktree, setWorktree] = useState("");
+  const [worktreeTouched, setWorktreeTouched] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  // Auto-fill the worktree name from the task until the user edits the field
+  // themselves. Leaving it blank launches in the folder (today's behavior).
+  useEffect(() => {
+    if (!worktreeTouched) setWorktree(slugify(task));
+  }, [task, worktreeTouched]);
 
   async function launch() {
     if (!folder.trim() || !task.trim() || busy) return;
@@ -20,6 +29,7 @@ export function NewAgentModal({ recentFolders, onClose }: { recentFolders: strin
     const ok = await spawnAgent(folder.trim(), task.trim(), {
       model: model || undefined,
       permissionMode: permissionMode || undefined,
+      worktree: worktree.trim() || undefined,
     });
     setBusy(false);
     if (ok) { toast("Launching new agent…"); onClose(); }
@@ -68,13 +78,18 @@ export function NewAgentModal({ recentFolders, onClose }: { recentFolders: strin
           value={task} onChange={(e) => setTask(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void launch(); }} />
 
+        <label className="pix newagent-label">WORKTREE</label>
+        <input className="reply-input" placeholder="blank = launch in the folder"
+          value={worktree}
+          onChange={(e) => { setWorktreeTouched(true); setWorktree(e.target.value); }} />
+
         <div className="newagent-actions">
           <button className="deskbtn" onClick={onClose}>CANCEL</button>
           <button className="deskbtn primary" disabled={busy || !folder.trim() || !task.trim()} onClick={() => void launch()}>
             {busy ? "LAUNCHING…" : "▸ LAUNCH"}
           </button>
         </div>
-        <div className="pix newagent-hint">Opens a new Claude session in a Ghostty tab and runs your task. It'll appear on the board; chat with it here. (⌘/Ctrl+Enter to launch)</div>
+        <div className="pix newagent-hint">Opens a new Claude session in a Ghostty tab and runs your task. It'll appear on the board; chat with it here. With a WORKTREE name it runs in an isolated <code>.claude/worktrees/&lt;name&gt;</code> branch off HEAD, so agents never share a working tree. (⌘/Ctrl+Enter to launch)</div>
       </div>
     </div>
   );
