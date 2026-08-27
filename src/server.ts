@@ -140,7 +140,7 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
           return json({ ok: false, error: "cross-site blocked" }, 403);
         }
         const action = url.pathname.slice("/action/".length);
-        let body: { sessionId?: string; name?: string; text?: string; cwd?: string; palette?: number; gear?: string; body?: string; model?: string; permissionMode?: string; key?: string; stage?: string; label?: string };
+        let body: { sessionId?: string; name?: string; text?: string; cwd?: string; palette?: number; gear?: string; body?: string; model?: string; permissionMode?: string; worktree?: string; key?: string; stage?: string; label?: string };
         try { body = await req.json(); } catch { return json({ ok: false, error: "bad body" }, 400); }
         // spawn creates a brand-new session — it has a folder + task, not a sessionId
         if (action === "spawn") {
@@ -150,7 +150,10 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
           try { if (!statSync(cwd).isDirectory()) throw 0; } catch { return json({ ok: false, error: `folder not found: ${cwd}` }, 400); }
           const model = typeof body.model === "string" && ALLOWED_MODELS.has(body.model) ? body.model : undefined;
           const permissionMode = typeof body.permissionMode === "string" && ALLOWED_PERMISSION_MODES.has(body.permissionMode) ? body.permissionMode : undefined;
-          return json(await spawnAgent(cwd, task, { model, permissionMode }));
+          // A blank/whitespace field means "no worktree" (launch in the folder). The
+          // name is sanitized to a slug inside createWorktree, so pass it as typed.
+          const worktree = typeof body.worktree === "string" && body.worktree.trim() ? body.worktree.trim() : undefined;
+          return json(await spawnAgent(cwd, task, { model, permissionMode, worktree }));
         }
         // line-stage: your manual review/merged designation. Keyed by item key,
         // not sessionId (a designated item may outlive its session), so it's
