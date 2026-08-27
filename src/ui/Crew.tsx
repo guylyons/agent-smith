@@ -1,19 +1,42 @@
-import { memo } from "react";
+import { memo, useEffect, useState } from "react";
 import type { MouseEvent } from "react";
 import type { AgentStatus } from "../schema";
 import { Sprite } from "./Sprite";
 import { paletteFor } from "./sprite-data";
 import { focusSession } from "./actions";
+import { subscribeFlash } from "./flash";
 
 const stop = (e: MouseEvent) => e.stopPropagation();
+
+// How long the "input sent" green ring lingers. Slightly past the CSS pulse
+// (.7s) so the animation plays out fully before the class is pulled; also the
+// hold duration for the reduced-motion static ring.
+const FLASH_MS = 750;
+
+// True while this card should show its send pulse. Bumps a counter on each send
+// so rapid re-sends restart the timer; internal state, so it re-renders even
+// though the card is memoized on props.
+function useSendFlash(sessionId: string): boolean {
+  const [pulse, setPulse] = useState(0);
+  useEffect(() => subscribeFlash((id) => {
+    if (id === sessionId) setPulse((n) => n + 1);
+  }), [sessionId]);
+  useEffect(() => {
+    if (!pulse) return;
+    const t = setTimeout(() => setPulse(0), FLASH_MS);
+    return () => clearTimeout(t);
+  }, [pulse]);
+  return pulse > 0;
+}
 
 // A fresh snapshot arrives every ~20s with new agent objects; only re-render a
 // card when a field it actually shows changed.
 const AgentCard = memo(function AgentCard({ a, onOpen }: { a: AgentStatus; onOpen: (id: string) => void }) {
   const { palette } = paletteFor(a.sessionId, a.role);
+  const flashing = useSendFlash(a.sessionId);
   return (
     <article
-      className={`win desk is-${a.state}`}
+      className={`win desk is-${a.state}${flashing ? " flash-send" : ""}`}
       role="button"
       tabIndex={0}
       title="Click to open this agent's conversation"

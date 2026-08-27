@@ -1,6 +1,7 @@
 // Send a command to the server about a real session. Errors surface as toasts,
 // never blocking dialogs. Confirmation/rename UX lives in the components.
 import { toast } from "./toast";
+import { flashSend } from "./flash";
 import { playSubmit } from "./sounds";
 import type { Board } from "../lib/board";
 
@@ -53,9 +54,11 @@ export function updateBoard(board: Board): void {
 }
 
 export function sendPromptTo(sessionId: string, text: string): Promise<boolean> {
-  // Immediate audible feedback for the user's send (a direct gesture, so it's
-  // always on — not gated by the alerts toggle).
+  // Immediate feedback for the user's send (a direct gesture, so it's always on
+  // — not gated by the alerts toggle): a submit blip plus a green pulse on the
+  // agent's grid card.
   playSubmit();
+  flashSend(sessionId);
   return act("prompt", { sessionId, text });
 }
 
