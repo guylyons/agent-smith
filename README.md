@@ -12,6 +12,10 @@ It connects to your sessions two ways, working together:
 
 - **Hooks** (real time) — Claude Code calls `hooks/status.ts` on session events,
   so activity, permission prompts, and questions show up the instant they happen.
+  A permission prompt leaves **no trace in the transcript**, so it's the one thing
+  only the hooks can see: without them installed, a session stopped at a permission
+  prompt reads as **working** (busy on the tool), not **needs you**. Install the
+  hooks if you want permission prompts on the board.
 - **Transcript scanner** (fills the gaps) — the server periodically reads your
   session transcripts under `~/.claude/projects`, so windows you already have
   open appear immediately, without waiting for them to act or be restarted. It
@@ -25,7 +29,7 @@ keyed by the real session id so they never double-count a session.
 
 ```bash
 bun install
-bun run install-hooks   # optional but recommended — real-time precision
+bun run install-hooks   # recommended — required to see permission prompts (see above)
 bun run dev             # builds if needed, starts the dashboard, prints the URL
 ```
 

@@ -219,21 +219,34 @@ export async function freshTranscripts(now: number, freshMs = FRESH_MS): Promise
 
 /**
  * Decide what to write for a session the scanner found open.
- * A permission "needs you" is invisible in the transcript, so once a hook sets
- * it we must NOT let a transcript-derived state overwrite it — we only refresh
- * its liveness (updatedAt) so it stays on the dashboard until a hook clears it
- * (PreToolUse/Stop/SessionEnd) or the session goes stale and ages out.
+ *
+ * A permission "needs you" is invisible in the transcript: a permission-blocked
+ * session sits on an unresolved tool_use, which derives as "working". So once a
+ * hook sets a permission wait we must NOT let that "working" overwrite it — we
+ * only refresh its liveness (updatedAt) so it stays on the dashboard until a hook
+ * clears it (PreToolUse/Stop/SessionEnd) or the session ages out.
+ *
+ * We DO release the pin, though, when the transcript proves it stale:
+ *  - `idle` means the turn ended on assistant text, which cannot coexist with a
+ *    pending permission prompt — the prompt was already answered (self-heals a
+ *    Stop hook that didn't fire or isn't installed).
+ *  - a pending `question` (AskUserQuestion) is a definitive newer signal; showing
+ *    a stale "permission" badge over it would desync the card from the answer
+ *    drawer.
+ * The still-blocked case derives as `working`, which does not release the pin.
  */
 export function mergeForWrite(existing: AgentStatus | null, derived: AgentStatus, now: number): AgentStatus {
-  if (existing && existing.waitingReason === "permission") {
-    return { ...existing, updatedAt: now };
-  }
   // Transcript-derived status never carries pid/tty (only the hook captures them);
   // carry them forward so a routine scan pass doesn't erase the hook's work and
   // break focus/pause for a session that's just quietly thinking.
   const carried = { ...derived };
   if (carried.pid === undefined && existing?.pid !== undefined) carried.pid = existing.pid;
   if (carried.tty === undefined && existing?.tty !== undefined) carried.tty = existing.tty;
+
+  if (existing && existing.waitingReason === "permission") {
+    const provenStale = derived.state === "idle" || derived.waitingReason === "question";
+    if (!provenStale) return { ...existing, updatedAt: now };
+  }
   return carried;
 }
 

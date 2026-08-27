@@ -31,14 +31,49 @@ test("mergeForWrite: writes the derived status when nothing exists", () => {
   expect(mergeForWrite(null, derived, 1000)).toEqual(derived);
 });
 
-test("mergeForWrite: preserves a hook-set permission wait, only refreshing liveness", () => {
+test("mergeForWrite: preserves a hook-set permission wait while still mid-tool, only refreshing liveness", () => {
+  // A permission-blocked session sits on an unresolved tool_use, which the
+  // transcript derives as "working" -- that must NOT overwrite the pin, since the
+  // permission prompt is invisible in the transcript.
   const existing = S({ state: "waiting", waitingReason: "permission", updatedAt: 1000, doing: "needs approval" });
-  const derived = S({ state: "idle", waitingReason: undefined, doing: "idle" });
+  const derived = S({ state: "working", waitingReason: undefined, doing: "running a command" });
   const out = mergeForWrite(existing, derived, 999_999);
   expect(out.state).toBe("waiting");
   expect(out.waitingReason).toBe("permission");
   expect(out.doing).toBe("needs approval");
   expect(out.updatedAt).toBe(999_999); // liveness refreshed so it doesn't age out
+});
+
+test("mergeForWrite: releases a permission pin once the transcript shows a completed turn", () => {
+  // "idle" means the transcript ended on assistant text -- a finished turn, which
+  // cannot coexist with a pending permission prompt. The pin is provably stale
+  // (e.g. the Stop hook didn't fire), so the derived idle wins.
+  const existing = S({ state: "waiting", waitingReason: "permission", updatedAt: 1000, doing: "needs approval" });
+  const derived = S({ state: "idle", waitingReason: undefined, doing: "idle", updatedAt: 999_999 });
+  const out = mergeForWrite(existing, derived, 999_999);
+  expect(out.state).toBe("idle");
+  expect(out.waitingReason).toBeUndefined();
+  expect(out.doing).toBe("idle");
+});
+
+test("mergeForWrite: a pending question overrides a stale permission pin", () => {
+  // A pending AskUserQuestion is a definitive transcript signal; showing a stale
+  // "permission" badge over it would desync the card from the answer drawer.
+  const existing = S({ state: "waiting", waitingReason: "permission", updatedAt: 1000, doing: "needs approval" });
+  const derived = S({ state: "waiting", waitingReason: "question", doing: "waiting on your answer", updatedAt: 999_999 });
+  const out = mergeForWrite(existing, derived, 999_999);
+  expect(out.state).toBe("waiting");
+  expect(out.waitingReason).toBe("question");
+  expect(out.doing).toBe("waiting on your answer");
+});
+
+test("mergeForWrite: a released permission pin still carries hook-set pid/tty forward", () => {
+  const existing = S({ state: "waiting", waitingReason: "permission", pid: 4242, tty: "/dev/ttys006" });
+  const derived = S({ state: "idle", waitingReason: undefined, doing: "idle" }); // transcript-derived, no pid/tty
+  const out = mergeForWrite(existing, derived, 1000);
+  expect(out.state).toBe("idle");   // pin released
+  expect(out.pid).toBe(4242);       // but the hook's pid/tty survive
+  expect(out.tty).toBe("/dev/ttys006");
 });
 
 test("mergeForWrite: carries hook-set pid/tty forward when the derived status lacks them", () => {
@@ -95,8 +130,10 @@ test("scanLiveSessions writes a status file per fresh session, keyed by sessionI
 test("scanLiveSessions keeps a fresh permission prompt alive without downgrading it", async () => {
   reset();
   const now = 30_000_000;
+  // A permission-blocked session sits on an unresolved tool_use (derives to
+  // "working"); the pin must survive that so the card keeps saying needs-you.
   writeTranscript("-repo", "sess2", [
-    { type: "assistant", sessionId: "sess2", cwd: "/repo", gitBranch: "b", message: { content: [{ type: "text", text: "All set." }] } },
+    { type: "assistant", sessionId: "sess2", cwd: "/repo", gitBranch: "b", message: { content: [{ type: "tool_use", name: "Bash", input: { command: "rm -rf build" } }] } },
   ], 30, now);
   // a hook already marked it needs-you (permission) a while ago
   writeFileSync(join(status, "sess2.json"), JSON.stringify(S({ sessionId: "sess2", state: "waiting", waitingReason: "permission", updatedAt: now - 500_000 })));
@@ -105,6 +142,21 @@ test("scanLiveSessions keeps a fresh permission prompt alive without downgrading
   expect(after.state).toBe("waiting");
   expect(after.waitingReason).toBe("permission");
   expect(after.updatedAt).toBe(now); // refreshed so it stays on the dashboard
+});
+
+test("scanLiveSessions releases a permission pin when the session has since finished its turn", async () => {
+  reset();
+  const now = 31_000_000;
+  // The turn ended on assistant text -> the permission was already answered; a
+  // stale pin (e.g. a Stop hook that never fired) must not keep it as needs-you.
+  writeTranscript("-repo", "sess3", [
+    { type: "assistant", sessionId: "sess3", cwd: "/repo", gitBranch: "b", message: { content: [{ type: "text", text: "All set." }] } },
+  ], 30, now);
+  writeFileSync(join(status, "sess3.json"), JSON.stringify(S({ sessionId: "sess3", state: "waiting", waitingReason: "permission", updatedAt: now - 500_000 })));
+  await scanLiveSessions(now, 15 * 60_000, { counts: new Map([["/repo", 1]]), ok: true }, NO_GHOSTTY);
+  const after = JSON.parse(readFileSync(join(status, "sess3.json"), "utf8"));
+  expect(after.state).toBe("idle");
+  expect(after.waitingReason).toBeUndefined();
 });
 
 const C = (sid: string, cwd: string, mtime: number) => ({ derived: S({ sessionId: sid, cwd }), mtime });
