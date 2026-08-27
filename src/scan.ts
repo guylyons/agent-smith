@@ -298,7 +298,11 @@ export function chooseLive(
       // no matching open terminal -> tab was closed, process is orphaned -> dropped
     }
 
-    const remaining = termsHere.length - claimed.size;
+    // Cap untitled fill by BOTH unclaimed terminals (drops a process whose tab was
+    // closed) AND remaining running-process headroom, n - claimed (drops a phantom:
+    // a tab still open after its claude process exited). Without the process bound a
+    // leftover shell tab in the cwd surfaces an ended session as a live agent.
+    const remaining = Math.min(termsHere.length - claimed.size, n - claimed.size);
     if (remaining > 0 && untitled.length > 0) {
       untitled.sort((a, b) => b.mtime - a.mtime);
       for (const c of untitled.slice(0, remaining)) chosen.push(c.derived);

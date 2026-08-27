@@ -203,6 +203,29 @@ test("chooseLive: with Ghostty available, an untitled candidate falls back to re
   expect(chosen.map((c) => c.sessionId)).toEqual(["newer"]);
 });
 
+test("chooseLive: an untitled candidate is NOT surfaced when a leftover tab outlives its process", () => {
+  // Real scenario: one live claude (titled, matched to its tab) plus an ended
+  // session (untitled, transcript still fresh) whose old tab is still open as a
+  // plain shell. ps counts only the 1 live process. The dead session must not be
+  // surfaced just because non-claude tabs (dev server, shells) are open in the cwd.
+  const cands = [
+    CTitle("marlow", "/repo/a", 200, "Issue investigation"),
+    C("otter", "/repo/a", 100), // untitled, ended session
+  ];
+  const counts = new Map([["/repo/a", 1]]); // only ONE running claude process
+  const ghostty = {
+    terminals: [
+      T("/repo/a", "bun run dev"),
+      T("/repo/a", "◑ Issue investigation"), // marlow's live tab
+      T("/repo/a", "~/repo/a"),              // otter's old tab, now a shell
+      T("/repo/a", "v"),
+    ],
+    ok: true,
+  };
+  const chosen = chooseLive(cands, counts, true, ghostty).map((c) => c.sessionId);
+  expect(chosen).toEqual(["marlow"]);
+});
+
 test("scanLiveSessions removes scanner-written phantoms but keeps hook-owned files", async () => {
   reset();
   const now = 40_000_000;
