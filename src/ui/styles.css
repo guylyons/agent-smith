@@ -139,53 +139,68 @@
   .lamp.idle{background:var(--dim)}
   .lamp.done{background:var(--leaf)}
 
-  /* ---- the line ---- */
-  .line{max-width:1080px;margin:26px auto 0;padding:16px 16px 0}
+  /* ---- the line: a simple kanban board ---- */
+  .line{max-width:1080px;margin:26px auto 0;padding:16px}
   .line h2{font-size:12px;letter-spacing:.5px}
   .line .hint{font-size:9px;color:var(--dim);margin-top:9px}
-  .stages{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-top:16px}
-  .stage{min-width:0}
-  .stage-head{
-    font-size:8px;text-align:center;padding:7px 2px;
-    background:var(--box-lo);border:2px solid var(--bevel);color:var(--dim);
+  .board{display:flex;gap:10px;margin-top:16px;overflow-x:auto;align-items:flex-start;padding-bottom:6px}
+  .col{
+    flex:0 0 210px;min-width:210px;
+    background:var(--box-lo);border:2px solid var(--bevel);
+    display:flex;flex-direction:column;gap:8px;padding:8px;
   }
-  .stage[data-key="needs"] .stage-head{color:var(--clay);border-color:var(--clay)}
-  .stage[data-key="done"] .stage-head{color:var(--gold);border-color:var(--gold)}
-  .stage[data-key="merged"] .stage-head{color:var(--leaf);border-color:var(--leaf)}
-  /* the columns you designate by hand accept drops */
-  .stage.droppable .slot{border:2px dashed transparent;border-radius:4px}
-  .stage.dragover .slot{border-color:var(--gold);background:rgba(240,196,80,.08)}
-  .slot{min-height:112px;padding:10px 0;display:flex;flex-direction:column;gap:8px;align-items:center}
-  .crate{
-    width:100%;background:var(--box-lo);
-    border:3px solid var(--bone);
+  .col.dragover{border-color:var(--gold);background:rgba(240,196,80,.08)}
+  .col-head{display:flex;align-items:center;gap:5px}
+  .grip{cursor:grab;color:var(--dim);font-size:10px;user-select:none;padding:0 2px}
+  .grip:active{cursor:grabbing}
+  .col-name{
+    flex:1;min-width:0;font-size:9px;color:var(--gold);
+    background:transparent;border:2px solid transparent;padding:4px 5px;
+  }
+  .col-name:hover{border-color:var(--bevel)}
+  .col-name:focus{outline:none;border-color:var(--gold);background:var(--night)}
+  .col-del,.card-del{
+    background:transparent;border:none;color:var(--dim);cursor:pointer;
+    font-size:11px;padding:2px 4px;line-height:1;
+  }
+  .col-del:hover,.card-del:hover{color:var(--clay)}
+  .col-instr{
+    width:100%;box-sizing:border-box;resize:vertical;min-height:44px;
+    font-family:ui-monospace,Menlo,monospace;font-size:10px;line-height:1.5;
+    background:var(--night);color:var(--bone);border:2px solid var(--bevel);padding:5px 6px;
+  }
+  .col-instr:focus{outline:none;border-color:var(--gold)}
+  .col-instr::placeholder{color:var(--dim)}
+  .cards{display:flex;flex-direction:column;gap:6px;min-height:20px}
+  .card{
+    display:flex;align-items:center;gap:4px;cursor:grab;
+    background:var(--box);border:3px solid var(--bone);
     box-shadow:inset 0 0 0 2px rgba(110,140,224,.5),0 3px 0 rgba(0,0,0,.5);
-    padding:8px 6px;text-align:center;
+    padding:6px;
   }
-  .crate.clickable{cursor:pointer}
-  .crate.draggable{cursor:grab}
-  .crate.draggable:active{cursor:grabbing}
-  .crate.clickable:hover{border-color:var(--gold)}
-  .crate.clickable:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
-  .crate .num{font-size:9px}
-  .crate .own{height:5px;margin-top:7px}
-  .crate.hop{animation:hop .45s steps(3) 1}
-  @keyframes hop{50%{transform:translateY(-14px)}}
-
-  /* signature: the belt */
-  .belt{margin:6px -16px 0;height:22px;border-top:var(--px) solid var(--bone);background:var(--box-lo);overflow:hidden}
-  .tread{
-    height:100%;
-    background:repeating-linear-gradient(90deg,var(--bevel) 0 10px,var(--box-lo) 10px 20px);
-    width:200%;
+  .card:active{cursor:grabbing}
+  .card-title{
+    flex:1;min-width:0;font-family:ui-monospace,Menlo,monospace;font-size:11px;
+    background:transparent;border:2px solid transparent;color:var(--bone);padding:3px 4px;
   }
-  .tread.running{animation:roll 1.4s linear infinite}
-  @keyframes roll{to{transform:translateX(-20px)}}
+  .card-title:focus{outline:none;border-color:var(--gold);background:var(--night);cursor:text}
+  .add-card{
+    width:100%;box-sizing:border-box;
+    font-family:ui-monospace,Menlo,monospace;font-size:10px;
+    background:transparent;color:var(--dim);border:2px dashed var(--bevel);padding:5px 6px;
+  }
+  .add-card:focus{outline:none;border-style:solid;border-color:var(--gold);color:var(--bone)}
+  .add-card::placeholder{color:var(--dim)}
+  .add-col{
+    flex:0 0 auto;align-self:stretch;cursor:pointer;
+    font-size:9px;color:var(--dim);background:transparent;
+    border:2px dashed var(--bevel);padding:8px 12px;
+  }
+  .add-col:hover{color:var(--gold);border-color:var(--gold)}
 
   footer{max-width:1080px;margin:22px auto 0;font-size:9px;color:var(--dim);line-height:2}
 
   @media (max-width:720px){
-    .stages{grid-template-columns:repeat(6,minmax(96px,1fr));overflow-x:auto}
     .title{font-size:14px}
   }
   @media (prefers-reduced-motion:reduce){

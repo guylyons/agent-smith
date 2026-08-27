@@ -1,0 +1,233 @@
+import { test, expect } from "bun:test";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  defaultBoard,
+  sanitizeBoard,
+  addColumn,
+  renameColumn,
+  setInstruction,
+  deleteColumn,
+  reorderColumn,
+  addCard,
+  renameCard,
+  deleteCard,
+  moveCard,
+  readBoard,
+  writeBoard,
+  type Board,
+} from "../src/lib/board";
+
+function tmp(): string {
+  return mkdtempSync(join(tmpdir(), "board-"));
+}
+
+test("defaultBoard seeds four columns and no cards", () => {
+  const b = defaultBoard();
+  expect(b.columns.map((c) => c.name)).toEqual(["Backlog", "In Progress", "Review", "Done"]);
+  expect(b.cards).toEqual([]);
+  // The Done column carries an example instruction so the format documents itself.
+  expect(b.columns[3]!.instruction).toContain("worktree");
+});
+
+test("defaultBoard column ids are unique", () => {
+  const ids = defaultBoard().columns.map((c) => c.id);
+  expect(new Set(ids).size).toBe(ids.length);
+});
+
+test("addColumn appends a column with a unique id and empty instruction", () => {
+  const b = addColumn(defaultBoard(), "Blocked");
+  const col = b.columns.at(-1)!;
+  expect(b.columns).toHaveLength(5);
+  expect(col.name).toBe("Blocked");
+  expect(col.instruction).toBe("");
+  expect(col.id).toBeTruthy();
+  expect(new Set(b.columns.map((c) => c.id)).size).toBe(5);
+});
+
+test("addColumn does not mutate the input board", () => {
+  const before = defaultBoard();
+  addColumn(before, "Blocked");
+  expect(before.columns).toHaveLength(4);
+});
+
+test("renameColumn changes only the named column", () => {
+  const b0 = defaultBoard();
+  const id = b0.columns[0]!.id;
+  const b = renameColumn(b0, id, "Icebox");
+  expect(b.columns[0]!.name).toBe("Icebox");
+  expect(b.columns[1]!.name).toBe("In Progress");
+});
+
+test("setInstruction sets a column's instruction", () => {
+  const b0 = defaultBoard();
+  const id = b0.columns[0]!.id;
+  const b = setInstruction(b0, id, "Pick the top ticket and start.");
+  expect(b.columns[0]!.instruction).toBe("Pick the top ticket and start.");
+});
+
+test("deleteColumn removes the column and its cards", () => {
+  let b = defaultBoard();
+  const target = b.columns[0]!.id;
+  const keep = b.columns[1]!.id;
+  b = addCard(b, target, "in target");
+  b = addCard(b, keep, "in keep");
+  b = deleteColumn(b, target);
+  expect(b.columns.map((c) => c.id)).not.toContain(target);
+  expect(b.cards.map((c) => c.title)).toEqual(["in keep"]);
+});
+
+test("reorderColumn moves a column to a new index", () => {
+  const b0 = defaultBoard(); // Backlog, In Progress, Review, Done
+  const done = b0.columns[3]!.id;
+  const b = reorderColumn(b0, done, 0);
+  expect(b.columns.map((c) => c.name)).toEqual(["Done", "Backlog", "In Progress", "Review"]);
+});
+
+test("reorderColumn clamps an out-of-range index to the end", () => {
+  const b0 = defaultBoard();
+  const backlog = b0.columns[0]!.id;
+  const b = reorderColumn(b0, backlog, 99);
+  expect(b.columns.map((c) => c.name)).toEqual(["In Progress", "Review", "Done", "Backlog"]);
+});
+
+test("addCard adds a card to a column with a unique id", () => {
+  const b0 = defaultBoard();
+  const col = b0.columns[0]!.id;
+  const b = addCard(b0, col, "Fix login bug");
+  const card = b.cards.at(-1)!;
+  expect(card.title).toBe("Fix login bug");
+  expect(card.columnId).toBe(col);
+  expect(card.id).toBeTruthy();
+});
+
+test("addCard to an unknown column is a no-op", () => {
+  const b = addCard(defaultBoard(), "nope", "orphan");
+  expect(b.cards).toHaveLength(0);
+});
+
+test("renameCard changes only the named card", () => {
+  let b = defaultBoard();
+  const col = b.columns[0]!.id;
+  b = addCard(b, col, "old");
+  const id = b.cards[0]!.id;
+  b = renameCard(b, id, "new");
+  expect(b.cards[0]!.title).toBe("new");
+});
+
+test("deleteCard removes the card", () => {
+  let b = defaultBoard();
+  const col = b.columns[0]!.id;
+  b = addCard(b, col, "doomed");
+  const id = b.cards[0]!.id;
+  b = deleteCard(b, id);
+  expect(b.cards).toHaveLength(0);
+});
+
+test("moveCard moves a card to another column, appended at the end", () => {
+  let b = defaultBoard();
+  const from = b.columns[0]!.id;
+  const to = b.columns[1]!.id;
+  b = addCard(b, to, "already there");
+  b = addCard(b, from, "mover");
+  const id = b.cards.find((c) => c.title === "mover")!.id;
+  b = moveCard(b, id, to);
+  const inTo = b.cards.filter((c) => c.columnId === to).map((c) => c.title);
+  expect(inTo).toEqual(["already there", "mover"]);
+});
+
+test("moveCard can insert at a specific index within the target column", () => {
+  let b = defaultBoard();
+  const col = b.columns[0]!.id;
+  b = addCard(b, col, "a");
+  b = addCard(b, col, "b");
+  b = addCard(b, col, "c");
+  const c = b.cards.find((x) => x.title === "c")!.id;
+  b = moveCard(b, c, col, 0);
+  expect(b.cards.filter((x) => x.columnId === col).map((x) => x.title)).toEqual(["c", "a", "b"]);
+});
+
+test("moveCard to an unknown column is a no-op", () => {
+  let b = defaultBoard();
+  const col = b.columns[0]!.id;
+  b = addCard(b, col, "stay");
+  const id = b.cards[0]!.id;
+  b = moveCard(b, id, "nope");
+  expect(b.cards[0]!.columnId).toBe(col);
+});
+
+test("sanitizeBoard returns the default board for non-object input", () => {
+  expect(sanitizeBoard(null)).toEqual(defaultBoard());
+  expect(sanitizeBoard("garbage")).toEqual(defaultBoard());
+  expect(sanitizeBoard(42)).toEqual(defaultBoard());
+});
+
+test("sanitizeBoard falls back to default when there are no valid columns", () => {
+  expect(sanitizeBoard({ columns: [], cards: [] })).toEqual(defaultBoard());
+  expect(sanitizeBoard({ columns: [{ id: 1 }], cards: [] })).toEqual(defaultBoard());
+});
+
+test("sanitizeBoard keeps valid columns and coerces missing fields", () => {
+  const b = sanitizeBoard({ columns: [{ id: "c1", name: "Todo" }], cards: [] });
+  expect(b.columns).toEqual([{ id: "c1", name: "Todo", instruction: "" }]);
+});
+
+test("sanitizeBoard drops cards that reference an unknown column", () => {
+  const b = sanitizeBoard({
+    columns: [{ id: "c1", name: "Todo", instruction: "" }],
+    cards: [
+      { id: "k1", title: "keep", columnId: "c1" },
+      { id: "k2", title: "orphan", columnId: "ghost" },
+    ],
+  });
+  expect(b.cards).toEqual([{ id: "k1", title: "keep", columnId: "c1" }]);
+});
+
+test("sanitizeBoard drops malformed cards", () => {
+  const b = sanitizeBoard({
+    columns: [{ id: "c1", name: "Todo", instruction: "" }],
+    cards: [{ id: "k1", columnId: "c1" }, "junk", { title: "no id", columnId: "c1" }],
+  });
+  expect(b.cards).toEqual([]);
+});
+
+test("sanitizeBoard drops duplicate column and card ids", () => {
+  const b = sanitizeBoard({
+    columns: [
+      { id: "c1", name: "A", instruction: "" },
+      { id: "c1", name: "dup", instruction: "" },
+    ],
+    cards: [
+      { id: "k1", title: "one", columnId: "c1" },
+      { id: "k1", title: "dup", columnId: "c1" },
+    ],
+  });
+  expect(b.columns).toEqual([{ id: "c1", name: "A", instruction: "" }]);
+  expect(b.cards).toEqual([{ id: "k1", title: "one", columnId: "c1" }]);
+});
+
+test("readBoard returns the default board when the file is missing", () => {
+  expect(readBoard(tmp())).toEqual(defaultBoard());
+});
+
+test("readBoard returns the default board when the file is corrupt", () => {
+  const dir = tmp();
+  writeFileSync(join(dir, ".line.json"), "{not json");
+  expect(readBoard(dir)).toEqual(defaultBoard());
+});
+
+test("writeBoard then readBoard round-trips the board", () => {
+  const dir = tmp();
+  let b = defaultBoard();
+  b = addCard(b, b.columns[0]!.id, "round trip");
+  writeBoard(dir, b);
+  expect(readBoard(dir)).toEqual(b);
+});
+
+test("writeBoard persists a version field on disk", () => {
+  const dir = tmp();
+  writeBoard(dir, defaultBoard());
+  const raw = JSON.parse(readFileSync(join(dir, ".line.json"), "utf8")) as { version?: number };
+  expect(raw.version).toBe(2);
+});

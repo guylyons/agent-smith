@@ -52,7 +52,7 @@ export function App() {
       <button className="settings-btn" title="Settings" onClick={() => setSettingsOpen(true)}>⚙</button>
       <Header snap={snap} onNewAgent={() => setNewAgentOpen(true)} />
       <Crew agents={snap.agents} onOpen={setSelectedId} />
-      <TheLine line={snap.line} onOpen={setSelectedId} />
+      <TheLine board={snap.board} />
       {selected && selected.sessionId === selectedId && (
         <ConversationDrawer agent={selected} ended={ended} onClose={() => setSelectedId(null)} />
       )}

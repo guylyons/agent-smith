@@ -1,6 +1,7 @@
 // Send a command to the server about a real session. Errors surface as toasts,
 // never blocking dialogs. Confirmation/rename UX lives in the components.
 import { toast } from "./toast";
+import type { Board } from "../lib/board";
 
 type Result = { ok: boolean; error?: string; path?: string };
 
@@ -43,11 +44,11 @@ export function setSprite(sessionId: string, palette: number, gear: string, body
   void act("sprite", { sessionId, palette, gear, body });
 }
 
-/** Designate where a crate sits on THE LINE. "review"/"merged" pin it there;
- *  "done" (or any live stage) clears your designation. Persisted server-side so
- *  agents can read it. */
-export function setLineStage(key: string, stage: "done" | "review" | "merged", label?: string, sessionId?: string): void {
-  void act("line-stage", { key, stage, label, sessionId });
+/** Persist the whole kanban board (THE LINE). The client owns board edits and
+ *  sends the full board; the server sanitizes and stores it to `.line.json`, which
+ *  any Claude session can read. */
+export function updateBoard(board: Board): void {
+  void act("board", { board });
 }
 
 export function sendPromptTo(sessionId: string, text: string): Promise<boolean> {
