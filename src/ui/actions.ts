@@ -1,6 +1,7 @@
 // Send a command to the server about a real session. Errors surface as toasts,
 // never blocking dialogs. Confirmation/rename UX lives in the components.
 import { toast } from "./toast";
+import { playSubmit } from "./sounds";
 import type { Board } from "../lib/board";
 
 type Result = { ok: boolean; error?: string; path?: string };
@@ -52,6 +53,9 @@ export function updateBoard(board: Board): void {
 }
 
 export function sendPromptTo(sessionId: string, text: string): Promise<boolean> {
+  // Immediate audible feedback for the user's send (a direct gesture, so it's
+  // always on — not gated by the alerts toggle).
+  playSubmit();
   return act("prompt", { sessionId, text });
 }
 
@@ -79,6 +83,7 @@ export async function uploadImage(file: File): Promise<string | null> {
  *  `opts.model` and `opts.permissionMode` are forwarded to the server, which
  *  allowlist-checks them again before building the launch command. */
 export async function spawnAgent(cwd: string, task: string, opts?: { model?: string; permissionMode?: string; worktree?: string; persona?: string }): Promise<boolean> {
+  playSubmit();
   const r = await post("spawn", { cwd, text: task, model: opts?.model, permissionMode: opts?.permissionMode, worktree: opts?.worktree, persona: opts?.persona });
   if (!r.ok) toast(r.error ?? "could not launch");
   return r.ok;
