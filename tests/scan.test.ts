@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { mergeForWrite, scanLiveSessions, freshTranscripts, chooseLive, isEphemeralCwd } from "../src/scan";
+import { mergeForWrite, scanLiveSessions, freshTranscripts, chooseLive, isEphemeralCwd, type GhosttyTerminal } from "../src/scan";
 import type { AgentStatus } from "../src/schema";
 import { mkdirSync, writeFileSync, rmSync, readFileSync, utimesSync, existsSync } from "node:fs";
 import { join } from "node:path";
@@ -20,6 +20,11 @@ const S = (o: Partial<AgentStatus>): AgentStatus => ({
   sessionId: "s", name: "A", role: "r", ticket: "#1", state: "working",
   doing: "x", cwd: "/", branch: "b", updatedAt: 0, ...o,
 });
+
+// Ghostty terminal list "unavailable" -- tests below exercise scanLiveSessions'
+// process-count path deterministically, independent of whatever Ghostty windows
+// happen to be open on the machine running the test.
+const NO_GHOSTTY: { terminals: GhosttyTerminal[]; ok: boolean } = { terminals: [], ok: false };
 
 test("mergeForWrite: writes the derived status when nothing exists", () => {
   const derived = S({ state: "idle" });
@@ -77,7 +82,7 @@ test("scanLiveSessions writes a status file per fresh session, keyed by sessionI
     { type: "assistant", sessionId: "sess1", cwd: "/repo", gitBranch: "feature/4412-card", message: { content: [{ type: "tool_use", name: "Edit", input: { file_path: "/repo/card.twig" } }] } },
   ], 30, now);
   const counts = { counts: new Map([["/repo", 1]]), ok: true };
-  const n = await scanLiveSessions(now, 15 * 60_000, counts);
+  const n = await scanLiveSessions(now, 15 * 60_000, counts, NO_GHOSTTY);
   expect(n).toBe(1);
   const written = JSON.parse(readFileSync(join(status, "sess1.json"), "utf8"));
   expect(written.sessionId).toBe("sess1");
@@ -95,7 +100,7 @@ test("scanLiveSessions keeps a fresh permission prompt alive without downgrading
   ], 30, now);
   // a hook already marked it needs-you (permission) a while ago
   writeFileSync(join(status, "sess2.json"), JSON.stringify(S({ sessionId: "sess2", state: "waiting", waitingReason: "permission", updatedAt: now - 500_000 })));
-  await scanLiveSessions(now, 15 * 60_000, { counts: new Map([["/repo", 1]]), ok: true });
+  await scanLiveSessions(now, 15 * 60_000, { counts: new Map([["/repo", 1]]), ok: true }, NO_GHOSTTY);
   const after = JSON.parse(readFileSync(join(status, "sess2.json"), "utf8"));
   expect(after.state).toBe("waiting");
   expect(after.waitingReason).toBe("permission");
@@ -137,6 +142,67 @@ test("chooseLive falls back to all non-ephemeral when process info is unavailabl
   expect(chosen.map((c) => c.sessionId)).toEqual(["a"]);
 });
 
+// A candidate with a title (mirrors ghostty.ts targeting: title equals/ends-with a
+// Ghostty terminal's tab name).
+const CTitle = (sid: string, cwd: string, mtime: number, title: string) => ({ derived: S({ sessionId: sid, cwd, title }), mtime });
+const T = (cwd: string, name: string): GhosttyTerminal => ({ cwd, name });
+
+test("chooseLive: 3 candidates in one cwd but only 1 matching Ghostty terminal title -> only that 1 is chosen", () => {
+  const cands = [
+    CTitle("orphan1", "/repo/a", 300, "Some other closed tab"),
+    CTitle("real", "/repo/a", 100, "Brand color background variables"),
+    CTitle("orphan2", "/repo/a", 200, "Yet another stale session"),
+  ];
+  // ps still reports 3 running processes in this cwd (the phantom bug), but only
+  // one Ghostty terminal is actually open there.
+  const counts = new Map([["/repo/a", 3]]);
+  const ghostty = { terminals: [T("/repo/a", "✳ Brand color background variables")], ok: true };
+  const chosen = chooseLive(cands, counts, true, ghostty);
+  expect(chosen.map((c) => c.sessionId)).toEqual(["real"]);
+});
+
+test("chooseLive: sessions matched by title across two cwds", () => {
+  const cands = [
+    CTitle("a1", "/repo/a", 100, "Cross-site header mobile nav sizing"),
+    CTitle("a2", "/repo/a", 200, "Primary nav menu panels links"),
+    CTitle("b1", "/repo/b", 100, "MHO-Drupal ticket review"),
+  ];
+  const counts = new Map([["/repo/a", 2], ["/repo/b", 1]]);
+  const ghostty = {
+    terminals: [
+      T("/repo/a", "✳ Cross-site header mobile nav sizing"),
+      T("/repo/a", "✳ Primary nav menu panels links"),
+      T("/repo/b", "✳ MHO-Drupal ticket review"),
+    ],
+    ok: true,
+  };
+  const chosen = chooseLive(cands, counts, true, ghostty).map((c) => c.sessionId).sort();
+  expect(chosen).toEqual(["a1", "a2", "b1"]);
+});
+
+test("chooseLive: osascript-unavailable fallback still returns process-capped sessions (doesn't blank)", () => {
+  const cands = [
+    C("old", "/repo/a", 100),
+    C("new", "/repo/a", 200),
+  ];
+  const counts = new Map([["/repo/a", 1]]);
+  // Ghostty query failed (osascript unavailable / Ghostty not running).
+  const ghostty = { terminals: [] as GhosttyTerminal[], ok: false };
+  const chosen = chooseLive(cands, counts, true, ghostty);
+  expect(chosen.map((c) => c.sessionId)).toEqual(["new"]); // process-count cap, newest wins
+});
+
+test("chooseLive: with Ghostty available, an untitled candidate falls back to remaining-terminal-count cap", () => {
+  const cands = [
+    C("older", "/repo/a", 100),
+    C("newer", "/repo/a", 200),
+  ];
+  const counts = new Map([["/repo/a", 2]]);
+  const ghostty = { terminals: [T("/repo/a", "~/repo/a")], ok: true }; // 1 plain, untitled terminal open
+  const chosen = chooseLive(cands, counts, true, ghostty);
+  expect(chosen.map((c) => c.sessionId)).toEqual(["newer"]);
+});
+
 test("scanLiveSessions removes scanner-written phantoms but keeps hook-owned files", async () => {
   reset();
   const now = 40_000_000;
@@ -147,7 +213,7 @@ test("scanLiveSessions removes scanner-written phantoms but keeps hook-owned fil
   writeFileSync(join(status, "phantom.json"), JSON.stringify(S({ sessionId: "phantom", cwd: "/gone" })));
   // a hook-owned session (has pid) not in this scan — must be preserved
   writeFileSync(join(status, "hooked.json"), JSON.stringify(S({ sessionId: "hooked", cwd: "/elsewhere", pid: 1234 })));
-  await scanLiveSessions(now, 15 * 60_000, { counts: new Map([["/repo", 1]]), ok: true });
+  await scanLiveSessions(now, 15 * 60_000, { counts: new Map([["/repo", 1]]), ok: true }, NO_GHOSTTY);
   expect(existsSync(join(status, "live1.json"))).toBe(true);
   expect(existsSync(join(status, "phantom.json"))).toBe(false); // removed
   expect(existsSync(join(status, "hooked.json"))).toBe(true);   // hook-owned, kept
