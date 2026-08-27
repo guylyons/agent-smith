@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentStatus } from "../schema";
 import type { Board, Card } from "../lib/board";
-import { renameCard, setCardDescription, assignCard, addComment, deleteComment, cardTaskText } from "../lib/board";
+import { renameCard, setCardDescription, assignCard, addComment, deleteComment, cardTaskText, commentNotifyText } from "../lib/board";
 import { sendPromptTo } from "./actions";
 import { toast } from "./toast";
 
@@ -35,6 +35,23 @@ export function CardModal({
     void sendPromptTo(assigned.id, text);
     mutate((b) => addComment(b, card.id, ME, `Sent task to ${assigned.name}.`));
     toast(`Sent to ${assigned.name}`);
+  }
+
+  // Post a comment, and — since every comment is meant for whoever's on the
+  // card — deliver it to the assigned agent so it's not left waiting on a note
+  // it can't see. The comment always saves; delivery only happens when the
+  // assignee is a running agent, and either outcome is toasted so it's never
+  // ambiguous whether the note reached anyone. A live send also pulses that
+  // agent's crew card green (see sendPromptTo).
+  function postComment(text: string) {
+    mutate((b) => addComment(b, card.id, ME, text));
+    if (assigned && assignedIsLive) {
+      const msg = commentNotifyText(board, card.id, text);
+      if (msg) void sendPromptTo(assigned.id, msg);
+      toast(`Notified ${assigned.name}`);
+    } else {
+      toast("No running agent assigned — comment saved, not delivered");
+    }
   }
 
   // Spawn a fresh agent seeded with this card's task (persona/model/worktree
@@ -131,7 +148,7 @@ export function CardModal({
               ))}
               {!comments.length && <p className="cardmodal-empty">No comments yet.</p>}
             </div>
-            <CommentComposer onPost={(text) => mutate((b) => addComment(b, card.id, ME, text))} />
+            <CommentComposer onPost={postComment} />
           </div>
         </div>
       </div>

@@ -19,6 +19,7 @@ import {
   addComment,
   deleteComment,
   cardTaskText,
+  commentNotifyText,
   readBoard,
   writeBoard,
   type Board,
@@ -362,4 +363,40 @@ test("cardTaskText includes the instruction but skips an empty description", () 
 
 test("cardTaskText returns empty string for an unknown card", () => {
   expect(cardTaskText(defaultBoard(), "nope")).toBe("");
+});
+
+// ---- commentNotifyText: the message pushed to a card's assigned agent ------
+
+test("commentNotifyText labels the comment with the card title", () => {
+  let b = defaultBoard();
+  b = addCard(b, b.columns[0]!.id, "Fix login bug");
+  const id = b.cards[0]!.id;
+  expect(commentNotifyText(b, id, "please cover the SSO case")).toBe(
+    '💬 New comment on "Fix login bug":\nplease cover the SSO case',
+  );
+});
+
+test("commentNotifyText trims the comment body", () => {
+  let b = defaultBoard();
+  b = addCard(b, b.columns[0]!.id, "Card A");
+  const id = b.cards[0]!.id;
+  expect(commentNotifyText(b, id, "  hi  ")).toBe('💬 New comment on "Card A":\nhi');
+});
+
+test("commentNotifyText returns empty string for a blank comment", () => {
+  let b = defaultBoard();
+  b = addCard(b, b.columns[0]!.id, "Card A");
+  expect(commentNotifyText(b, b.cards[0]!.id, "   ")).toBe("");
+});
+
+test("commentNotifyText returns empty string for an unknown card", () => {
+  expect(commentNotifyText(defaultBoard(), "nope", "hello")).toBe("");
+});
+
+test("commentNotifyText falls back to a placeholder for an untitled card", () => {
+  let b = defaultBoard();
+  b = addCard(b, b.columns[0]!.id, "temp");
+  const id = b.cards[0]!.id;
+  b = renameCard(b, id, "   ");
+  expect(commentNotifyText(b, id, "note")).toBe('💬 New comment on "(untitled card)":\nnote');
 });

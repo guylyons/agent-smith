@@ -145,6 +145,19 @@ export function cardTaskText(board: Board, id: string): string {
     .join("\n\n");
 }
 
+/** The message delivered to a card's assigned agent when a human posts a comment
+ *  on it: a header line naming the card so the agent can correlate the note to
+ *  the ticket, then the comment body. Returns "" if the comment is blank or the
+ *  card is unknown, so callers can skip an empty send. */
+export function commentNotifyText(board: Board, id: string, text: string): string {
+  const body = text.trim();
+  if (!body) return "";
+  const card = board.cards.find((k) => k.id === id);
+  if (!card) return "";
+  const title = card.title.trim() || "(untitled card)";
+  return `💬 New comment on "${title}":\n${body}`;
+}
+
 /** Move a card into `toColumnId`. Without `toIndex` it appends; with one it
  *  inserts at that position among the target column's cards. No-op if the card
  *  or the target column is unknown. */
