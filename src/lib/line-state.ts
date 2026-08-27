@@ -17,7 +17,19 @@ function file(dir: string): string {
 export function readLineState(dir: string): LineState {
   try {
     const o = JSON.parse(readFileSync(file(dir), "utf8"));
-    return o && typeof o === "object" ? (o as LineState) : {};
+    if (!o || typeof o !== "object" || Array.isArray(o)) return {};
+    // Validate every entry — the file is documented as one any Claude session may
+    // write, so a bad stage/label must be dropped here rather than crash the
+    // snapshot build (buildSnapshot indexes byStage.get(stage) without a guard).
+    const out: LineState = {};
+    for (const [key, v] of Object.entries(o as Record<string, unknown>)) {
+      if (!v || typeof v !== "object") continue;
+      const d = v as Record<string, unknown>;
+      if ((d.stage === "review" || d.stage === "merged") && typeof d.label === "string") {
+        out[key] = { stage: d.stage, label: d.label, sessionId: typeof d.sessionId === "string" ? d.sessionId : undefined };
+      }
+    }
+    return out;
   } catch {
     return {}; // missing or corrupt — no designations
   }

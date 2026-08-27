@@ -13,7 +13,7 @@ function file(dir: string): string {
 export function readOverrides(dir: string): Overrides {
   try {
     const o = JSON.parse(readFileSync(file(dir), "utf8"));
-    return o && typeof o === "object" ? (o as Overrides) : {};
+    return o && typeof o === "object" && !Array.isArray(o) ? (o as Overrides) : {};
   } catch {
     return {}; // missing or corrupt — no overrides
   }
