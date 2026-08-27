@@ -8,9 +8,13 @@ function repoName(cwd: string): string {
   return parts[parts.length - 1] ?? cwd;
 }
 
-export function NewAgentModal({ recentFolders, onClose }: { recentFolders: string[]; onClose: () => void }) {
-  const [folder, setFolder] = useState(recentFolders[0] ?? "");
-  const [task, setTask] = useState("");
+export function NewAgentModal({
+  recentFolders, onClose, initialTask = "", initialFolder,
+}: {
+  recentFolders: string[]; onClose: () => void; initialTask?: string; initialFolder?: string;
+}) {
+  const [folder, setFolder] = useState(initialFolder ?? recentFolders[0] ?? "");
+  const [task, setTask] = useState(initialTask);
   const [model, setModel] = useState("");
   const [permissionMode, setPermissionMode] = useState("");
   const [worktree, setWorktree] = useState("");

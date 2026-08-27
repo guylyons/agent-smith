@@ -103,29 +103,42 @@ read and act on.
   delete (with its cards), `+ COLUMN` to add one. Each column has an instruction
   field, e.g. _"Once done, ensure the worktree is clean and committed, then share
   a report in the ticket."_
-- **Cards** — type in `+ add card` to add one, click a title to rename, drag a
-  card to any column, `✕` to delete. Cards are free-form (a title of your
-  choosing — a ticket number, a task, a note).
+- **Cards** — type in `+ add card` to add one, drag a card to any column, `✕` to
+  delete. **Click a card** to open its detail modal: edit the title and a fuller
+  description, set an assignee, and hold a comment thread.
+- **Assign a card to an agent** — in the card's detail modal, the **ASSIGNEE**
+  picker lists the live agent sessions; choosing one records it on the card (kept
+  visible, marked _(ended)_, even after that session closes).
+  - **▸ SEND TASK** sends the assigned agent the card's task — its **title +
+    description + column instruction**, combined — and drops a "Sent task to …"
+    note in the card's comment thread.
+  - **+ NEW AGENT FOR THIS CARD** opens the New Agent modal pre-filled with that
+    same combined task, so you can launch a fresh session (persona, model,
+    worktree) to work it.
 
 A fresh board starts with `Backlog · In Progress · Review · Done`; reshape it
 however you like.
 
 The whole board is stored in `~/.agent-status/.line.json` so it survives
 restarts **and is readable by any agent** — that's how a session becomes aware
-of the stages and what each one expects of it. The client owns edits and writes
-the full board; the server sanitizes it before saving.
+of the stages, what each one expects of it, and which cards it's been assigned.
+The client owns edits and writes the full board; the server sanitizes it before
+saving.
 
 ```jsonc
 // ~/.agent-status/.line.json
 {
-  "version": 2,
+  "version": 3,
   "columns": [
     { "id": "backlog", "name": "Backlog", "instruction": "" },
     { "id": "done", "name": "Done",
       "instruction": "Once done, ensure the worktree is clean and committed, then share a report in the ticket." }
   ],
   "cards": [
-    { "id": "card_1a2b3c4d", "title": "#123 fix login bug", "columnId": "backlog" }
+    { "id": "card_1a2b3c4d", "title": "#123 fix login bug", "columnId": "backlog",
+      "description": "Users are locked out after a password reset.",
+      "assignee": { "id": "<sessionId>", "name": "NOVA" },   // a live agent session
+      "comments": [ { "id": "cmt_9f8e", "author": "You", "text": "Sent task to NOVA.", "at": 1787840000000 } ] }
   ]
 }
 ```

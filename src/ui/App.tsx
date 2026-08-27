@@ -16,7 +16,8 @@ import type { AgentStatus } from "../schema";
 export function App() {
   const snap = useSnapshot();
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [newAgentOpen, setNewAgentOpen] = useState(false);
+  // null = closed; {} = blank; {task} = seeded from a card's "new agent for this card"
+  const [spawnSeed, setSpawnSeed] = useState<{ task?: string } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [alertsEnabled, setAlertsEnabled] = useState(false);
   const recentFolders = [...new Set(snap.agents.map((a) => a.cwd).filter(Boolean))];
@@ -50,13 +51,19 @@ export function App() {
       <Backdrop />
       <Crt />
       <button className="settings-btn" title="Settings" onClick={() => setSettingsOpen(true)}>⚙</button>
-      <Header snap={snap} onNewAgent={() => setNewAgentOpen(true)} />
+      <Header snap={snap} onNewAgent={() => setSpawnSeed({})} />
       <Crew agents={snap.agents} onOpen={setSelectedId} />
-      <TheLine board={snap.board} agents={snap.agents} />
+      <TheLine board={snap.board} agents={snap.agents} onSpawnForCard={(task) => setSpawnSeed({ task })} />
       {selected && selected.sessionId === selectedId && (
         <ConversationDrawer agent={selected} ended={ended} onClose={() => setSelectedId(null)} />
       )}
-      {newAgentOpen && <NewAgentModal recentFolders={recentFolders} onClose={() => setNewAgentOpen(false)} />}
+      {spawnSeed && (
+        <NewAgentModal
+          recentFolders={recentFolders}
+          initialTask={spawnSeed.task}
+          onClose={() => setSpawnSeed(null)}
+        />
+      )}
       {settingsOpen && <SettingsPanel alertsEnabled={alertsEnabled} onToggleAlerts={toggleAlerts} onClose={() => setSettingsOpen(false)} />}
       <Toaster />
       <Notifier snap={snap} enabled={alertsEnabled} />

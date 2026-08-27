@@ -131,6 +131,20 @@ export function deleteComment(board: Board, id: string, commentId: string): Boar
   }));
 }
 
+/** The task text handed to an agent when a card is assigned/sent: the card
+ *  title, then its description, then its column's instruction — each on its own
+ *  block, empties skipped. So a card in a column instructed "start a worktree,
+ *  TDD" arrives as one combined task. Empty string for an unknown card. */
+export function cardTaskText(board: Board, id: string): string {
+  const card = board.cards.find((k) => k.id === id);
+  if (!card) return "";
+  const instr = board.columns.find((c) => c.id === card.columnId)?.instruction ?? "";
+  return [card.title, card.description ?? "", instr]
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 /** Move a card into `toColumnId`. Without `toIndex` it appends; with one it
  *  inserts at that position among the target column's cards. No-op if the card
  *  or the target column is unknown. */

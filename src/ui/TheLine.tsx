@@ -21,7 +21,11 @@ type Mutate = (fn: (b: Board) => Board) => void;
 // snapshot); every edit applies a PURE op via a functional update — so rapid
 // edits build on each other instead of clobbering — and posts the result to the
 // server, which persists it and echoes it back over SSE.
-export function TheLine({ board: incoming, agents }: { board: Board; agents: AgentStatus[] }) {
+export function TheLine({
+  board: incoming, agents, onSpawnForCard,
+}: {
+  board: Board; agents: AgentStatus[]; onSpawnForCard: (task: string) => void;
+}) {
   const [board, setBoard] = useState(incoming);
   const [addingCol, setAddingCol] = useState(false);
   const [openCardId, setOpenCardId] = useState<string | null>(null);
@@ -66,10 +70,12 @@ export function TheLine({ board: incoming, agents }: { board: Board; agents: Age
 
       {openCard && (
         <CardModal
+          board={board}
           card={openCard}
           columnName={openColumn?.name ?? ""}
           agents={agents}
           mutate={mutate}
+          onSpawnForCard={onSpawnForCard}
           onClose={() => setOpenCardId(null)}
         />
       )}
