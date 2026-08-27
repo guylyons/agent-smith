@@ -13,7 +13,7 @@ import type { AgentStatus } from "./schema";
 import { parseStatus } from "./schema";
 import { ensureStatusDir } from "./lib/paths";
 import { deriveStatusFromTranscript } from "./lib/transcript";
-import { parseConversation, findPendingQuestion, type ChatMessage, type PendingQuestion } from "./lib/conversation";
+import { parseConversation, findPendingQuestion, findBlockingTool, type ChatMessage, type PendingQuestion, type BlockingTool } from "./lib/conversation";
 import { deriveSubagent, type Subagent } from "./lib/subagents";
 
 const FRESH_MS = Number(process.env.AGENT_SCAN_FRESH_MS ?? 15 * 60_000);
@@ -140,20 +140,21 @@ async function tailLinesOf(file: string, bytes: number): Promise<string[]> {
 }
 const tailLines = (file: string) => tailLinesOf(file, TAIL_BYTES);
 
-/** Find a session's transcript and parse it into a chat log + any pending question. */
-export async function readConversation(sessionId: string, maxBytes = 512 * 1024): Promise<{ messages: ChatMessage[]; question: PendingQuestion | null }> {
+/** Find a session's transcript and parse it into a chat log, any pending question,
+ *  and whatever tool it is currently blocked on. */
+export async function readConversation(sessionId: string, maxBytes = 512 * 1024): Promise<{ messages: ChatMessage[]; question: PendingQuestion | null; blocked: BlockingTool | null }> {
   const root = projectsDir();
   let projects: import("node:fs").Dirent[];
-  try { projects = await readdir(root, { withFileTypes: true }); } catch { return { messages: [], question: null }; }
+  try { projects = await readdir(root, { withFileTypes: true }); } catch { return { messages: [], question: null, blocked: null }; }
   for (const proj of projects) {
     if (!proj.isDirectory()) continue;
     const file = join(root, proj.name, `${sessionId}.jsonl`);
     try {
       const lines = await tailLinesOf(file, maxBytes);
-      return { messages: parseConversation(lines), question: findPendingQuestion(lines) };
+      return { messages: parseConversation(lines), question: findPendingQuestion(lines), blocked: findBlockingTool(lines) };
     } catch { /* not in this project dir */ }
   }
-  return { messages: [], question: null };
+  return { messages: [], question: null, blocked: null };
 }
 
 /** Count subagents actively writing (mtime < 90s) in a session's subagents dir. */
@@ -243,7 +244,10 @@ export function mergeForWrite(existing: AgentStatus | null, derived: AgentStatus
   if (carried.pid === undefined && existing?.pid !== undefined) carried.pid = existing.pid;
   if (carried.tty === undefined && existing?.tty !== undefined) carried.tty = existing.tty;
 
-  if (existing && existing.waitingReason === "permission") {
+  // A hook-set block on the USER is invisible to the transcript: the session sits
+  // on an unresolved tool_use, which derives as "working". Don't let that
+  // overwrite it. (`question` is excluded — the scanner derives it independently.)
+  if (existing && (existing.waitingReason === "permission" || existing.waitingReason === "plan")) {
     const provenStale = derived.state === "idle" || derived.waitingReason === "question";
     if (!provenStale) return { ...existing, updatedAt: now };
   }

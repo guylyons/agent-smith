@@ -3,7 +3,7 @@ import type { Snapshot } from "../lib/snapshot";
 import { soundTransitions, type PrevState } from "./soundEvents";
 import { playCue } from "./sounds";
 
-function notify(name: string, waitingReason: "permission" | "question" | undefined, doing: string) {
+function notify(name: string, waitingReason: "permission" | "question" | "plan" | undefined, doing: string) {
   try {
     if (typeof Notification === "undefined") return;
     if (Notification.permission !== "granted") return;

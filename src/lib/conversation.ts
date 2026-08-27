@@ -8,37 +8,69 @@ export type QuestionOption = { label: string; description?: string };
 export type Question = { header?: string; question: string; multiSelect: boolean; options: QuestionOption[] };
 export type PendingQuestion = { questions: Question[] };
 
+export type BlockingTool = { name: string; summary: string };
+
+type ToolUse = { id: string; name: string; input?: Record<string, unknown> };
+
+/** One pass over the transcript: every tool_use, and the ids that came back.
+ *  Sidechain (subagent) and meta entries are skipped — they are not this
+ *  session's blocking state. */
+function walkTools(lines: string[]): { resolved: Set<string>; uses: ToolUse[] } {
+  const resolved = new Set<string>();
+  const uses: ToolUse[] = [];
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+    let e: Record<string, unknown>;
+    try { e = JSON.parse(line); } catch { continue; }
+    if (e.isSidechain === true || e.isMeta === true) continue;
+    for (const c of contentArray(e)) {
+      if (c.type === "tool_result" && typeof (c as { tool_use_id?: string }).tool_use_id === "string") {
+        resolved.add((c as { tool_use_id: string }).tool_use_id);
+      }
+      if (c.type === "tool_use" && typeof c.name === "string" && typeof (c as { id?: string }).id === "string") {
+        uses.push({ id: (c as { id: string }).id, name: c.name, input: c.input });
+      }
+    }
+  }
+  return { resolved, uses };
+}
+
 /**
  * Find an AskUserQuestion the session is still waiting on — a tool_use with that
  * name whose tool_use_id has no matching tool_result yet. Lets the dashboard show
  * the options and answer them, instead of forcing the user to the terminal.
  */
 export function findPendingQuestion(lines: string[]): PendingQuestion | null {
-  const resolved = new Set<string>();
-  let last: { id: string; questions: Question[] } | null = null;
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (!line) continue;
-    let e: Record<string, unknown>;
-    try { e = JSON.parse(line); } catch { continue; }
-    for (const c of contentArray(e)) {
-      if (c.type === "tool_result" && typeof (c as { tool_use_id?: string }).tool_use_id === "string") {
-        resolved.add((c as { tool_use_id: string }).tool_use_id);
-      }
-      if (c.type === "tool_use" && c.name === "AskUserQuestion" && typeof (c as { id?: string }).id === "string") {
-        const input = (c as { input?: { questions?: Question[] } }).input;
-        const questions = Array.isArray(input?.questions) ? input!.questions! : [];
-        if (questions.length) last = { id: (c as { id: string }).id, questions };
-      }
-    }
+  const { resolved, uses } = walkTools(lines);
+  let last: ToolUse | null = null;
+  for (const u of uses) {
+    if (u.name !== "AskUserQuestion") continue;
+    const qs = (u.input as { questions?: Question[] } | undefined)?.questions;
+    if (Array.isArray(qs) && qs.length) last = u;
   }
-  if (last && !resolved.has(last.id)) {
-    return {
-      questions: last.questions.map((q) => ({
-        header: q.header, question: q.question, multiSelect: !!q.multiSelect,
-        options: (q.options ?? []).map((o) => ({ label: o.label, description: o.description })),
-      })),
-    };
+  if (!last || resolved.has(last.id)) return null;
+  const questions = (last.input as { questions: Question[] }).questions;
+  return {
+    questions: questions.map((q) => ({
+      header: q.header, question: q.question, multiSelect: !!q.multiSelect,
+      options: (q.options ?? []).map((o) => ({ label: o.label, description: o.description })),
+    })),
+  };
+}
+
+/**
+ * The newest tool_use with no tool_result yet — i.e. what the session is sitting
+ * on right now. This is how the pane can always name what blocks an agent
+ * (a permission prompt, a plan approval, anything future) rather than rendering
+ * an empty panel for everything that isn't an AskUserQuestion.
+ */
+export function findBlockingTool(lines: string[]): BlockingTool | null {
+  const { resolved, uses } = walkTools(lines);
+  for (let i = uses.length - 1; i >= 0; i--) {
+    const u = uses[i];
+    if (resolved.has(u.id)) continue;
+    return { name: u.name, summary: humanizeTool(u.name, u.input) };
   }
   return null;
 }

@@ -107,7 +107,8 @@ export type ChatMessage = { role: "user" | "assistant" | "tool"; text: string };
 export type QuestionOption = { label: string; description?: string };
 export type Question = { header?: string; question: string; multiSelect: boolean; options: QuestionOption[] };
 export type PendingQuestion = { questions: Question[] };
-export type Conversation = { messages: ChatMessage[]; question: PendingQuestion | null };
+export type BlockingTool = { name: string; summary: string };
+export type Conversation = { messages: ChatMessage[]; question: PendingQuestion | null; blocked: BlockingTool | null };
 
 // Returns null on any failure (network error, non-2xx, unparseable body) so a
 // transient blip doesn't blank an open chat. Callers keep their prior state.
@@ -116,7 +117,7 @@ export async function fetchConversation(sessionId: string): Promise<Conversation
     const res = await fetch(`/conversation?sessionId=${encodeURIComponent(sessionId)}`);
     if (!res.ok) return null;
     const body = (await res.json()) as Partial<Conversation>;
-    return { messages: body.messages ?? [], question: body.question ?? null };
+    return { messages: body.messages ?? [], question: body.question ?? null, blocked: body.blocked ?? null };
   } catch {
     return null;
   }

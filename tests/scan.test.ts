@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { mergeForWrite, scanLiveSessions, freshTranscripts, chooseLive, isEphemeralCwd, type GhosttyTerminal } from "../src/scan";
+import { mergeForWrite, scanLiveSessions, freshTranscripts, chooseLive, isEphemeralCwd, readConversation, type GhosttyTerminal } from "../src/scan";
 import type { AgentStatus } from "../src/schema";
 import { mkdirSync, writeFileSync, rmSync, readFileSync, utimesSync, existsSync } from "node:fs";
 import { join } from "node:path";
@@ -83,6 +83,23 @@ test("mergeForWrite: carries hook-set pid/tty forward when the derived status la
   expect(out.state).toBe("working"); // state still tracks the transcript
   expect(out.pid).toBe(4242);        // but the hook's pid/tty survive
   expect(out.tty).toBe("/dev/ttys006");
+});
+
+test("mergeForWrite: a hook-set plan block survives a scanner-derived working", () => {
+  const existing = S({ state: "waiting", waitingReason: "plan", updatedAt: 1000, doing: "waiting on plan approval" });
+  const derived = S({ state: "working", waitingReason: undefined, doing: "exitplanmode" });
+  const out = mergeForWrite(existing, derived, 5000);
+  expect(out.state).toBe("waiting");
+  expect(out.waitingReason).toBe("plan");
+  expect(out.updatedAt).toBe(5000);
+});
+
+test("mergeForWrite: a plan block IS released once the transcript goes idle", () => {
+  const existing = S({ state: "waiting", waitingReason: "plan", updatedAt: 1000, doing: "waiting on plan approval" });
+  const derived = S({ state: "idle", waitingReason: undefined, doing: "idle", updatedAt: 999_999 });
+  const out = mergeForWrite(existing, derived, 5000);
+  expect(out.state).toBe("idle");
+  expect(out.waitingReason).toBeUndefined();
 });
 
 function writeTranscript(proj: string, sid: string, lines: object[], mtimeSecAgo = 0, now = Date.now()) {
@@ -310,4 +327,17 @@ test("scanLiveSessions removes scanner-written phantoms but keeps hook-owned fil
   expect(existsSync(join(status, "live1.json"))).toBe(true);
   expect(existsSync(join(status, "phantom.json"))).toBe(false); // removed
   expect(existsSync(join(status, "hooked.json"))).toBe(true);   // hook-owned, kept
+});
+
+test("readConversation reports the blocking tool", async () => {
+  reset();
+  const dir = join(projects, "-repo");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "sessB.jsonl"), [
+    JSON.stringify({ type: "assistant", sessionId: "sessB", cwd: "/repo", message: { content: [{ type: "text", text: "one moment" }] } }),
+    JSON.stringify({ type: "assistant", sessionId: "sessB", cwd: "/repo", message: { content: [{ type: "tool_use", id: "tu_1", name: "Bash", input: { command: "rm -rf build" } }] } }),
+  ].join("\n"));
+  const conv = await readConversation("sessB");
+  expect(conv.question).toBeNull();
+  expect(conv.blocked).toEqual({ name: "Bash", summary: "running rm -rf build" });
 });

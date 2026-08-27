@@ -38,11 +38,24 @@ export function applyEvent(prev: AgentStatus | null, e: HookEvent, now: number, 
   switch (e.hook_event_name) {
     case "SessionStart":
       return seed(e, now, persona);
-    case "PreToolUse":
+    case "PreToolUse": {
+      // These tools BLOCK on the user. PreToolUse fires the instant they begin,
+      // which is the earliest any signal exists — the transcript scanner would
+      // only notice on its next pass, up to 20s later.
+      const blocking = e.tool_name === "AskUserQuestion"
+        ? { waitingReason: "question" as const, doing: "waiting on your answer" }
+        : e.tool_name === "ExitPlanMode"
+        ? { waitingReason: "plan" as const, doing: "waiting on plan approval" }
+        : null;
+      if (blocking) return { ...base, state: "waiting", ...blocking, updatedAt: now };
       return { ...base, state: "working", waitingReason: undefined,
         doing: humanizeTool(e.tool_name ?? "", e.tool_input), updatedAt: now };
+    }
     case "Notification":
-      return { ...base, state: "waiting", waitingReason: "permission", updatedAt: now };
+      // Also set `doing`: without it the card strands the previous tool's line
+      // ("running rm -rf build") while the session actually sits on a prompt.
+      return { ...base, state: "waiting", waitingReason: "permission",
+        doing: "needs permission", updatedAt: now };
     case "Stop":
       // A finished turn is idle. A genuine question (AskUserQuestion) blocks the
       // turn — it doesn't reach Stop — and the transcript scanner surfaces it as
