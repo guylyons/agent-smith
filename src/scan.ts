@@ -288,25 +288,27 @@ export function chooseLive(
     const untitled = list.filter((c) => !c.derived.title);
 
     const claimed = new Set<number>(); // indices into termsHere already matched
+    const titledOpen: Candidate[] = [];
     for (const c of titled) {
       const title = c.derived.title!;
       const idx = termsHere.findIndex((t, i) => !claimed.has(i) && terminalMatchesTitle(t.name, title));
-      if (idx >= 0) {
-        claimed.add(idx);
-        chosen.push(c.derived);
-      }
+      if (idx >= 0) { claimed.add(idx); titledOpen.push(c); }
       // no matching open terminal -> tab was closed, process is orphaned -> dropped
     }
 
-    // Cap untitled fill by BOTH unclaimed terminals (drops a process whose tab was
-    // closed) AND remaining running-process headroom, n - claimed (drops a phantom:
-    // a tab still open after its claude process exited). Without the process bound a
-    // leftover shell tab in the cwd surfaces an ended session as a live agent.
-    const remaining = Math.min(termsHere.length - claimed.size, n - claimed.size);
-    if (remaining > 0 && untitled.length > 0) {
-      untitled.sort((a, b) => b.mtime - a.mtime);
-      for (const c of untitled.slice(0, remaining)) chosen.push(c.derived);
-    }
+    // Untitled sessions can fill the terminals no title claimed (their tab is open
+    // but bears no recognizable title), newest first.
+    const freeTerms = termsHere.length - claimed.size;
+    untitled.sort((a, b) => b.mtime - a.mtime);
+    const untitledOpen = freeTerms > 0 ? untitled.slice(0, freeTerms) : [];
+
+    // Everything with an open terminal, but never more than n live processes for
+    // this cwd. When a title still lingers on a tab whose process already exited,
+    // its candidate can appear here too; capping at n and keeping the FRESHEST
+    // transcripts drops that stale phantom in favor of the genuinely-live session
+    // (whose transcript is being actively written) rather than hiding the latter.
+    const open = [...titledOpen, ...untitledOpen].sort((a, b) => b.mtime - a.mtime);
+    for (const c of open.slice(0, n)) chosen.push(c.derived);
   }
   return chosen;
 }

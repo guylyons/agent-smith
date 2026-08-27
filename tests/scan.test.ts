@@ -226,6 +226,24 @@ test("chooseLive: an untitled candidate is NOT surfaced when a leftover tab outl
   expect(chosen).toEqual(["marlow"]);
 });
 
+test("chooseLive: a lingering titled tab whose process died does not hide a fresher live session", () => {
+  // n=1 running claude. A dead session's tab still shows its old title (title
+  // lingers after the process exits), and a genuinely-live untitled session is
+  // being actively written (fresher mtime). Capping at n and preferring the
+  // freshest transcript must surface the live one, not the stale phantom.
+  const cands = [
+    CTitle("phantom", "/repo/b", 100, "Old task"), // dead process, title still on its tab
+    C("live", "/repo/b", 200),                      // live session, untitled tab, fresher
+  ];
+  const counts = new Map([["/repo/b", 1]]); // one running claude process
+  const ghostty = {
+    terminals: [T("/repo/b", "◑ Old task"), T("/repo/b", "~/repo/b")],
+    ok: true,
+  };
+  const chosen = chooseLive(cands, counts, true, ghostty).map((c) => c.sessionId);
+  expect(chosen).toEqual(["live"]);
+});
+
 test("scanLiveSessions removes scanner-written phantoms but keeps hook-owned files", async () => {
   reset();
   const now = 40_000_000;
