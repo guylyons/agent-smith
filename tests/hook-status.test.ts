@@ -71,3 +71,49 @@ test("persona survives later events", () => {
   const s2 = applyEvent(s1, { hook_event_name: "Stop", session_id: "s1", cwd: "/repo", branch: start.branch } as any, 3000)!;
   expect(s2.persona).toBe("backend-dev");
 });
+
+test("PreToolUse on AskUserQuestion -> waiting/question immediately", () => {
+  const s0 = applyEvent(null, start as any, 1000)!;
+  const s = applyEvent(s0, {
+    hook_event_name: "PreToolUse", session_id: "s1", cwd: "/repo",
+    branch: start.branch, tool_name: "AskUserQuestion", tool_input: { questions: [] },
+  } as any, 2000)!;
+  expect(s.state).toBe("waiting");
+  expect(s.waitingReason).toBe("question");
+  expect(s.doing).toBe("waiting on your answer");
+});
+
+test("PreToolUse on ExitPlanMode -> waiting/plan immediately", () => {
+  const s0 = applyEvent(null, start as any, 1000)!;
+  const s = applyEvent(s0, {
+    hook_event_name: "PreToolUse", session_id: "s1", cwd: "/repo",
+    branch: start.branch, tool_name: "ExitPlanMode", tool_input: {},
+  } as any, 2000)!;
+  expect(s.state).toBe("waiting");
+  expect(s.waitingReason).toBe("plan");
+  expect(s.doing).toBe("waiting on plan approval");
+});
+
+test("PreToolUse on an ordinary tool is still working (regression)", () => {
+  const s0 = applyEvent(null, start as any, 1000)!;
+  const s = applyEvent(s0, {
+    hook_event_name: "PreToolUse", session_id: "s1", cwd: "/repo",
+    branch: start.branch, tool_name: "Edit", tool_input: { file_path: "/a/card.twig" },
+  } as any, 2000)!;
+  expect(s.state).toBe("working");
+  expect(s.waitingReason).toBeUndefined();
+  expect(s.doing).toBe("editing card.twig");
+});
+
+test("Notification sets doing, not just state (no stale tool line)", () => {
+  const s0 = applyEvent(null, start as any, 1000)!;
+  const busy = applyEvent(s0, {
+    hook_event_name: "PreToolUse", session_id: "s1", cwd: "/repo",
+    branch: start.branch, tool_name: "Bash", tool_input: { command: "rm -rf build" },
+  } as any, 2000)!;
+  const s = applyEvent(busy, {
+    hook_event_name: "Notification", session_id: "s1", cwd: "/repo", branch: start.branch,
+  } as any, 3000)!;
+  expect(s.waitingReason).toBe("permission");
+  expect(s.doing).toBe("needs permission");
+});

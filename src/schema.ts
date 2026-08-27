@@ -6,7 +6,7 @@ export const AgentStatusSchema = z.object({
   role: z.string(),
   ticket: z.string().nullable(),
   state: z.enum(["working", "waiting", "idle"]),
-  waitingReason: z.enum(["permission", "question"]).optional(),
+  waitingReason: z.enum(["permission", "question", "plan"]).optional(),
   doing: z.string(),
   cwd: z.string(),
   branch: z.string().nullable(),
