@@ -1,43 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { Snapshot } from "../lib/snapshot";
-
-// Short two-tone beep, synthesized with WebAudio so we don't ship an audio
-// asset. Best-effort: browsers can block audio without a prior user gesture.
-function playBeep() {
-  try {
-    const Ctx = window.AudioContext || (window as any).webkitAudioContext;
-    if (!Ctx) return;
-    const ctx = new Ctx();
-    const now = ctx.currentTime;
-    const tones = [
-      { freq: 880, start: 0, dur: 0.12 },
-      { freq: 1320, start: 0.13, dur: 0.14 },
-    ];
-    for (const t of tones) {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = "square";
-      osc.frequency.value = t.freq;
-      gain.gain.setValueAtTime(0.0001, now + t.start);
-      gain.gain.exponentialRampToValueAtTime(0.15, now + t.start + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + t.start + t.dur);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(now + t.start);
-      osc.stop(now + t.start + t.dur + 0.02);
-    }
-    // Tear the context down once the tones finish playing.
-    setTimeout(() => {
-      try {
-        ctx.close();
-      } catch {
-        /* ignore */
-      }
-    }, 400);
-  } catch {
-    /* autoplay/AudioContext may be blocked — ignore */
-  }
-}
+import { soundTransitions, type PrevState } from "./soundEvents";
+import { playCue } from "./sounds";
 
 function notify(name: string, waitingReason: "permission" | "question" | undefined, doing: string) {
   try {
@@ -50,30 +14,33 @@ function notify(name: string, waitingReason: "permission" | "question" | undefin
   }
 }
 
-// Fires a desktop notification + beep when an agent transitions into "waiting".
-// Renders nothing — the on/off control lives in the Settings panel (App owns it).
+// Fires sound cues (completion / question / permission) and a desktop
+// notification when agents change state. Renders nothing — the on/off control
+// lives in the Settings panel (App owns it). The which-cue decision is the pure
+// soundTransitions() (see soundEvents.ts); this effect just plays and notifies.
 export function Notifier({ snap, enabled }: { snap: Snapshot; enabled: boolean }) {
-  const prevWaiting = useRef<Map<string, boolean>>(new Map());
+  const prevState = useRef<PrevState>(new Map());
   const primed = useRef(false);
 
   useEffect(() => {
-    const prev = prevWaiting.current;
-    const next = new Map<string, boolean>();
+    const prev = prevState.current;
+    const { cues, next } = soundTransitions(prev, snap.agents, primed.current);
 
-    for (const agent of snap.agents) {
-      const isWaiting = agent.state === "waiting";
-      next.set(agent.sessionId, isWaiting);
+    if (enabled) {
+      for (const cue of cues) playCue(cue);
 
-      if (primed.current && isWaiting && !prev.get(agent.sessionId)) {
-        // Transitioned into waiting since the last snapshot.
-        if (enabled && typeof Notification !== "undefined" && Notification.permission === "granted") {
-          notify(agent.name, agent.waitingReason, agent.doing);
-          playBeep();
+      // Desktop notifications, only for "needs you" (waiting) transitions —
+      // completion is sound-only. Derived from the same prev->current diff.
+      if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+        for (const agent of snap.agents) {
+          if (primed.current && agent.state === "waiting" && prev.get(agent.sessionId) !== "waiting") {
+            notify(agent.name, agent.waitingReason, agent.doing);
+          }
         }
       }
     }
 
-    prevWaiting.current = next;
+    prevState.current = next;
     // Establish the baseline on the first POPULATED snapshot without firing, so
     // we don't alert for every agent that's already waiting on load. The very
     // first snapshot from useSnapshot is the empty placeholder (no agents); if we
