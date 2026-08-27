@@ -7,6 +7,19 @@ export const AgentStatusSchema = z.object({
   ticket: z.string().nullable(),
   state: z.enum(["working", "waiting", "idle"]),
   waitingReason: z.enum(["permission", "question", "plan"]).optional(),
+  // The questions+options of an AskUserQuestion the session is BLOCKED on, captured
+  // by the hook from PreToolUse.tool_input. This is the only live source: Claude Code
+  // does NOT flush a pending AskUserQuestion to the transcript — the entry appears
+  // only once answered, backdated to its creation time — so the transcript scanner
+  // can never see a question while it actually blocks. Cleared when the wait ends.
+  pendingQuestion: z.object({
+    questions: z.array(z.object({
+      header: z.string().optional(),
+      question: z.string(),
+      multiSelect: z.boolean().optional(),
+      options: z.array(z.object({ label: z.string(), description: z.string().optional() })),
+    })),
+  }).optional(),
   doing: z.string(),
   cwd: z.string(),
   branch: z.string().nullable(),

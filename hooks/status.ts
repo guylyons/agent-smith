@@ -33,6 +33,36 @@ function seed(e: HookEvent, now: number, persona?: string): AgentStatus {
   };
 }
 
+/**
+ * Pull the questions+options out of an AskUserQuestion's tool_input so the pane can
+ * render them. This is the ONLY live source for a pending question: Claude Code does
+ * not flush a blocked AskUserQuestion to the transcript (it lands only once answered,
+ * backdated), so the scanner can never see one. Shape-checked defensively — a payload
+ * we don't recognise yields undefined rather than a malformed status file.
+ */
+function parseQuestions(input: Record<string, unknown> | undefined): AgentStatus["pendingQuestion"] {
+  const raw = (input as { questions?: unknown } | undefined)?.questions;
+  if (!Array.isArray(raw)) return undefined;
+  const questions = raw.flatMap((q) => {
+    if (!q || typeof q !== "object") return [];
+    const o = q as Record<string, unknown>;
+    if (typeof o.question !== "string") return [];
+    const opts = Array.isArray(o.options) ? o.options : [];
+    return [{
+      ...(typeof o.header === "string" ? { header: o.header } : {}),
+      question: o.question,
+      ...(typeof o.multiSelect === "boolean" ? { multiSelect: o.multiSelect } : {}),
+      options: opts.flatMap((x) => {
+        if (!x || typeof x !== "object") return [];
+        const oo = x as Record<string, unknown>;
+        if (typeof oo.label !== "string") return [];
+        return [{ label: oo.label, ...(typeof oo.description === "string" ? { description: oo.description } : {}) }];
+      }),
+    }];
+  });
+  return questions.length ? { questions } : undefined;
+}
+
 export function applyEvent(prev: AgentStatus | null, e: HookEvent, now: number, persona?: string): AgentStatus | null {
   const base = prev ?? seed(e, now, persona);
   switch (e.hook_event_name) {
@@ -43,24 +73,26 @@ export function applyEvent(prev: AgentStatus | null, e: HookEvent, now: number, 
       // which is the earliest any signal exists — the transcript scanner would
       // only notice on its next pass, up to 20s later.
       const blocking = e.tool_name === "AskUserQuestion"
-        ? { waitingReason: "question" as const, doing: "waiting on your answer" }
+        ? { waitingReason: "question" as const, doing: "waiting on your answer",
+            pendingQuestion: parseQuestions(e.tool_input) }
         : e.tool_name === "ExitPlanMode"
-        ? { waitingReason: "plan" as const, doing: "waiting on plan approval" }
+        ? { waitingReason: "plan" as const, doing: "waiting on plan approval",
+            pendingQuestion: undefined }
         : null;
       if (blocking) return { ...base, state: "waiting", ...blocking, updatedAt: now };
-      return { ...base, state: "working", waitingReason: undefined,
+      return { ...base, state: "working", waitingReason: undefined, pendingQuestion: undefined,
         doing: humanizeTool(e.tool_name ?? "", e.tool_input), updatedAt: now };
     }
     case "Notification":
       // Also set `doing`: without it the card strands the previous tool's line
       // ("running rm -rf build") while the session actually sits on a prompt.
       return { ...base, state: "waiting", waitingReason: "permission",
-        doing: "needs permission", updatedAt: now };
+        doing: "needs permission", pendingQuestion: undefined, updatedAt: now };
     case "Stop":
       // A finished turn is idle. A genuine question (AskUserQuestion) blocks the
       // turn — it doesn't reach Stop — and the transcript scanner surfaces it as
       // waiting/question. A rhetorical '?' in the final message is not a question.
-      return { ...base, state: "idle", waitingReason: undefined, updatedAt: now };
+      return { ...base, state: "idle", waitingReason: undefined, pendingQuestion: undefined, updatedAt: now };
     case "SessionEnd":
       return null;
     default:
