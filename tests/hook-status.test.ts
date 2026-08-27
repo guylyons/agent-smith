@@ -45,3 +45,29 @@ test("SessionEnd -> null (delete)", () => {
   const s0 = applyEvent(null, start as any, 1000)!;
   expect(applyEvent(s0, { hook_event_name: "SessionEnd", session_id: "s1", cwd: "/repo", branch: start.branch } as any, 5000)).toBeNull();
 });
+
+test("SessionStart records a persona from the env", () => {
+  const s = applyEvent(null, start as any, 1000, "frontend-ux")!;
+  expect(s.persona).toBe("frontend-ux");
+});
+
+test("no persona when the env var is absent", () => {
+  expect(applyEvent(null, start as any, 1000)!.persona).toBeUndefined();
+  expect(applyEvent(null, start as any, 1000, "")!.persona).toBeUndefined();
+});
+
+test("an invalid persona id is dropped", () => {
+  expect(applyEvent(null, start as any, 1000, "Bad Id!")!.persona).toBeUndefined();
+  expect(applyEvent(null, start as any, 1000, "../escape")!.persona).toBeUndefined();
+});
+
+test("persona survives later events", () => {
+  const s0 = applyEvent(null, start as any, 1000, "backend-dev")!;
+  const s1 = applyEvent(s0, {
+    hook_event_name: "PreToolUse", session_id: "s1", cwd: "/repo",
+    branch: start.branch, tool_name: "Edit", tool_input: { file_path: "/a/x.ts" },
+  } as any, 2000)!;
+  expect(s1.persona).toBe("backend-dev");
+  const s2 = applyEvent(s1, { hook_event_name: "Stop", session_id: "s1", cwd: "/repo", branch: start.branch } as any, 3000)!;
+  expect(s2.persona).toBe("backend-dev");
+});

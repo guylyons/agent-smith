@@ -8,6 +8,10 @@ import { identify } from "../src/lib/identity";
 import { humanizeTool } from "../src/lib/humanize";
 import { ensureStatusDir } from "../src/lib/paths";
 
+// Mirrors PERSONA_ID_RE in src/lib/personas.ts. Duplicated deliberately: the
+// hook stores the id and nothing else, so it never loads the registry.
+const PERSONA_ID_RE = /^[a-z0-9-]{1,64}$/;
+
 export type HookEvent = {
   hook_event_name: string;
   session_id: string;
@@ -17,20 +21,23 @@ export type HookEvent = {
   tool_input?: Record<string, unknown>;
 };
 
-function seed(e: HookEvent, now: number): AgentStatus {
+function seed(e: HookEvent, now: number, persona?: string): AgentStatus {
   const { role, name } = identify(e.session_id, e.branch, e.cwd);
   return {
     sessionId: e.session_id, name, role,
     ticket: parseTicket(e.branch), state: "working",
     doing: "starting up", cwd: e.cwd, branch: e.branch, updatedAt: now,
+    // Set at launch by the dashboard and inherited by this hook from the claude
+    // process. Only the id is stored; the server resolves the rest.
+    ...(persona && PERSONA_ID_RE.test(persona) ? { persona } : {}),
   };
 }
 
-export function applyEvent(prev: AgentStatus | null, e: HookEvent, now: number): AgentStatus | null {
-  const base = prev ?? seed(e, now);
+export function applyEvent(prev: AgentStatus | null, e: HookEvent, now: number, persona?: string): AgentStatus | null {
+  const base = prev ?? seed(e, now, persona);
   switch (e.hook_event_name) {
     case "SessionStart":
-      return seed(e, now);
+      return seed(e, now, persona);
     case "PreToolUse":
       return { ...base, state: "working", waitingReason: undefined,
         doing: humanizeTool(e.tool_name ?? "", e.tool_input), updatedAt: now };
@@ -95,7 +102,7 @@ async function main() {
       prev = null; // corrupt/partial prior status file; treat as fresh
     }
   }
-  const next = applyEvent(prev, e, Date.now());
+  const next = applyEvent(prev, e, Date.now(), process.env.AGENT_PERSONA);
   if (next === null) { rmSync(file, { force: true }); return; }
   const { pid, tty } = resolveProcess();
   if (pid) next.pid = pid;
