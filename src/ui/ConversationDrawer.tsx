@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type DragEvent, type ClipboardEvent } from "react";
 import type { AgentStatus } from "../schema";
 import { Sprite } from "./Sprite";
+import { ModalBackdrop } from "./Backdrop";
 import { SpritePicker } from "./SpritePicker";
 import { renderMarkdown } from "./markdown";
 import {
@@ -79,7 +80,9 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
   useEffect(() => {
     if (tab !== "info") return;
     let alive = true;
-    const load = async () => { const r = await fetchRepo(agent.sessionId); if (alive) setRepo(r); };
+    // Keep the last good repo info on a failed poll (fetchRepo returns null) so a
+    // single dropped request doesn't blank the INFO tab back to "loading repo…".
+    const load = async () => { const r = await fetchRepo(agent.sessionId); if (alive && r) setRepo(r); };
     void load();
     const id = setInterval(load, 4000);
     return () => { alive = false; clearInterval(id); };
@@ -107,6 +110,10 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
     // then the typed message. Paths lead; the text (if any) follows.
     const paths = attachments.map((a) => a.path);
     const outgoing = [...paths, ...(t ? [t] : [])].join("\n");
+    // Remember what we cleared so a failed send can restore it — otherwise the
+    // typed message and attachment chips are gone for good on a server hiccup.
+    const prevText = text;
+    const prevAttachments = attachments;
     setText("");
     setAttachments([]);
     const id = `${Date.now()}-${Math.random()}`;
@@ -116,7 +123,14 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
     const ok = await sendPromptTo(agent.sessionId, outgoing);
     sendingRef.current = false;
     setBusy(false);
-    if (!ok) setPending((p) => p.filter((x) => x.id !== id)); // roll back on failure
+    if (!ok) {
+      setPending((p) => p.filter((x) => x.id !== id)); // roll back the optimistic echo
+      setText((cur) => cur || prevText); // ...and give the user their message back
+      setAttachments((cur) => (cur.length ? cur : prevAttachments));
+    }
+    // Re-enabling the textarea after `busy` doesn't restore focus on its own, so
+    // hand it back — otherwise the next keystrokes after every send go nowhere.
+    taRef.current?.focus();
   }
 
   // Upload each image file and add it as an attachment chip. Non-image files
@@ -149,12 +163,19 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
   }
 
   async function answer(text: string) {
+    // Guard against a double-answer: the question panel stays rendered until the
+    // agent's status clears server-side (`liveQ` falls back to the hook copy, and
+    // the poll re-sets `question`), so without this a second click would fire the
+    // answer prompt twice.
+    if (sendingRef.current) return;
+    sendingRef.current = true;
     const id = `${Date.now()}-${Math.random()}`;
     const base = messages.filter((msg) => msg.role === "user" && msg.text.trim() === text.trim()).length;
     setPending((p) => [...p, { id, text, base, at: Date.now() }]);
     setQuestion(null); setPicks({});
     atBottomRef.current = true;
     const ok = await sendPromptTo(agent.sessionId, text);
+    sendingRef.current = false;
     if (!ok) setPending((p) => p.filter((x) => x.id !== id));
   }
   function togglePick(qi: number, label: string, multi: boolean) {
@@ -189,8 +210,8 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
 
   return (
     <>
-    <div className="drawer-backdrop" onClick={onClose}>
-      <aside className={`win drawer${dragOver ? " drag-over" : ""}`} onClick={(e) => e.stopPropagation()}
+    <ModalBackdrop onClose={onClose}>
+      <aside className={`win drawer${dragOver ? " drag-over" : ""}`}
         onDragOver={(e) => { if (e.dataTransfer?.types.includes("Files")) { e.preventDefault(); setDragOver(true); } }}
         onDragLeave={(e) => { if (e.currentTarget === e.target) setDragOver(false); }}
         onDrop={onDrop}>
@@ -389,7 +410,7 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
           </div>
         )}
       </aside>
-    </div>
+    </ModalBackdrop>
     {pickSprite && <SpritePicker agent={agent} onClose={() => setPickSprite(false)} />}
     </>
   );

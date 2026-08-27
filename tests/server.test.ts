@@ -118,6 +118,21 @@ test("POST /action/upload rejects a non-image type", async () => {
   server.stop(true);
 });
 
+test("POST /action/rename rejects a non-string name with 400 (not a 500)", async () => {
+  reset();
+  process.env.AGENT_STATUS_DIR = dir;
+  const { makeServer } = await import("../src/server");
+  const server = makeServer(0);
+  const res = await fetch(`http://localhost:${server.port}/action/rename`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ sessionId: "abc", name: 42 }),
+  });
+  expect(res.status).toBe(400);
+  expect((await res.json()).ok).toBe(false);
+  server.stop(true);
+});
+
 test("GET /personas lists the built-ins without prompt text", async () => {
   const { makeServer } = await import("../src/server");
   const srv = makeServer(0, { scan: false });

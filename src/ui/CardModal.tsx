@@ -3,6 +3,7 @@ import type { AgentStatus } from "../schema";
 import type { Board, Card } from "../lib/board";
 import { renameCard, setCardDescription, assignCard, addComment, deleteComment, cardTaskText, commentNotifyText } from "../lib/board";
 import { sendPromptTo } from "./actions";
+import { ModalBackdrop } from "./Backdrop";
 import { toast } from "./toast";
 
 type Mutate = (fn: (b: Board) => Board) => void;
@@ -47,8 +48,13 @@ export function CardModal({
     mutate((b) => addComment(b, card.id, ME, text));
     if (assigned && assignedIsLive) {
       const msg = commentNotifyText(board, card.id, text);
-      if (msg) void sendPromptTo(assigned.id, msg);
-      toast(`Notified ${assigned.name}`);
+      // Only claim "Notified" once the send actually succeeds — otherwise the
+      // user gets a "Notified X" toast contradicted a moment later by the error
+      // toast from a failed delivery.
+      if (msg) {
+        const name = assigned.name;
+        void sendPromptTo(assigned.id, msg).then((ok) => { if (ok) toast(`Notified ${name}`); });
+      }
     } else {
       toast("No running agent assigned — comment saved, not delivered");
     }
@@ -71,8 +77,8 @@ export function CardModal({
   const comments = card.comments ?? [];
 
   return (
-    <div className="drawer-backdrop" onClick={onClose}>
-      <div className="win cardmodal" onClick={(e) => e.stopPropagation()}>
+    <ModalBackdrop onClose={onClose}>
+      <div className="win cardmodal">
         <div className="cardmodal-head">
           <span className="pix cardmodal-crumb">IN {columnName || "—"}</span>
           <button className="cardmodal-x" title="Close" onClick={onClose}>✕</button>
@@ -152,7 +158,7 @@ export function CardModal({
           </div>
         </div>
       </div>
-    </div>
+    </ModalBackdrop>
   );
 }
 

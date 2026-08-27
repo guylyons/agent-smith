@@ -101,6 +101,13 @@ function ColumnView({
   }
 
   function onDelete() {
+    // The server replaces an empty board with the default one, which then echoes
+    // back over SSE — so deleting the last column would silently resurrect the
+    // stock columns. Refuse it and say why rather than surprise the user.
+    if (board.columns.length <= 1) {
+      alert("Keep at least one column — an empty board resets to the default.");
+      return;
+    }
     const n = board.cards.filter((c) => c.columnId === column.id).length;
     const label = column.name || "this column";
     const msg = n ? `Delete "${label}" and its ${n} card${n > 1 ? "s" : ""}?` : `Delete "${label}"?`;
@@ -224,6 +231,11 @@ function InlineText({
   const [draft, setDraft] = useState(value);
   const [editing, setEditing] = useState(false);
   const ref = useRef<HTMLInputElement>(null);
+  // Escape cancels: it calls blur(), which fires onBlur synchronously with the
+  // still-edited `draft` in scope (the queued setDraft(value) hasn't rendered),
+  // so committing there would persist the very text the user tried to discard.
+  // This flag makes onBlur skip that one commit.
+  const cancelling = useRef(false);
 
   useEffect(() => { if (!editing) setDraft(value); }, [value, editing]);
   useEffect(() => { if (autoFocus) ref.current?.focus(); }, [autoFocus]);
@@ -238,11 +250,15 @@ function InlineText({
       value={editing ? draft : value}
       placeholder={placeholder}
       onFocus={start}
+      onBlur={() => {
+        stop();
+        if (cancelling.current) { cancelling.current = false; setDraft(value); return; }
+        onCommit(draft.trim());
+      }}
       onChange={(e) => setDraft(e.target.value)}
-      onBlur={() => { stop(); onCommit(draft.trim()); }}
       onKeyDown={(e) => {
         if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
-        else if (e.key === "Escape") { setDraft(value); stop(); (e.target as HTMLInputElement).blur(); }
+        else if (e.key === "Escape") { cancelling.current = true; (e.target as HTMLInputElement).blur(); }
       }}
     />
   );

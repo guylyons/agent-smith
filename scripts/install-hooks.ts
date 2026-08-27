@@ -17,7 +17,9 @@ const backupPath = settingsPath + ".agentworkshop.bak";
 const bun = process.execPath; // absolute path to the bun running this script
 const repoRoot = resolve(import.meta.dir, "..");
 const hookScript = join(repoRoot, "hooks", "status.ts");
-const command = `${bun} run ${hookScript}`;
+// Quote both paths: a bun path or repo path containing a space would otherwise
+// be split by the shell, installing a broken hook command for every event.
+const command = `"${bun}" run "${hookScript}"`;
 
 type Entry = { matcher?: string; hooks?: { type?: string; command?: string }[] };
 const single = (): Entry[] => [{ hooks: [{ type: "command", command }] }];

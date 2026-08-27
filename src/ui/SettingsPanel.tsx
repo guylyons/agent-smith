@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ModalBackdrop } from "./Backdrop";
 import { TUBE_MODES, BACKGROUNDS, applyTube, applyBg, loadSetting, saveSetting } from "./settings";
 
 // One place for the display/alert toggles that used to float over the board.
@@ -12,8 +13,8 @@ export function SettingsPanel({ alertsEnabled, onToggleAlerts, onClose }: {
   function pickBg(id: string) { applyBg(id); saveSetting("aw-bg", id); setBg(id); }
 
   return (
-    <div className="drawer-backdrop" onClick={onClose}>
-      <aside className="win settings" onClick={(e) => e.stopPropagation()}>
+    <ModalBackdrop onClose={onClose}>
+      <aside className="win settings">
         <div className="settings-head">
           <span className="pix settings-title">SETTINGS</span>
           <button className="deskbtn" title="Close" onClick={onClose}>✕</button>
@@ -40,6 +41,6 @@ export function SettingsPanel({ alertsEnabled, onToggleAlerts, onClose }: {
           <div className="pix settings-hint">A desktop notification + sound when an agent needs you.</div>
         </div>
       </aside>
-    </div>
+    </ModalBackdrop>
   );
 }

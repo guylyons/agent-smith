@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { AgentStatus } from "../schema";
 import { Sprite } from "./Sprite";
+import { ModalBackdrop } from "./Backdrop";
 import { PALETTES, GEARS, BODIES, BODY_IDS, paletteFor } from "./sprite-data";
 import { setSprite } from "./actions";
 
@@ -8,7 +9,11 @@ import { setSprite } from "./actions";
  * overriding the deterministic default derived from sessionId+role. */
 export function SpritePicker({ agent, onClose }: { agent: AgentStatus; onClose: () => void }) {
   const defaults = paletteFor(agent.sessionId, agent.role);
-  const [palette, setPalette] = useState(agent.sprite?.palette ?? 0);
+  // Seed from the agent's ACTUAL default palette (the deterministic hash pick),
+  // not index 0 — otherwise the preview shows the wrong colors for every agent
+  // whose hash palette isn't 0, and SAVE-without-changes recolors it to 0.
+  const defaultPaletteIndex = Math.max(0, PALETTES.indexOf(defaults.palette));
+  const [palette, setPalette] = useState(agent.sprite?.palette ?? defaultPaletteIndex);
   const [gear, setGear] = useState(agent.sprite?.gear ?? defaults.gear);
   const [body, setBody] = useState(agent.sprite?.body ?? defaults.body);
 
@@ -20,8 +25,8 @@ export function SpritePicker({ agent, onClose }: { agent: AgentStatus; onClose: 
   }
 
   return (
-    <div className="drawer-backdrop" onClick={onClose}>
-      <div className="win spritepicker" onClick={(e) => e.stopPropagation()}>
+    <ModalBackdrop onClose={onClose}>
+      <div className="win spritepicker">
         <div className="pix spritepicker-title">CHOOSE SPRITE</div>
 
         <div className="spritepicker-preview">
@@ -79,6 +84,6 @@ export function SpritePicker({ agent, onClose }: { agent: AgentStatus; onClose: 
           <button className="deskbtn primary" onClick={save}>SAVE</button>
         </div>
       </div>
-    </div>
+    </ModalBackdrop>
   );
 }

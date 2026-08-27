@@ -82,6 +82,12 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
 
   const server = Bun.serve({
     port,
+    // Bind to loopback only. Bun defaults to 0.0.0.0 when hostname is omitted,
+    // which would expose every mutating action (spawn with bypassPermissions =
+    // arbitrary code execution, kill, prompt, upload) to anyone on the LAN — the
+    // sec-fetch-site CSRF check does not stop a non-browser client that sends no
+    // such header. This is a single-user local dashboard; keep it on localhost.
+    hostname: "127.0.0.1",
     async fetch(req) {
       const url = new URL(req.url);
       if (url.pathname === "/events") {
@@ -176,6 +182,11 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
         }
         if (!validSessionId(body.sessionId)) return json({ ok: false, error: "bad sessionId" }, 400);
         if (action === "rename") {
+          // name must be a string (or absent = clear); a non-string would throw
+          // inside setNameOverride (.trim()) and 500 the handler.
+          if (body.name !== undefined && typeof body.name !== "string") {
+            return json({ ok: false, error: "name must be a string" }, 400);
+          }
           setNameOverride(dir, body.sessionId, body.name ?? null);
           push();
           return json({ ok: true });

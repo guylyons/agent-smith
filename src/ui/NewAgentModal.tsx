@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { spawnAgent, fetchPersonas, type PersonaInfo } from "./actions";
 import { slugify } from "../lib/slug";
+import { ModalBackdrop } from "./Backdrop";
 import { toast } from "./toast";
 
 function repoName(cwd: string): string {
@@ -45,8 +46,8 @@ export function NewAgentModal({
   }
 
   return (
-    <div className="drawer-backdrop" onClick={onClose}>
-      <div className="win newagent" onClick={(e) => e.stopPropagation()}>
+    <ModalBackdrop onClose={onClose}>
+      <div className="win newagent">
         <div className="pix newagent-title">NEW AGENT</div>
 
         <label className="pix newagent-label">FOLDER</label>
@@ -112,6 +113,6 @@ export function NewAgentModal({
         </div>
         <div className="pix newagent-hint">Opens a new Claude session in a Ghostty tab and runs your task. It'll appear on the board; chat with it here. With a WORKTREE name it runs in an isolated <code>.claude/worktrees/&lt;name&gt;</code> branch off HEAD, so agents never share a working tree. A PERSONA starts the agent in a role — its skills, its look on the board. (⌘/Ctrl+Enter to launch)</div>
       </div>
-    </div>
+    </ModalBackdrop>
   );
 }
