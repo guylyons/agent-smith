@@ -4,8 +4,8 @@ import { Sprite } from "./Sprite";
 import { SpritePicker } from "./SpritePicker";
 import { renderMarkdown } from "./markdown";
 import {
-  fetchConversation, fetchSubagents, fetchRepo, sendPromptTo, uploadImage, focusSession, pauseSession, renameSession, killAgent,
-  type ChatMessage, type Subagent, type RepoInfo, type PendingQuestion,
+  fetchConversation, fetchSubagents, fetchRepo, fetchPersonas, sendPromptTo, uploadImage, focusSession, pauseSession, renameSession, killAgent,
+  type ChatMessage, type Subagent, type RepoInfo, type PendingQuestion, type PersonaInfo,
 } from "./actions";
 
 type Pending = { id: string; text: string; base: number; at: number };
@@ -22,6 +22,7 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
   const [subagents, setSubagents] = useState<Subagent[]>([]);
   const [pending, setPending] = useState<Pending[]>([]); // optimistic, not yet in transcript
   const [repo, setRepo] = useState<RepoInfo | null>(null);
+  const [personas, setPersonas] = useState<PersonaInfo[]>([]);
   const [question, setQuestion] = useState<PendingQuestion | null>(null);
   const [picks, setPicks] = useState<Record<number, Set<string>>>({});
   const [text, setText] = useState("");
@@ -81,6 +82,12 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
     const id = setInterval(load, 4000);
     return () => { alive = false; clearInterval(id); };
   }, [tab, agent.sessionId]);
+
+  // Persona list is small and static — fetch it once when needed, not on the 4s poll.
+  useEffect(() => {
+    if (tab !== "info" || !agent.persona || personas.length) return;
+    void fetchPersonas().then(setPersonas);
+  }, [tab, agent.persona, personas.length]);
 
   // Keep pinned to the bottom unless the user scrolled up.
   useEffect(() => {
@@ -326,6 +333,18 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
               <>
                 <div className="info-row"><span className="info-k">PWD</span><span className="info-v">{repo.cwd}</span></div>
                 <div className="info-row"><span className="info-k">BRANCH</span><span className="info-v">{repo.branch || "—"}{agent.ticket ? ` · ${agent.ticket}` : ""}</span></div>
+                {agent.persona && (() => {
+                  const p = personas.find((x) => x.id === agent.persona);
+                  return (
+                    <div className="info-row">
+                      <span className="info-k">PERSONA</span>
+                      <span className="info-v">
+                        {p ? p.role : agent.persona}
+                        {p && p.skills.length > 0 ? ` · ${p.skills.join(", ")}` : ""}
+                      </span>
+                    </div>
+                  );
+                })()}
                 <div className="pix info-sec">WORKING TREE {repo.status.length ? `· ${repo.status.length} changed` : "· clean"}</div>
                 {repo.status.map((s, i) => (
                   <div key={i} className="info-file"><span className="info-code">{s.code || "·"}</span>{s.file}</div>
