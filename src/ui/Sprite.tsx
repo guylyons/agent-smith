@@ -7,15 +7,15 @@ import { spriteRects, paletteFor, PALETTES } from "./sprite-data";
 // props actually change.
 function SpriteImpl({ sessionId, role, state, override }: {
   sessionId: string; role: string; state: string;
-  override?: { palette: number; gear: string };
+  override?: { palette: number; gear: string; body?: string };
 }) {
   const rects = useMemo(() => {
     if (override) {
       const palette = PALETTES[override.palette % PALETTES.length];
-      return spriteRects({ gear: override.gear, palette });
+      return spriteRects({ body: override.body, gear: override.gear, palette });
     }
-    const { palette, gear } = paletteFor(sessionId, role);
-    return spriteRects({ gear, palette });
+    const { palette, gear, body } = paletteFor(sessionId, role);
+    return spriteRects({ body, gear, palette });
   }, [sessionId, role, override]);
   return (
     <svg className={`sprite ${state === "working" ? "is-bobbing" : ""}`}

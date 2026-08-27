@@ -55,7 +55,8 @@ const AgentCard = memo(function AgentCard({ a, onOpen }: { a: AgentStatus; onOpe
     x.sessionId === y.sessionId && x.name === y.name && x.role === y.role &&
     x.ticket === y.ticket && x.state === y.state && x.doing === y.doing &&
     x.subagents === y.subagents &&
-    x.sprite?.palette === y.sprite?.palette && x.sprite?.gear === y.sprite?.gear;
+    x.sprite?.palette === y.sprite?.palette && x.sprite?.gear === y.sprite?.gear &&
+    x.sprite?.body === y.sprite?.body;
 });
 
 export function Crew({ agents, onOpen }: { agents: AgentStatus[]; onOpen: (id: string) => void }) {

@@ -114,7 +114,10 @@ Click a desk to open its pane, with two tabs:
 ## Controls
 
 - **Click the sprite** (on a desk or in the pane) to pick a custom character —
-  a palette + gear picker, overriding the deterministic default.
+  a character + palette + gear picker, overriding the deterministic default.
+  Characters include the human **worker** and **engineer** plus standalone
+  critters/droids — **cat**, **fox**, **owl**, **robot** — each recolored by any
+  of the five palettes. (Gear overlays apply only to the human worker.)
 - **↗ TERMINAL** jumps to the session's exact Ghostty tab.
 - **Click the name** (in the pane) to rename the agent. Stored in
   `~/.agent-status/.overrides.json` and survives restarts.
@@ -150,7 +153,10 @@ not for sessions already waiting when you load the page.
 ## Backgrounds
 
 The **BG** button cycles five self-contained CSS art backgrounds — night,
-stars, synth, grid, dusk — and remembers your pick.
+stars, synth, grid, dusk — and remembers your pick. Each carries a very subtle
+idle animation (a drifting nebula, twinkling stars, a slowly scrolling synth
+horizon, a barely-panning blueprint grid, a gently breathing dusk sky) — all
+disabled automatically under `prefers-reduced-motion`.
 
 ## How targeting works
 

@@ -125,7 +125,7 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
           return json({ ok: false, error: "cross-site blocked" }, 403);
         }
         const action = url.pathname.slice("/action/".length);
-        let body: { sessionId?: string; name?: string; text?: string; cwd?: string; palette?: number; gear?: string; model?: string; permissionMode?: string };
+        let body: { sessionId?: string; name?: string; text?: string; cwd?: string; palette?: number; gear?: string; body?: string; model?: string; permissionMode?: string };
         try { body = await req.json(); } catch { return json({ ok: false, error: "bad body" }, 400); }
         // spawn creates a brand-new session — it has a folder + task, not a sessionId
         if (action === "spawn") {
@@ -147,7 +147,8 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
           if (typeof body.palette !== "number" || typeof body.gear !== "string") {
             return json({ ok: false, error: "palette and gear are required" }, 400);
           }
-          setSpriteOverride(dir, body.sessionId, { palette: body.palette, gear: body.gear });
+          const character = typeof body.body === "string" ? body.body : undefined;
+          setSpriteOverride(dir, body.sessionId, { palette: body.palette, gear: body.gear, body: character });
           push();
           return json({ ok: true });
         }

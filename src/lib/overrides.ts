@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { readFileSync, writeFileSync, renameSync } from "node:fs";
 import type { AgentStatus } from "../schema";
 
-export type Overrides = Record<string, { name?: string; sprite?: { palette: number; gear: string } }>;
+export type Overrides = Record<string, { name?: string; sprite?: { palette: number; gear: string; body?: string } }>;
 
 function file(dir: string): string {
   return join(dir, ".overrides.json");
@@ -29,7 +29,7 @@ export function setNameOverride(dir: string, sessionId: string, name: string | n
   renameSync(tmp, file(dir));
 }
 
-export function setSpriteOverride(dir: string, sessionId: string, sprite: { palette: number; gear: string } | null): void {
+export function setSpriteOverride(dir: string, sessionId: string, sprite: { palette: number; gear: string; body?: string } | null): void {
   const all = readOverrides(dir);
   if (sprite) all[sessionId] = { ...all[sessionId], sprite };
   else if (all[sessionId]) { delete all[sessionId].sprite; if (!Object.keys(all[sessionId]).length) delete all[sessionId]; }
