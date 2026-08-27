@@ -6,7 +6,6 @@ import { parseStatus } from "../src/schema";
 import { parseTicket } from "../src/lib/ticket";
 import { identify } from "../src/lib/identity";
 import { humanizeTool } from "../src/lib/humanize";
-import { endsWithQuestion } from "../src/lib/question";
 import { ensureStatusDir } from "../src/lib/paths";
 
 export type HookEvent = {
@@ -39,11 +38,11 @@ export function applyEvent(prev: AgentStatus | null, e: HookEvent, now: number):
         doing: humanizeTool(e.tool_name ?? "", e.tool_input), updatedAt: now };
     case "Notification":
       return { ...base, state: "waiting", waitingReason: "permission", updatedAt: now };
-    case "Stop": {
-      const asking = endsWithQuestion(e.last_assistant_message ?? e.last_message);
-      return { ...base, state: asking ? "waiting" : "idle",
-        waitingReason: asking ? "question" : undefined, updatedAt: now };
-    }
+    case "Stop":
+      // A finished turn is idle. A genuine question (AskUserQuestion) blocks the
+      // turn — it doesn't reach Stop — and the transcript scanner surfaces it as
+      // waiting/question. A rhetorical '?' in the final message is not a question.
+      return { ...base, state: "idle", waitingReason: undefined, updatedAt: now };
     case "SessionEnd":
       return null;
     default:

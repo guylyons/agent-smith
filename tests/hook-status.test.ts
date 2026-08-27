@@ -32,12 +32,12 @@ test("Notification -> waiting/permission", () => {
   expect(s.waitingReason).toBe("permission");
 });
 
-test("Stop with a question -> waiting/question, else idle", () => {
+test("Stop -> idle even if the final message ends with '?' (a prose '?' is not a reliable question; real AskUserQuestion is scanner-detected)", () => {
   const s0 = applyEvent(null, start as any, 1000)!;
-  const q = applyEvent(s0, { hook_event_name: "Stop", session_id: "s1", cwd: "/repo", branch: start.branch, last_message: "Which variant should I use?" } as any, 4000)!;
-  expect(q.state).toBe("waiting");
-  expect(q.waitingReason).toBe("question");
-  const done = applyEvent(s0, { hook_event_name: "Stop", session_id: "s1", cwd: "/repo", branch: start.branch, last_message: "Done." } as any, 4000)!;
+  const q = applyEvent(s0, { hook_event_name: "Stop", session_id: "s1", cwd: "/repo", branch: start.branch, last_assistant_message: "Which variant should I use?" } as any, 4000)!;
+  expect(q.state).toBe("idle");
+  expect(q.waitingReason).toBeUndefined();
+  const done = applyEvent(s0, { hook_event_name: "Stop", session_id: "s1", cwd: "/repo", branch: start.branch, last_assistant_message: "Done." } as any, 4000)!;
   expect(done.state).toBe("idle");
 });
 

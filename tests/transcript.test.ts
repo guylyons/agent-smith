@@ -42,14 +42,35 @@ test("a thinking block after a tool_use shows 'thinking', not the stale tool act
   expect(s.doing).toBe("thinking");
 });
 
-test("assistant ended turn with a question -> waiting/question", () => {
+test("a prose '?' at end of turn is IDLE, not a false question", () => {
+  // The agent finished and its last sentence happens to end with '?' — this is
+  // NOT the agent blocking on a question. Must not show as NEEDS-YOU/question.
   const lines = [
-    L({ type: "assistant", sessionId: "s1", cwd: "/repo", gitBranch: "b", message: { content: [{ type: "text", text: "Which variant should I use — featured or compact?" }] } }),
+    L({ type: "assistant", sessionId: "s1", cwd: "/repo", gitBranch: "b", message: { content: [{ type: "text", text: "All done and tests pass. Make sense?" }] } }),
+  ];
+  const s = deriveStatusFromTranscript(lines, 1)!;
+  expect(s.state).toBe("idle");
+  expect(s.waitingReason).toBeUndefined();
+});
+
+test("a pending AskUserQuestion -> waiting/question (the reliable signal)", () => {
+  const lines = [
+    L({ type: "assistant", sessionId: "s1", cwd: "/repo", gitBranch: "b", message: { content: [{ type: "tool_use", id: "tu1", name: "AskUserQuestion", input: { questions: [{ question: "Which?", options: [{ label: "A" }] }] } }] } }),
   ];
   const s = deriveStatusFromTranscript(lines, 1)!;
   expect(s.state).toBe("waiting");
   expect(s.waitingReason).toBe("question");
   expect(s.doing).toBe("waiting on your answer");
+});
+
+test("an ANSWERED AskUserQuestion is not a pending question", () => {
+  const lines = [
+    L({ type: "assistant", sessionId: "s1", cwd: "/repo", gitBranch: "b", message: { content: [{ type: "tool_use", id: "tu1", name: "AskUserQuestion", input: { questions: [{ question: "q", options: [{ label: "A" }] }] } }] } }),
+    L({ type: "user", sessionId: "s1", cwd: "/repo", gitBranch: "b", message: { content: [{ type: "tool_result", tool_use_id: "tu1", content: "answered: A" }] } }),
+    L({ type: "assistant", sessionId: "s1", cwd: "/repo", gitBranch: "b", message: { content: [{ type: "text", text: "Great, moving on." }] } }),
+  ];
+  const s = deriveStatusFromTranscript(lines, 1)!;
+  expect(s.state).toBe("idle");
 });
 
 test("assistant ended turn with a statement -> idle", () => {

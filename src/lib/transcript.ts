@@ -7,7 +7,7 @@ import type { AgentStatus } from "../schema";
 import { parseTicket } from "./ticket";
 import { identify } from "./identity";
 import { humanizeTool } from "./humanize";
-import { endsWithQuestion } from "./question";
+import { findPendingQuestion } from "./conversation";
 
 type Content = { type?: string; text?: string; name?: string; input?: Record<string, unknown> };
 
@@ -28,7 +28,6 @@ export function deriveStatusFromTranscript(lines: string[], updatedAt: number): 
   let branch: string | null = null;
   let title: string | undefined;
   let lastToolUse: { name: string; input?: Record<string, unknown> } | null = null;
-  let lastAssistantText: string | null = null;
   // Did the session end its turn on assistant text (turn complete), or is it
   // still active (a user prompt or a tool in flight came last)?
   let endedOnAssistantText = false;
@@ -53,7 +52,6 @@ export function deriveStatusFromTranscript(lines: string[], updatedAt: number): 
       for (const c of contentArray(e)) {
         if (c.type === "thinking") { thinkingLast = true; endedOnAssistantText = false; }
         if (c.type === "text" && typeof c.text === "string" && c.text.trim()) {
-          lastAssistantText = c.text.trim();
           endedOnAssistantText = true;
           thinkingLast = false;
         }
@@ -73,17 +71,22 @@ export function deriveStatusFromTranscript(lines: string[], updatedAt: number): 
 
   if (!sessionId) return null;
 
-  // State: assistant finished the turn -> idle, unless it ended on a question.
-  // Anything else (user just prompted, mid-tool) -> working.
+  // "Needs you / question" comes ONLY from a genuinely-pending AskUserQuestion —
+  // the same reliable signal the conversation panel uses. A rhetorical or
+  // mid-stream '?' in prose is NOT a question (that heuristic caused the card to
+  // say NEEDS-YOU while the pane had nothing to answer). Otherwise: a completed
+  // turn -> idle; anything mid-flight -> working.
   let state: AgentStatus["state"];
   let waitingReason: AgentStatus["waitingReason"];
   let doing: string;
 
-  if (endedOnAssistantText) {
-    const asking = endsWithQuestion(lastAssistantText);
-    state = asking ? "waiting" : "idle";
-    waitingReason = asking ? "question" : undefined;
-    doing = asking ? "waiting on your answer" : "idle";
+  if (findPendingQuestion(lines) !== null) {
+    state = "waiting";
+    waitingReason = "question";
+    doing = "waiting on your answer";
+  } else if (endedOnAssistantText) {
+    state = "idle";
+    doing = "idle";
   } else {
     state = "working";
     doing = thinkingLast || !lastToolUse ? "thinking" : humanizeTool(lastToolUse.name, lastToolUse.input);
