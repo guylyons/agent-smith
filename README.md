@@ -4,7 +4,8 @@ A live board of your open Claude Code sessions, styled as a SNES/CRT pixel-art
 workshop. Every open session shows up as a person at a desk — with the ticket
 they're on, what they're doing right now, whether they're **working**, **idle**,
 or **need you** (a permission prompt or a question), and a badge when they have
-active subagents. "THE LINE" kanban strip tracks where each ticket sits.
+active subagents. "THE LINE" is a simple, editable kanban board — renamable,
+draggable columns and cards, with a per-column instruction any agent can read.
 
 ![the workshop](docs/workshop.png)
 
@@ -93,32 +94,40 @@ Each open session is a pixel character with:
 
 ### THE LINE
 
-A kanban strip that follows each work item — labelled by ticket (`#123`) if the
-branch has a number, else a short branch name, else the repo — left to right
-along a git lifecycle:
+A simple, fully editable kanban board. Everything is renamable and draggable,
+and **each column carries an instruction** describing what to do with work that
+lands in it — so the board is not just a tracker, it's something an agent can
+read and act on.
 
-| stage | meaning | source |
-| --- | --- | --- |
-| `BACKLOG` | idle, not begun (no commits yet) | live session state |
-| `WORKING` | actively running | live session state |
-| `NEEDS YOU` | waiting on a permission/question | live session state |
-| `DONE` | committed but not pushed anywhere | `git rev-list --count HEAD --not --remotes > 0` |
-| `REVIEW` | you're reviewing it | **your** manual move |
-| `MERGED` | you've merged it | **your** manual move |
+- **Columns** — click a name to rename it, drag the `⠿` grip to reorder, `✕` to
+  delete (with its cards), `+ COLUMN` to add one. Each column has an instruction
+  field, e.g. _"Once done, ensure the worktree is clean and committed, then share
+  a report in the ticket."_
+- **Cards** — type in `+ add card` to add one, click a title to rename, drag a
+  card to any column, `✕` to delete. Cards are free-form (a title of your
+  choosing — a ticket number, a task, a note).
 
-**Click** a crate to open its conversation pane. **Drag** a crate between
-`DONE` / `REVIEW` / `MERGED` to set where it sits — dragging back to `DONE`
-clears your designation. The three live columns are derived, so they don't
-accept drops.
+A fresh board starts with `Backlog · In Progress · Review · Done`; reshape it
+however you like.
 
-Your `REVIEW` / `MERGED` moves are stored in `~/.agent-status/.line.json`,
-keyed by item (`repo|label`), so they survive restarts **and are readable by
-any agent** — that's how a session becomes aware of what you've already reviewed
-or merged. A designated item keeps its crate even after its session ends.
+The whole board is stored in `~/.agent-status/.line.json` so it survives
+restarts **and is readable by any agent** — that's how a session becomes aware
+of the stages and what each one expects of it. The client owns edits and writes
+the full board; the server sanitizes it before saving.
 
 ```jsonc
 // ~/.agent-status/.line.json
-{ "agentsmith|#123": { "stage": "review", "label": "#123", "sessionId": "…" } }
+{
+  "version": 2,
+  "columns": [
+    { "id": "backlog", "name": "Backlog", "instruction": "" },
+    { "id": "done", "name": "Done",
+      "instruction": "Once done, ensure the worktree is clean and committed, then share a report in the ticket." }
+  ],
+  "cards": [
+    { "id": "card_1a2b3c4d", "title": "#123 fix login bug", "columnId": "backlog" }
+  ]
+}
 ```
 
 ## The agent pane

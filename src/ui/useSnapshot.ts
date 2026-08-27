@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import type { Snapshot } from "../lib/snapshot";
-import { LINE_STAGES } from "../lib/snapshot";
 
+// The pre-SSE placeholder: no agents, an empty board. The server always sends a
+// real (seeded) board on connect, so this blank board is only ever shown for the
+// instant before the first /events message arrives.
 export function emptySnapshot(): Snapshot {
-  return { agents: [], line: LINE_STAGES.map((stage) => ({ stage, items: [] })) };
+  return { agents: [], board: { columns: [], cards: [] } };
 }
 
 export function parseEvent(data: string): Snapshot | null {

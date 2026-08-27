@@ -6,9 +6,9 @@ import { ensureStatusDir, statusDir } from "./lib/paths";
 import { scanLiveSessions, readConversation, readSubagents } from "./scan";
 import { readOverrides, applyOverrides, setNameOverride, setSpriteOverride } from "./lib/overrides";
 import { loadPersonas, applyPersonas } from "./lib/personas";
-import { readLineState, setLineStage } from "./lib/line-state";
+import { readBoard, writeBoard, sanitizeBoard } from "./lib/board";
 import { ALLOWED_MODELS, ALLOWED_PERMISSION_MODES, focusSession, interruptSession, killAgent, sendPrompt, spawnAgent } from "./ghostty";
-import { readRepo, countUnpushed } from "./repo";
+import { readRepo } from "./repo";
 import { saveUpload } from "./lib/uploads";
 
 function json(body: unknown, status = 200): Response {
@@ -26,7 +26,7 @@ function loadStatus(dir: string, sessionId: string): AgentStatus | null {
   catch { return null; }
 }
 
-export function readSnapshot(dir: string, now: number, committedCwds: Set<string> = new Set()): Snapshot {
+export function readSnapshot(dir: string, now: number): Snapshot {
   const agents: AgentStatus[] = [];
   let names: string[] = [];
   // status files are <sessionId>.json; skip dotfiles like .overrides.json / .line.json
@@ -40,8 +40,7 @@ export function readSnapshot(dir: string, now: number, committedCwds: Set<string
   // personas resolve INSIDE applyOverrides so a name you typed yourself wins:
   // user override > persona > inferRole > hashed codename
   return buildSnapshot(applyOverrides(applyPersonas(agents, loadPersonas()), readOverrides(dir)), now, {
-    committedCwds,
-    designations: readLineState(dir),
+    board: readBoard(dir),
   });
 }
 
@@ -50,19 +49,9 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
   const dir = ensureStatusDir();
   const clients = new Set<(s: Snapshot) => void>();
 
-  // cwds with committed-but-unpushed work (-> DONE). Refreshed on the scan loop,
-  // so the per-push snapshot build stays a synchronous cache read, no git spawn.
-  let committedCwds = new Set<string>();
-  const refreshCommitted = async () => {
-    const cwds = [...new Set(readSnapshot(dir, Date.now()).agents.map((a) => a.cwd).filter(Boolean))];
-    const next = new Set<string>();
-    await Promise.all(cwds.map(async (cwd) => { if ((await countUnpushed(cwd)) > 0) next.add(cwd); }));
-    committedCwds = next;
-  };
-
   let timer: ReturnType<typeof setTimeout> | null = null;
   const push = () => {
-    const snap = readSnapshot(dir, Date.now(), committedCwds);
+    const snap = readSnapshot(dir, Date.now());
     for (const send of clients) {
       try {
         send(snap);
@@ -85,7 +74,6 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
       scanning = true;
       try { await scanLiveSessions(Date.now()); } catch { /* keep serving */ }
       finally { scanning = false; }
-      try { await refreshCommitted(); } catch { /* leave last-known committed set */ }
       push();
     };
     void runScan();
@@ -103,7 +91,7 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
             const enc = new TextEncoder();
             send = (s) => ctrl.enqueue(enc.encode(`data: ${JSON.stringify(s)}\n\n`));
             clients.add(send);
-            send(readSnapshot(dir, Date.now(), committedCwds)); // initial
+            send(readSnapshot(dir, Date.now())); // initial
           },
           cancel() { clients.delete(send); },
         });
@@ -150,7 +138,7 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
           return json({ ok: false, error: "cross-site blocked" }, 403);
         }
         const action = url.pathname.slice("/action/".length);
-        let body: { sessionId?: string; name?: string; text?: string; cwd?: string; palette?: number; gear?: string; body?: string; model?: string; permissionMode?: string; worktree?: string; persona?: string; key?: string; stage?: string; label?: string; type?: string; dataBase64?: string };
+        let body: { sessionId?: string; name?: string; text?: string; cwd?: string; palette?: number; gear?: string; body?: string; model?: string; permissionMode?: string; worktree?: string; persona?: string; board?: unknown; type?: string; dataBase64?: string };
         try { body = await req.json(); } catch { return json({ ok: false, error: "bad body" }, 400); }
         // spawn creates a brand-new session — it has a folder + task, not a sessionId
         if (action === "spawn") {
@@ -166,19 +154,12 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
           const persona = typeof body.persona === "string" && body.persona.trim() ? body.persona.trim() : undefined;
           return json(await spawnAgent(cwd, task, { model, permissionMode, worktree, persona }));
         }
-        // line-stage: your manual review/merged designation. Keyed by item key,
-        // not sessionId (a designated item may outlive its session), so it's
-        // handled before the sessionId guard below.
-        if (action === "line-stage") {
-          const key = typeof body.key === "string" ? body.key.trim() : "";
-          if (!key || key.length > 256) return json({ ok: false, error: "bad key" }, 400);
-          if (body.stage === "review" || body.stage === "merged") {
-            const label = typeof body.label === "string" && body.label.trim() ? body.label.trim() : (key.split("|").pop() || key);
-            const sessionId = validSessionId(body.sessionId) ? body.sessionId : undefined;
-            setLineStage(dir, key, { stage: body.stage, label, sessionId });
-          } else {
-            setLineStage(dir, key, null); // moving back off review/merged clears it
-          }
+        // board: the whole kanban board (THE LINE). The client owns the edit and
+        // sends the full board; the server sanitizes it (dropping malformed
+        // columns/cards, orphan cards) before persisting so a bad write can't
+        // corrupt the file agents read. Not tied to a sessionId.
+        if (action === "board") {
+          writeBoard(dir, sanitizeBoard(body.board));
           push();
           return json({ ok: true });
         }

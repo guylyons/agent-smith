@@ -6,13 +6,11 @@ function projectName(cwd: string): string {
 }
 
 export function Header({ snap, onNewAgent }: { snap: Snapshot; onNewAgent: () => void }) {
-  const { agents, line } = snap;
+  const { agents, board } = snap;
   const working = agents.filter((a) => a.state === "working").length;
   const waiting = agents.filter((a) => a.state === "waiting").length;
   const idle = agents.filter((a) => a.state === "idle").length;
-  const open = line
-    .filter((l) => l.stage !== "merged")
-    .reduce((n, l) => n + l.items.length, 0);
+  const onLine = board.cards.length;
 
   const first = agents[0];
   const project = first ? projectName(first.cwd) : null;
@@ -31,7 +29,7 @@ export function Header({ snap, onNewAgent }: { snap: Snapshot; onNewAgent: () =>
         <span><b>{working}</b> WORKING</span>
         <span><b>{waiting}</b> NEED YOU</span>
         <span><b>{idle}</b> IDLE</span>
-        <span><b>{open}</b> TICKETS OPEN</span>
+        <span><b>{onLine}</b> ON THE LINE</span>
         <button className="newagent-btn" onClick={onNewAgent}>+ NEW AGENT</button>
       </div>
     </header>
