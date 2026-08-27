@@ -102,9 +102,16 @@ async function main() {
   const { pid, tty } = resolveProcess();
   if (pid) next.pid = pid;
   if (tty) next.tty = tty;
-  const tmp = `${file}.tmp`;
+  // Unique per-process tmp so concurrent hook invocations for the same session
+  // never write and rename the same tmp file (which races to ENOENT).
+  const tmp = `${file}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(next));
-  renameSync(tmp, file); // atomic
+  try {
+    renameSync(tmp, file); // atomic within the same directory
+  } catch (err) {
+    rmSync(tmp, { force: true }); // don't leak our tmp if the rename fails
+    throw err;
+  }
 }
 
 if (import.meta.main) void main();
