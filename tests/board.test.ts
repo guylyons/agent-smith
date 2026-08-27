@@ -18,6 +18,7 @@ import {
   assignCard,
   addComment,
   deleteComment,
+  cardTaskText,
   readBoard,
   writeBoard,
   type Board,
@@ -327,4 +328,38 @@ test("writeBoard then readBoard round-trips a fully detailed card", () => {
   b = addComment(b, id, "You", "a comment");
   writeBoard(dir, b);
   expect(readBoard(dir)).toEqual(b);
+});
+
+// ---- cardTaskText: the prompt sent to an assigned agent -------------------
+
+test("cardTaskText combines title, description, and column instruction", () => {
+  let b = defaultBoard();
+  const col = b.columns[0]!.id;
+  b = setInstruction(b, col, "Start a worktree and TDD.");
+  b = addCard(b, col, "Fix login bug");
+  const id = b.cards[0]!.id;
+  b = setCardDescription(b, id, "Users are locked out after reset.");
+  expect(cardTaskText(b, id)).toBe(
+    "Fix login bug\n\nUsers are locked out after reset.\n\nStart a worktree and TDD.",
+  );
+});
+
+test("cardTaskText is just the title when there's no description or instruction", () => {
+  let b = defaultBoard();
+  b = addCard(b, b.columns[0]!.id, "Fix login bug");
+  const id = b.cards[0]!.id;
+  expect(cardTaskText(b, id)).toBe("Fix login bug");
+});
+
+test("cardTaskText includes the instruction but skips an empty description", () => {
+  let b = defaultBoard();
+  const col = b.columns[0]!.id;
+  b = setInstruction(b, col, "Ship it.");
+  b = addCard(b, col, "Fix login bug");
+  const id = b.cards[0]!.id;
+  expect(cardTaskText(b, id)).toBe("Fix login bug\n\nShip it.");
+});
+
+test("cardTaskText returns empty string for an unknown card", () => {
+  expect(cardTaskText(defaultBoard(), "nope")).toBe("");
 });

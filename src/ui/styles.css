@@ -530,6 +530,16 @@ body{background:transparent}
   color:var(--bone);background:var(--night);border:2px solid var(--bevel);padding:7px 8px;
 }
 .cardmodal-select:focus{outline:none;border-color:var(--gold)}
+.cardmodal-assign-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:2px}
+.cardmodal-send,.cardmodal-spawn{
+  cursor:pointer;font-size:8px;letter-spacing:.5px;padding:8px 10px;
+  border:2px solid var(--bevel);background:var(--box-lo);color:var(--bone);
+}
+.cardmodal-send{background:var(--gold);color:#1a1204;border-color:var(--bone)}
+.cardmodal-send:hover:not(:disabled){background:var(--leaf)}
+.cardmodal-send:disabled{opacity:.4;cursor:not-allowed}
+.cardmodal-spawn{color:var(--dim);border-style:dashed}
+.cardmodal-spawn:hover{color:var(--gold);border-color:var(--gold)}
 .cardmodal-desc{
   width:100%;box-sizing:border-box;resize:vertical;min-height:88px;
   font-family:ui-monospace,Menlo,monospace;font-size:11px;line-height:1.6;

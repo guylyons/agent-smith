@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentStatus } from "../schema";
 import type { Board, Card } from "../lib/board";
-import { renameCard, setCardDescription, assignCard, addComment, deleteComment } from "../lib/board";
+import { renameCard, setCardDescription, assignCard, addComment, deleteComment, cardTaskText } from "../lib/board";
+import { sendPromptTo } from "./actions";
+import { toast } from "./toast";
 
 type Mutate = (fn: (b: Board) => Board) => void;
 
@@ -13,15 +15,34 @@ const ME = "You";
 // single card room to breathe: editable title + description, a persona
 // assignee, and a comment thread. Backdrop click or Esc closes it.
 export function CardModal({
-  card, columnName, agents, mutate, onClose,
+  board, card, columnName, agents, mutate, onSpawnForCard, onClose,
 }: {
-  card: Card; columnName: string; agents: AgentStatus[]; mutate: Mutate; onClose: () => void;
+  board: Board; card: Card; columnName: string; agents: AgentStatus[];
+  mutate: Mutate; onSpawnForCard: (task: string) => void; onClose: () => void;
 }) {
   // The assignee is a live agent session: its assignee.id is the sessionId. If
   // that session is no longer in the snapshot it has ended — we keep it selected
   // and labelled so the card still shows who had it.
   const assigned = card.assignee;
   const assignedIsLive = !!assigned && agents.some((a) => a.sessionId === assigned.id);
+
+  // Send the card's task (title + description + column instruction) to the
+  // assigned live agent, and drop a note in the thread so there's a trace.
+  function sendToAssigned() {
+    if (!assigned) return;
+    const text = cardTaskText(board, card.id);
+    if (!text.trim()) { toast("Card has no task text to send"); return; }
+    void sendPromptTo(assigned.id, text);
+    mutate((b) => addComment(b, card.id, ME, `Sent task to ${assigned.name}.`));
+    toast(`Sent to ${assigned.name}`);
+  }
+
+  // Spawn a fresh agent seeded with this card's task (persona/model/worktree
+  // chosen in the New Agent modal). Closes the card so the modal is unobstructed.
+  function spawnForCard() {
+    onSpawnForCard(cardTaskText(board, card.id));
+    onClose();
+  }
 
   // Esc closes from anywhere in the modal.
   useEffect(() => {
@@ -68,6 +89,19 @@ export function CardModal({
               ))}
             </select>
             {!agents.length && <p className="cardmodal-empty">No agents are running right now.</p>}
+            <div className="cardmodal-assign-actions">
+              <button
+                className="pix cardmodal-send"
+                disabled={!assignedIsLive}
+                title={assignedIsLive ? "Send this card's task to the assigned agent" : "Assign a running agent first"}
+                onClick={sendToAssigned}
+              >▸ SEND TASK</button>
+              <button
+                className="pix cardmodal-spawn"
+                title="Launch a new agent seeded with this card's task"
+                onClick={spawnForCard}
+              >+ NEW AGENT FOR THIS CARD</button>
+            </div>
           </div>
 
           <div className="cardmodal-row">
