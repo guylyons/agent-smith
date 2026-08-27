@@ -4,6 +4,7 @@
 import { join, dirname, resolve } from "node:path";
 import { mkdirSync } from "node:fs";
 import { slugify } from "./slug";
+import { registerWorktreeTrust } from "./trust";
 
 export type WorktreeResult = { ok: boolean; path?: string; branch?: string; error?: string };
 
@@ -34,5 +35,12 @@ export async function createWorktree(cwd: string, name: string): Promise<Worktre
 
   const add = await git(repoRoot, ["worktree", "add", "-b", branch, path, "HEAD"]);
   if (add.code !== 0) return { ok: false, error: add.stderr || "git worktree add failed" };
+
+  // Extend the repo root's existing trust to this derived worktree so an agent
+  // launched here doesn't stall on the trust dialog before its first turn. Gated
+  // on the root already being trusted, and best-effort — a failure just leaves
+  // the old stall behavior, it never fails the worktree we just made.
+  registerWorktreeTrust(repoRoot, path);
+
   return { ok: true, path, branch };
 }
