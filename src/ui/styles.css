@@ -218,6 +218,22 @@
 .newagent-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
 .newagent-hint{font-size:8px;color:var(--dim);line-height:1.8;margin-top:10px}
 
+/* ---- settings ---- */
+.settings-btn{position:fixed;top:16px;right:16px;z-index:100;
+  font-family:"Press Start 2P",ui-monospace,monospace;font-size:12px;
+  background:var(--box);color:var(--bone);border:3px solid var(--bone);
+  box-shadow:inset 0 0 0 2px var(--bevel),0 3px 0 rgba(0,0,0,.55);
+  padding:7px 10px;cursor:pointer;line-height:1}
+.settings-btn:hover{color:var(--gold)}
+.settings-btn:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
+.settings{width:min(420px,92vw);max-height:90vh;overflow-y:auto;margin:8vh auto;padding:0;display:flex;flex-direction:column}
+.settings-head{display:flex;align-items:center;justify-content:space-between;padding:14px;border-bottom:var(--px) solid var(--bone)}
+.settings-title{font-size:14px;letter-spacing:1px}
+.settings-body{padding:16px;display:flex;flex-direction:column;gap:6px}
+.settings-label{font-size:8px;color:var(--gold);letter-spacing:.5px;margin-top:12px}
+.settings-row{display:flex;flex-wrap:wrap;gap:6px}
+.settings-hint{font-size:8px;color:var(--dim);line-height:1.8;margin-top:6px}
+
 /* ---- selectable 2D-art backgrounds ---- */
 /* body has an opaque bg in the mock; make it transparent so the z-index:-1
    art layer shows through (html keeps the --night fallback). */
@@ -339,7 +355,13 @@ body{background:transparent}
 .msg-tool .msg-text{font-size:11px;color:var(--dim)}
 .msg-tool .msg-text::before{content:"⚙ "}
 .msg-empty{color:var(--dim);font-size:11px;text-align:center;margin:auto}
-.drawer-foot{display:flex;gap:6px;padding:12px 14px;border-top:var(--px) solid var(--bone)}
+.drawer-foot{display:flex;gap:6px;padding:12px 14px;border-top:var(--px) solid var(--bone);align-items:flex-end}
+.reply-textarea{resize:none;overflow-y:auto;line-height:1.5;min-height:34px;font-family:ui-monospace,Menlo,monospace}
+/* "thinking" pill — shown while the agent is working */
+.thinking-pill{align-self:flex-start;margin:2px 14px 8px;padding:5px 10px;background:var(--box-lo);border:2px solid var(--gold);color:var(--gold);font-size:11px;display:inline-flex;align-items:center;gap:7px;max-width:calc(100% - 28px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.thinking-spin{display:inline-block;animation:spin 1.4s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.thinking-spin{animation:none}}
 /* pending AskUserQuestion — answer inline */
 .qpanel{padding:12px 14px;border-top:var(--px) solid var(--gold);background:var(--box-lo);display:flex;flex-direction:column;gap:10px;max-height:40%;overflow-y:auto}
 .qblock{display:flex;flex-direction:column;gap:6px}

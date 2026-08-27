@@ -28,6 +28,13 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
   const [pickSprite, setPickSprite] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
   const atBottomRef = useRef(true);
+  const taRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-grow the message textarea (up to a cap) as the user types multi-line.
+  useEffect(() => {
+    const t = taRef.current;
+    if (t) { t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight, 160) + "px"; }
+  }, [text]);
 
   // Load + poll the conversation and subagents while open.
   useEffect(() => {
@@ -140,6 +147,7 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
             </div>
           </div>
           <div className="drawer-btns">
+            <button className="deskbtn" title="Change this agent's sprite" onClick={() => setPickSprite(true)}>◈ SPRITE</button>
             <button className="deskbtn" title="Jump to this terminal in Ghostty" onClick={() => focusSession(agent.sessionId)}>↗ TERMINAL</button>
             {confirmPause ? (
               <>
@@ -225,16 +233,22 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
               </div>
             )}
 
+            {!ended && agent.state === "working" && (
+              <div className="thinking-pill"><span className="thinking-spin">✻</span> {agent.doing || "thinking"}…</div>
+            )}
+
             <div className="drawer-foot">
-              <input
-                className="reply-input"
+              <textarea
+                ref={taRef}
+                className="reply-input reply-textarea"
                 autoFocus
-                placeholder={ended ? "Session ended" : `Message ${agent.name}… (Enter to send)`}
+                rows={1}
+                placeholder={ended ? "Session ended" : `Message ${agent.name}… (Enter to send · Shift+Enter for newline)`}
                 value={text}
                 disabled={busy}
                 onChange={(e) => setText(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") { e.preventDefault(); void send(); }
+                  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); }
                   if (e.key === "Escape") onClose();
                 }}
               />

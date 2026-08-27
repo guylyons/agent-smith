@@ -1,23 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import type { Snapshot } from "../lib/snapshot";
-
-const STORAGE_KEY = "aw-alerts";
-
-function loadEnabled(): boolean {
-  try {
-    return localStorage.getItem(STORAGE_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-function saveEnabled(v: boolean) {
-  try {
-    localStorage.setItem(STORAGE_KEY, v ? "1" : "0");
-  } catch {
-    /* ignore */
-  }
-}
 
 // Short two-tone beep, synthesized with WebAudio so we don't ship an audio
 // asset. Best-effort: browsers can block audio without a prior user gesture.
@@ -68,14 +50,11 @@ function notify(name: string, waitingReason: "permission" | "question" | undefin
   }
 }
 
-export function Notifier({ snap }: { snap: Snapshot }) {
-  const [enabled, setEnabled] = useState(false);
+// Fires a desktop notification + beep when an agent transitions into "waiting".
+// Renders nothing — the on/off control lives in the Settings panel (App owns it).
+export function Notifier({ snap, enabled }: { snap: Snapshot; enabled: boolean }) {
   const prevWaiting = useRef<Map<string, boolean>>(new Map());
   const primed = useRef(false);
-
-  useEffect(() => {
-    setEnabled(loadEnabled());
-  }, []);
 
   useEffect(() => {
     const prev = prevWaiting.current;
@@ -100,18 +79,5 @@ export function Notifier({ snap }: { snap: Snapshot }) {
     primed.current = true;
   }, [snap, enabled]);
 
-  function toggle() {
-    const next = !enabled;
-    if (next && typeof Notification !== "undefined" && Notification.permission === "default") {
-      Notification.requestPermission().catch(() => {});
-    }
-    setEnabled(next);
-    saveEnabled(next);
-  }
-
-  return (
-    <button className="alertbtn" aria-live="polite" onClick={toggle}>
-      🔔 ALERTS: {enabled ? "ON" : "OFF"}
-    </button>
-  );
+  return null;
 }
