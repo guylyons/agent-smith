@@ -19,8 +19,9 @@ const repoRoot = resolve(import.meta.dir, "..");
 const hookScript = join(repoRoot, "hooks", "status.ts");
 const command = `${bun} run ${hookScript}`;
 
-const single = () => [{ hooks: [{ type: "command", command }] }];
-const withMatcher = () => [{ matcher: "*", hooks: [{ type: "command", command }] }];
+type Entry = { matcher?: string; hooks?: { type?: string; command?: string }[] };
+const single = (): Entry[] => [{ hooks: [{ type: "command", command }] }];
+const withMatcher = (): Entry[] => [{ matcher: "*", hooks: [{ type: "command", command }] }];
 
 const OURS = { SessionStart: single, PreToolUse: withMatcher, Notification: single, Stop: single, SessionEnd: single };
 
@@ -29,14 +30,23 @@ function main() {
   if (existsSync(settingsPath)) {
     try { settings = JSON.parse(readFileSync(settingsPath, "utf8")); }
     catch { console.error(`Could not parse ${settingsPath}; aborting so nothing is clobbered.`); process.exit(1); }
-    copyFileSync(settingsPath, backupPath);
-    console.log(`Backed up existing settings → ${backupPath}`);
+    // Back up only if we don't already have one, so re-running never clobbers the
+    // pristine pre-install copy with already-modified settings.
+    if (!existsSync(backupPath)) {
+      copyFileSync(settingsPath, backupPath);
+      console.log(`Backed up existing settings → ${backupPath}`);
+    }
   }
 
-  const hooks = (settings.hooks as Record<string, unknown>) ?? {};
+  const hooks = (settings.hooks as Record<string, Entry[]>) ?? {};
   const added: string[] = [];
   for (const [event, make] of Object.entries(OURS)) {
-    if (!(event in hooks)) { hooks[event] = make(); added.push(event); }
+    // Merge per-COMMAND, not per-event: a user who already has some other Stop /
+    // Notification / SessionStart hook must still get ours appended, or that
+    // event never reports to the dashboard.
+    const existing = Array.isArray(hooks[event]) ? hooks[event]! : [];
+    const already = existing.some((e) => (e.hooks ?? []).some((h) => (h.command ?? "").includes(hookScript)));
+    if (!already) { hooks[event] = [...existing, ...make()]; added.push(event); }
   }
   settings.hooks = hooks;
   writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
@@ -44,7 +54,7 @@ function main() {
   if (added.length) {
     console.log(`Installed hooks for: ${added.join(", ")}`);
   } else {
-    console.log("All five hook events were already present — nothing changed.");
+    console.log("Our hook command was already present on all five events — nothing changed.");
   }
   console.log(`Hook command: ${command}`);
   console.log("\nNext:");

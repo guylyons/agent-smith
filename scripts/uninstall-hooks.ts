@@ -16,7 +16,9 @@ type Entry = { matcher?: string; hooks?: { type?: string; command?: string }[] }
 
 function main() {
   if (!existsSync(settingsPath)) { console.log("No settings file; nothing to do."); return; }
-  const settings = JSON.parse(readFileSync(settingsPath, "utf8")) as Record<string, unknown>;
+  let settings: Record<string, unknown>;
+  try { settings = JSON.parse(readFileSync(settingsPath, "utf8")) as Record<string, unknown>; }
+  catch { console.error(`Could not parse ${settingsPath}; aborting so nothing is clobbered.`); process.exit(1); }
   const hooks = settings.hooks as Record<string, Entry[]> | undefined;
   if (!hooks) { console.log("No hooks configured; nothing to do."); return; }
 
