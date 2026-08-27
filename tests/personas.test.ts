@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { parsePersona, loadPersonas, getPersona, composePrompt } from "../src/lib/personas";
+import { parsePersona, loadPersonas, getPersona, composePrompt, PERSONA_ID_RE } from "../src/lib/personas";
 
 const dir = "/tmp/aw-personas-test";
 function reset() { rmSync(dir, { recursive: true, force: true }); mkdirSync(dir, { recursive: true }); }
@@ -113,4 +113,26 @@ test("a user override beats the persona", () => {
 test("persona survives a schema round-trip and is optional", () => {
   expect(parseStatus({ ...A({ persona: "frontend-ux" }) })!.persona).toBe("frontend-ux");
   expect(parseStatus({ ...A({}) })!.persona).toBeUndefined();
+});
+
+test("PERSONA_ID_RE does not drift between src/lib/personas.ts and hooks/status.ts", () => {
+  // Guard against silent divergence of the deliberately-duplicated regex.
+  // The hook keeps its own copy to avoid loading the registry on every tool use.
+  // If the two copies diverge, personas silently drop without error.
+  const hookPath = join(import.meta.dir, "../hooks/status.ts");
+  const hookContent = readFileSync(hookPath, "utf8");
+
+  // Extract the regex literal from: const PERSONA_ID_RE = /^[a-z0-9-]{1,64}$/;
+  const match = hookContent.match(/const\s+PERSONA_ID_RE\s*=\s*(\/.+?\/)\s*;/);
+  expect(match, `Failed to extract PERSONA_ID_RE from ${hookPath}`).toBeTruthy();
+
+  const hookRegexLiteral = match![1];
+  const registryRegexLiteral = `/${PERSONA_ID_RE.source}/`;
+
+  expect(hookRegexLiteral,
+    `Regex drift detected:\n  hooks/status.ts: ${hookRegexLiteral}\n  src/lib/personas.ts: ${registryRegexLiteral}`
+  ).toBe(registryRegexLiteral);
+
+  // Also ensure no flags were accidentally added on either side.
+  expect(PERSONA_ID_RE.flags).toBe("");
 });
