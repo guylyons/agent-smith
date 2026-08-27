@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { DragEvent } from "react";
+import type { AgentStatus } from "../schema";
 import type { Board, Column, Card } from "../lib/board";
 import {
   addColumn, renameColumn, setInstruction, deleteColumn, reorderColumn,
@@ -20,7 +21,7 @@ type Mutate = (fn: (b: Board) => Board) => void;
 // snapshot); every edit applies a PURE op via a functional update — so rapid
 // edits build on each other instead of clobbering — and posts the result to the
 // server, which persists it and echoes it back over SSE.
-export function TheLine({ board: incoming }: { board: Board }) {
+export function TheLine({ board: incoming, agents }: { board: Board; agents: AgentStatus[] }) {
   const [board, setBoard] = useState(incoming);
   const [addingCol, setAddingCol] = useState(false);
   const [openCardId, setOpenCardId] = useState<string | null>(null);
@@ -67,6 +68,7 @@ export function TheLine({ board: incoming }: { board: Board }) {
         <CardModal
           card={openCard}
           columnName={openColumn?.name ?? ""}
+          agents={agents}
           mutate={mutate}
           onClose={() => setOpenCardId(null)}
         />

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import type { AgentStatus } from "../schema";
 import type { Board, Card } from "../lib/board";
 import { renameCard, setCardDescription, assignCard, addComment, deleteComment } from "../lib/board";
-import { fetchPersonas, type PersonaInfo } from "./actions";
 
 type Mutate = (fn: (b: Board) => Board) => void;
 
@@ -13,13 +13,15 @@ const ME = "You";
 // single card room to breathe: editable title + description, a persona
 // assignee, and a comment thread. Backdrop click or Esc closes it.
 export function CardModal({
-  card, columnName, mutate, onClose,
+  card, columnName, agents, mutate, onClose,
 }: {
-  card: Card; columnName: string; mutate: Mutate; onClose: () => void;
+  card: Card; columnName: string; agents: AgentStatus[]; mutate: Mutate; onClose: () => void;
 }) {
-  const [personas, setPersonas] = useState<PersonaInfo[]>([]);
-
-  useEffect(() => { void fetchPersonas().then(setPersonas); }, []);
+  // The assignee is a live agent session: its assignee.id is the sessionId. If
+  // that session is no longer in the snapshot it has ended — we keep it selected
+  // and labelled so the card still shows who had it.
+  const assigned = card.assignee;
+  const assignedIsLive = !!assigned && agents.some((a) => a.sessionId === assigned.id);
 
   // Esc closes from anywhere in the modal.
   useEffect(() => {
@@ -48,21 +50,24 @@ export function CardModal({
             <label className="pix cardmodal-label">ASSIGNEE</label>
             <select
               className="cardmodal-select"
-              value={card.assignee?.id ?? ""}
+              value={assigned?.id ?? ""}
               onChange={(e) => {
-                const p = personas.find((x) => x.id === e.target.value);
-                mutate((b) => assignCard(b, card.id, p ? { id: p.id, name: p.name } : null));
+                const a = agents.find((x) => x.sessionId === e.target.value);
+                mutate((b) => assignCard(b, card.id, a ? { id: a.sessionId, name: a.name } : null));
               }}
             >
               <option value="">Unassigned</option>
-              {/* Keep a stale assignee selectable even if its persona file is gone. */}
-              {card.assignee && !personas.some((p) => p.id === card.assignee!.id) && (
-                <option value={card.assignee.id}>{card.assignee.name}</option>
+              {/* A prior assignee whose session has ended: keep it selected/visible. */}
+              {assigned && !assignedIsLive && (
+                <option value={assigned.id}>{assigned.name} (ended)</option>
               )}
-              {personas.map((p) => (
-                <option key={p.id} value={p.id}>{p.name} — {p.role}</option>
+              {agents.map((a) => (
+                <option key={a.sessionId} value={a.sessionId}>
+                  {a.name} — {a.role} · {a.state}
+                </option>
               ))}
             </select>
+            {!agents.length && <p className="cardmodal-empty">No agents are running right now.</p>}
           </div>
 
           <div className="cardmodal-row">
