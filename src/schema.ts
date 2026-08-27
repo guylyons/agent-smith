@@ -20,6 +20,10 @@ export const AgentStatusSchema = z.object({
   title: z.string().optional(),
   // count of subagents (Task tool) currently active inside this session
   subagents: z.number().optional(),
+  // persona id (see personas/*.md), captured by the hook from AGENT_PERSONA at
+  // launch. Only the id is stored — name/role/sprite resolve from the registry
+  // at snapshot time, so editing a persona file updates live desks.
+  persona: z.string().optional(),
   // user-chosen sprite override (palette index + gear id + character body),
   // replacing the deterministic default derived from sessionId+role
   sprite: z.object({ palette: z.number(), gear: z.string(), body: z.string().optional() }).optional(),

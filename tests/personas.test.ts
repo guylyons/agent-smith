@@ -71,3 +71,46 @@ test("the shipped built-in personas all load", () => {
   const ids = loadPersonas().map((p) => p.id);
   expect(ids).toEqual(["backend-dev", "editor", "frontend-ux", "scrum-master"]);
 });
+
+import { applyPersonas } from "../src/lib/personas";
+import { parseStatus, type AgentStatus } from "../src/schema";
+import { applyOverrides } from "../src/lib/overrides";
+
+const A = (o: Partial<AgentStatus>): AgentStatus => ({
+  sessionId: "s", name: "NOVA", role: "General", ticket: null, state: "idle",
+  doing: "x", cwd: "/repo", branch: null, updatedAt: 0, ...o,
+});
+
+test("a persona replaces name, role and sprite", () => {
+  const personas = [parsePersona(GOOD, "frontend-ux")!];
+  const [a] = applyPersonas([A({ persona: "frontend-ux" })], personas);
+  expect(a.name).toBe("PIXEL");
+  expect(a.role).toBe("Frontend UX");
+  expect(a.sprite).toEqual({ body: "engineer", palette: 2, gear: "" });
+});
+
+test("agents without a persona, or with an unknown one, pass through untouched", () => {
+  const personas = [parsePersona(GOOD, "frontend-ux")!];
+  const input = [A({ sessionId: "a" }), A({ sessionId: "b", persona: "ghost" })];
+  expect(applyPersonas(input, personas)).toEqual(input);
+});
+
+test("applyPersonas never mutates its input", () => {
+  const personas = [parsePersona(GOOD, "frontend-ux")!];
+  const input = [A({ persona: "frontend-ux" })];
+  applyPersonas(input, personas);
+  expect(input[0].name).toBe("NOVA");
+});
+
+test("a user override beats the persona", () => {
+  const personas = [parsePersona(GOOD, "frontend-ux")!];
+  const agents = [A({ sessionId: "s1", persona: "frontend-ux" })];
+  const out = applyOverrides(applyPersonas(agents, personas), { s1: { name: "Captain" } });
+  expect(out[0].name).toBe("Captain");     // override wins
+  expect(out[0].role).toBe("Frontend UX"); // persona still supplies the rest
+});
+
+test("persona survives a schema round-trip and is optional", () => {
+  expect(parseStatus({ ...A({ persona: "frontend-ux" }) })!.persona).toBe("frontend-ux");
+  expect(parseStatus({ ...A({}) })!.persona).toBeUndefined();
+});

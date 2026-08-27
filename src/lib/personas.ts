@@ -6,6 +6,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
+import type { AgentStatus } from "../schema";
 import { BODIES, PALETTES } from "../ui/sprite-data";
 
 export const PERSONA_ID_RE = /^[a-z0-9-]{1,64}$/;
@@ -76,4 +77,16 @@ export function composePrompt(p: Persona): string {
   if (p.skills.length === 0) return p.prompt;
   const list = p.skills.map((s) => `\`${s}\``).join(", ");
   return `${p.prompt}\n\nReach for ${list} via the Skill tool when the work calls for it.`;
+}
+
+/** Fill name/role/sprite from each agent's persona. Mirrors `applyOverrides` in
+ *  overrides.ts: pure, never mutates its inputs. Call it INSIDE applyOverrides —
+ *  overrides are applied last so a name you typed yourself always wins. */
+export function applyPersonas(agents: AgentStatus[], personas: Persona[]): AgentStatus[] {
+  if (personas.length === 0) return agents;
+  const byId = new Map(personas.map((p) => [p.id, p]));
+  return agents.map((a) => {
+    const p = a.persona ? byId.get(a.persona) : undefined;
+    return p ? { ...a, name: p.name, role: p.role, sprite: { ...p.sprite } } : a;
+  });
 }
