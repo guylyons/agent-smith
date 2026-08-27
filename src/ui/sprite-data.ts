@@ -260,6 +260,42 @@ export const GEAR = {
       "......OWWOO.....",
       "......OWWOO.....",
       "......OOOO......"]}
+  ],
+  // Hats sit over the top of the head (rows 1-4), covering the hair.
+  // Cap: a rounded crown covering the head with a dark brim jutting out front.
+  cap:[
+    {at:1, rows:[
+      "....OGGGGGO.....",
+      "...OGGGGGGGO....",
+      "..OGGGGGGGGGO...",
+      "..OOOOOOOOOOOOO."]}
+  ],
+  // Beanie: a snug knit dome with a folded brim band.
+  beanie:[
+    {at:0, rows:[
+      ".....OOOOO......",
+      "....OGGGGGGO....",
+      "..OOGGGGGGGGO...",
+      "..OGGGGGGGGGO...",
+      "..OBBBBBBBBBO..."]}
+  ],
+  // Necktie: a knot at the collar and a blade hanging down the chest.
+  necktie:[
+    {at:12, rows:[
+      ".......NN.......",
+      "......ONNO......",
+      ".......NN.......",
+      "......NNNN......",
+      "......NNNN......"]}
+  ],
+  // Phone: a small lit handset held up at the chest.
+  phone:[
+    {at:14, rows:[
+      "......OOO.......",
+      "......OWO.......",
+      "......OWO.......",
+      "......OGO.......",
+      "......OOO......."]}
   ]
 };
 
@@ -310,9 +346,15 @@ export const PALETTES: SpritePalette[] = [
 // this set, so growing the pickable list below never shifts an existing sprite's
 // deterministic gear (paletteFor hashes against DEFAULT_GEARS.length).
 export const DEFAULT_GEARS = ["headset", "goggles", "hood", "visor", "topknot"];
-// Everything offered in the sprite picker: the original head gear plus opt-in
-// eyewear and held accessories.
-export const GEARS = [...DEFAULT_GEARS, "sunglasses", "spectacles", "laptop", "keyboard", "coffee"];
+// A bare worker with no accessory. Has no entry in GEAR, so spriteRects draws
+// the plain body — it leads the picker as the "take it all off" choice.
+export const NONE_GEAR = "none";
+// Everything offered in the sprite picker: the bare option, the original head
+// gear, then opt-in eyewear, hats, neckwear and held accessories.
+export const GEARS = [
+  NONE_GEAR, ...DEFAULT_GEARS,
+  "sunglasses", "spectacles", "cap", "beanie", "necktie", "laptop", "keyboard", "phone", "coffee",
+];
 const ROLE_GEAR: Record<string, string> = {
   "Ticket triage": "headset", "Component build": "goggles", "Migration": "hood",
   "Test & profile": "visor", "Docs & changelog": "topknot",

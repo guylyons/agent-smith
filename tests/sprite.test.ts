@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { spriteRects, paletteFor, PALETTES, BODIES, BODY_IDS, GEARS, DEFAULT_GEARS, GEAR } from "../src/ui/sprite-data";
+import { spriteRects, paletteFor, PALETTES, BODIES, BODY_IDS, GEARS, DEFAULT_GEARS, GEAR, NONE_GEAR } from "../src/ui/sprite-data";
 
 test("paletteFor is deterministic per sessionId", () => {
   expect(paletteFor("abc", "General")).toEqual(paletteFor("abc", "General"));
@@ -37,13 +37,26 @@ test("spriteRects draws pixels for every body", () => {
 });
 
 test("the new accessories are exposed as pickable gear", () => {
-  for (const g of ["sunglasses", "spectacles", "laptop", "keyboard", "coffee"]) {
+  for (const g of ["sunglasses", "spectacles", "laptop", "keyboard", "coffee",
+                   "cap", "beanie", "necktie", "phone"]) {
     expect(GEARS).toContain(g);
   }
 });
 
+test("a NONE option is offered and renders the bare worker", () => {
+  expect(GEARS).toContain(NONE_GEAR);
+  // NONE has no overlay, so it must reproduce the plain body exactly.
+  const bare = spriteRects({ body: "worker", gear: NONE_GEAR, palette: PALETTES[0] });
+  const unknown = spriteRects({ body: "worker", gear: "__no_such_gear__", palette: PALETTES[0] });
+  expect(bare).toEqual(unknown);
+});
+
 test("every gear id has an overlay definition and vice versa", () => {
-  for (const g of GEARS) expect(GEAR[g as keyof typeof GEAR]).toBeDefined();
+  // NONE is deliberately overlay-less (the bare worker); every other gear draws.
+  for (const g of GEARS) {
+    if (g === NONE_GEAR) continue;
+    expect(GEAR[g as keyof typeof GEAR]).toBeDefined();
+  }
   for (const g of Object.keys(GEAR)) expect(GEARS).toContain(g);
 });
 
@@ -64,6 +77,7 @@ test("each gear composites a visibly different sprite onto the worker", () => {
   const base = spriteRects({ body: "worker", gear: "__none__", palette: PALETTES[0] });
   const seen = new Set<string>();
   for (const g of GEARS) {
+    if (g === NONE_GEAR) continue; // NONE is meant to equal the bare body
     const rects = spriteRects({ body: "worker", gear: g, palette: PALETTES[0] });
     const key = JSON.stringify(rects);
     // gear actually changes the sprite...
