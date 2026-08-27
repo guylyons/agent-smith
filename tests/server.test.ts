@@ -109,6 +109,35 @@ test("POST /action/upload rejects a non-image type", async () => {
   server.stop(true);
 });
 
+test("GET /personas lists the built-ins without prompt text", async () => {
+  const { makeServer } = await import("../src/server");
+  const srv = makeServer(0, { scan: false });
+  const res = await fetch(`http://localhost:${srv.port}/personas`);
+  expect(res.status).toBe(200);
+  const list = (await res.json()) as any[];
+  expect(list.map((p) => p.id)).toEqual(["backend-dev", "editor", "frontend-ux", "scrum-master"]);
+  expect(list[0].name).toBeTruthy();
+  expect(list[0].role).toBeTruthy();
+  expect(Array.isArray(list[0].skills)).toBe(true);
+  expect(list[0].prompt).toBeUndefined();
+  srv.stop();
+});
+
+test("readSnapshot resolves a persona onto the agent", () => {
+  reset();
+  writeFileSync(join(dir, "a.json"), valid({ sessionId: "a", persona: "backend-dev", name: "NOVA", role: "General" }));
+  const [agent] = readSnapshot(dir, Date.now()).agents;
+  expect(agent.name).toBe("ANVIL");
+  expect(agent.role).toBe("Backend Dev");
+  expect(agent.sprite!.body).toBe("robot");
+});
+
+test("readSnapshot leaves a persona-less agent alone", () => {
+  reset();
+  writeFileSync(join(dir, "a.json"), valid({ sessionId: "a", name: "NOVA", role: "General" }));
+  expect(readSnapshot(dir, Date.now()).agents[0].name).toBe("NOVA");
+});
+
 test("scan:true runs a pass and stop() cleans up without leaking a timer", async () => {
   reset();
   process.env.AGENT_STATUS_DIR = dir;

@@ -5,6 +5,7 @@ import { buildSnapshot, type Snapshot } from "./lib/snapshot";
 import { ensureStatusDir, statusDir } from "./lib/paths";
 import { scanLiveSessions, readConversation, readSubagents } from "./scan";
 import { readOverrides, applyOverrides, setNameOverride, setSpriteOverride } from "./lib/overrides";
+import { loadPersonas, applyPersonas } from "./lib/personas";
 import { readLineState, setLineStage } from "./lib/line-state";
 import { ALLOWED_MODELS, ALLOWED_PERMISSION_MODES, focusSession, interruptSession, killAgent, sendPrompt, spawnAgent } from "./ghostty";
 import { readRepo, countUnpushed } from "./repo";
@@ -36,7 +37,9 @@ export function readSnapshot(dir: string, now: number, committedCwds: Set<string
       if (s) agents.push(s);
     } catch { /* half-written; skip */ }
   }
-  return buildSnapshot(applyOverrides(agents, readOverrides(dir)), now, {
+  // personas resolve INSIDE applyOverrides so a name you typed yourself wins:
+  // user override > persona > inferRole > hashed codename
+  return buildSnapshot(applyOverrides(applyPersonas(agents, loadPersonas()), readOverrides(dir)), now, {
     committedCwds,
     designations: readLineState(dir),
   });
@@ -123,6 +126,12 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
         return json({ subagents: await readSubagents(sid, Date.now()) });
       }
 
+      // the persona picker's options
+      if (url.pathname === "/personas") {
+        // id/name/role/skills only — the prompt body is never sent to the browser
+        return json(loadPersonas().map(({ id, name, role, skills }) => ({ id, name, role, skills })));
+      }
+
       // a session's git context (branch, commits, working-tree status)
       if (url.pathname === "/repo") {
         const sid = url.searchParams.get("sessionId") ?? "";
@@ -141,7 +150,7 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
           return json({ ok: false, error: "cross-site blocked" }, 403);
         }
         const action = url.pathname.slice("/action/".length);
-        let body: { sessionId?: string; name?: string; text?: string; cwd?: string; palette?: number; gear?: string; body?: string; model?: string; permissionMode?: string; worktree?: string; key?: string; stage?: string; label?: string; type?: string; dataBase64?: string };
+        let body: { sessionId?: string; name?: string; text?: string; cwd?: string; palette?: number; gear?: string; body?: string; model?: string; permissionMode?: string; worktree?: string; persona?: string; key?: string; stage?: string; label?: string; type?: string; dataBase64?: string };
         try { body = await req.json(); } catch { return json({ ok: false, error: "bad body" }, 400); }
         // spawn creates a brand-new session — it has a folder + task, not a sessionId
         if (action === "spawn") {
@@ -154,7 +163,8 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
           // A blank/whitespace field means "no worktree" (launch in the folder). The
           // name is sanitized to a slug inside createWorktree, so pass it as typed.
           const worktree = typeof body.worktree === "string" && body.worktree.trim() ? body.worktree.trim() : undefined;
-          return json(await spawnAgent(cwd, task, { model, permissionMode, worktree }));
+          const persona = typeof body.persona === "string" && body.persona.trim() ? body.persona.trim() : undefined;
+          return json(await spawnAgent(cwd, task, { model, permissionMode, worktree, persona }));
         }
         // line-stage: your manual review/merged designation. Keyed by item key,
         // not sessionId (a designated item may outlive its session), so it's
