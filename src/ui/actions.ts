@@ -77,10 +77,24 @@ export async function uploadImage(file: File): Promise<string | null> {
 /** Launch a new Claude agent in `cwd` with `task` as its opening prompt.
  *  `opts.model` and `opts.permissionMode` are forwarded to the server, which
  *  allowlist-checks them again before building the launch command. */
-export async function spawnAgent(cwd: string, task: string, opts?: { model?: string; permissionMode?: string; worktree?: string }): Promise<boolean> {
-  const r = await post("spawn", { cwd, text: task, model: opts?.model, permissionMode: opts?.permissionMode, worktree: opts?.worktree });
+export async function spawnAgent(cwd: string, task: string, opts?: { model?: string; permissionMode?: string; worktree?: string; persona?: string }): Promise<boolean> {
+  const r = await post("spawn", { cwd, text: task, model: opts?.model, permissionMode: opts?.permissionMode, worktree: opts?.worktree, persona: opts?.persona });
   if (!r.ok) toast(r.error ?? "could not launch");
   return r.ok;
+}
+
+export type PersonaInfo = { id: string; name: string; role: string; skills: string[] };
+
+/** The personas the server offers. Returns [] on any failure so a blip degrades
+ *  to "no persona choice" rather than a broken modal. */
+export async function fetchPersonas(): Promise<PersonaInfo[]> {
+  try {
+    const res = await fetch("/personas");
+    if (!res.ok) return [];
+    return (await res.json()) as PersonaInfo[];
+  } catch {
+    return [];
+  }
 }
 
 export type ChatMessage = { role: "user" | "assistant" | "tool"; text: string };

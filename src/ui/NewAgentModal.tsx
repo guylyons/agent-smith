@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { spawnAgent } from "./actions";
+import { spawnAgent, fetchPersonas, type PersonaInfo } from "./actions";
 import { slugify } from "../lib/slug";
 import { toast } from "./toast";
 
@@ -16,12 +16,16 @@ export function NewAgentModal({ recentFolders, onClose }: { recentFolders: strin
   const [worktree, setWorktree] = useState("");
   const [worktreeTouched, setWorktreeTouched] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [personas, setPersonas] = useState<PersonaInfo[]>([]);
+  const [persona, setPersona] = useState("");
 
   // Auto-fill the worktree name from the task until the user edits the field
   // themselves. Leaving it blank launches in the folder (today's behavior).
   useEffect(() => {
     if (!worktreeTouched) setWorktree(slugify(task));
   }, [task, worktreeTouched]);
+
+  useEffect(() => { void fetchPersonas().then(setPersonas); }, []);
 
   async function launch() {
     if (!folder.trim() || !task.trim() || busy) return;
@@ -30,6 +34,7 @@ export function NewAgentModal({ recentFolders, onClose }: { recentFolders: strin
       model: model || undefined,
       permissionMode: permissionMode || undefined,
       worktree: worktree.trim() || undefined,
+      persona: persona || undefined,
     });
     setBusy(false);
     if (ok) { toast("Launching new agent…"); onClose(); }
@@ -49,6 +54,18 @@ export function NewAgentModal({ recentFolders, onClose }: { recentFolders: strin
               <button key={f} className={`deskbtn ${f === folder ? "on" : ""}`} title={f} onClick={() => setFolder(f)}>{repoName(f)}</button>
             ))}
           </div>
+        )}
+
+        {personas.length > 0 && (
+          <>
+            <label className="pix newagent-label">PERSONA</label>
+            <select className="reply-input newagent-select" value={persona} onChange={(e) => setPersona(e.target.value)}>
+              <option value="">None</option>
+              {personas.map((p) => (
+                <option key={p.id} value={p.id}>{p.role} · {p.name}</option>
+              ))}
+            </select>
+          </>
         )}
 
         <div className="newagent-opts">
@@ -89,7 +106,7 @@ export function NewAgentModal({ recentFolders, onClose }: { recentFolders: strin
             {busy ? "LAUNCHING…" : "▸ LAUNCH"}
           </button>
         </div>
-        <div className="pix newagent-hint">Opens a new Claude session in a Ghostty tab and runs your task. It'll appear on the board; chat with it here. With a WORKTREE name it runs in an isolated <code>.claude/worktrees/&lt;name&gt;</code> branch off HEAD, so agents never share a working tree. (⌘/Ctrl+Enter to launch)</div>
+        <div className="pix newagent-hint">Opens a new Claude session in a Ghostty tab and runs your task. It'll appear on the board; chat with it here. With a WORKTREE name it runs in an isolated <code>.claude/worktrees/&lt;name&gt;</code> branch off HEAD, so agents never share a working tree. A PERSONA starts the agent in a role — its skills, its look on the board. (⌘/Ctrl+Enter to launch)</div>
       </div>
     </div>
   );
