@@ -4,3 +4,6 @@ dist/
 # verification artifacts
 .playwright-mcp/
 agent-workshop-live*.png
+
+# subagent worktrees (scratch)
+.claude/worktrees/
