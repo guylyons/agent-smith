@@ -2,7 +2,7 @@
 // never blocking dialogs. Confirmation/rename UX lives in the components.
 import { toast } from "./toast";
 
-type Result = { ok: boolean; error?: string };
+type Result = { ok: boolean; error?: string; path?: string };
 
 async function post(action: string, body: object): Promise<Result> {
   try {
@@ -52,6 +52,26 @@ export function setLineStage(key: string, stage: "done" | "review" | "merged", l
 
 export function sendPromptTo(sessionId: string, text: string): Promise<boolean> {
   return act("prompt", { sessionId, text });
+}
+
+/** Upload an image dropped/pasted into a chat. The server saves it to a temp
+ *  file and returns the path, which the caller prepends to the prompt so the
+ *  agent reads the image by path. Returns null (and toasts) on any failure. */
+export async function uploadImage(file: File): Promise<string | null> {
+  try {
+    const buf = await file.arrayBuffer();
+    let bin = "";
+    const bytes = new Uint8Array(buf);
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    }
+    const r = await post("upload", { name: file.name || "image", type: file.type, dataBase64: btoa(bin) });
+    if (!r.ok || !r.path) { toast(r.error ?? "upload failed"); return null; }
+    return r.path;
+  } catch (e) {
+    toast(`upload failed: ${String(e)}`);
+    return null;
+  }
 }
 
 /** Launch a new Claude agent in `cwd` with `task` as its opening prompt.

@@ -1,14 +1,20 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type DragEvent, type ClipboardEvent } from "react";
 import type { AgentStatus } from "../schema";
 import { Sprite } from "./Sprite";
 import { SpritePicker } from "./SpritePicker";
 import { renderMarkdown } from "./markdown";
 import {
-  fetchConversation, fetchSubagents, fetchRepo, sendPromptTo, focusSession, pauseSession, renameSession, killAgent,
+  fetchConversation, fetchSubagents, fetchRepo, sendPromptTo, uploadImage, focusSession, pauseSession, renameSession, killAgent,
   type ChatMessage, type Subagent, type RepoInfo, type PendingQuestion,
 } from "./actions";
 
 type Pending = { id: string; text: string; base: number; at: number };
+type Attachment = { id: string; name: string; path: string };
+
+// basename of a saved upload path, for the chip label
+function baseOf(path: string): string {
+  return path.split("/").pop() || path;
+}
 
 export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStatus; ended: boolean; onClose: () => void }) {
   const [tab, setTab] = useState<"chat" | "info">("chat");
@@ -19,7 +25,10 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
   const [question, setQuestion] = useState<PendingQuestion | null>(null);
   const [picks, setPicks] = useState<Record<number, Set<string>>>({});
   const [text, setText] = useState("");
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [dragOver, setDragOver] = useState(false);
   const [busy, setBusy] = useState(false);
+  const attachSeq = useRef(0);
   const [loaded, setLoaded] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(agent.name);
@@ -81,18 +90,53 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
 
   async function send() {
     const t = text.trim();
-    if (!t || sendingRef.current) return; // ref, not `busy`: two Enters in one frame both see busy=false
+    // Send with attachments alone (image, no words) or text alone, but not empty.
+    if ((!t && attachments.length === 0) || sendingRef.current) return; // ref, not `busy`: two Enters in one frame both see busy=false
     sendingRef.current = true;
     setBusy(true);
+    // Prepend each saved image path on its own line so Claude Code reads them,
+    // then the typed message. Paths lead; the text (if any) follows.
+    const paths = attachments.map((a) => a.path);
+    const outgoing = [...paths, ...(t ? [t] : [])].join("\n");
     setText("");
+    setAttachments([]);
     const id = `${Date.now()}-${Math.random()}`;
-    const base = messages.filter((msg) => msg.role === "user" && msg.text.trim() === t).length;
-    setPending((p) => [...p, { id, text: t, base, at: Date.now() }]);
+    const base = messages.filter((msg) => msg.role === "user" && msg.text.trim() === outgoing.trim()).length;
+    setPending((p) => [...p, { id, text: outgoing, base, at: Date.now() }]);
     atBottomRef.current = true;
-    const ok = await sendPromptTo(agent.sessionId, t);
+    const ok = await sendPromptTo(agent.sessionId, outgoing);
     sendingRef.current = false;
     setBusy(false);
     if (!ok) setPending((p) => p.filter((x) => x.id !== id)); // roll back on failure
+  }
+
+  // Upload each image file and add it as an attachment chip. Non-image files
+  // (and failed uploads) are skipped. Returns true if any file was an image, so
+  // a paste with an image can suppress the default text paste.
+  async function addImageFiles(files: Iterable<File>): Promise<boolean> {
+    const images = [...files].filter((f) => f.type.startsWith("image/"));
+    if (images.length === 0) return false;
+    await Promise.all(images.map(async (f) => {
+      const path = await uploadImage(f);
+      if (!path) return;
+      const id = `att-${attachSeq.current++}`;
+      setAttachments((a) => [...a, { id, name: f.name || baseOf(path), path }]);
+    }));
+    return true;
+  }
+
+  function onDrop(e: DragEvent) {
+    const files = e.dataTransfer?.files;
+    if (files && files.length) { e.preventDefault(); void addImageFiles(files); }
+    setDragOver(false);
+  }
+
+  function onPaste(e: ClipboardEvent) {
+    const files = e.clipboardData?.files;
+    if (files && files.length && [...files].some((f) => f.type.startsWith("image/"))) {
+      e.preventDefault(); // don't also paste a filename/blob into the textarea
+      void addImageFiles(files);
+    }
   }
 
   async function answer(text: string) {
@@ -126,7 +170,10 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
   return (
     <>
     <div className="drawer-backdrop" onClick={onClose}>
-      <aside className="win drawer" onClick={(e) => e.stopPropagation()}>
+      <aside className={`win drawer${dragOver ? " drag-over" : ""}`} onClick={(e) => e.stopPropagation()}
+        onDragOver={(e) => { if (e.dataTransfer?.types.includes("Files")) { e.preventDefault(); setDragOver(true); } }}
+        onDragLeave={(e) => { if (e.currentTarget === e.target) setDragOver(false); }}
+        onDrop={onDrop}>
         <header className="drawer-head">
           <div className="drawer-sprite" title="Change sprite" style={{ cursor: "pointer" }} onClick={() => setPickSprite(true)}>
             <Sprite sessionId={agent.sessionId} role={agent.role} state={agent.state} override={agent.sprite} />
@@ -241,22 +288,35 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
               <div className="thinking-pill"><span className="thinking-spin">✻</span> {agent.doing || "thinking"}…</div>
             )}
 
+            {attachments.length > 0 && (
+              <div className="attach-row">
+                {attachments.map((a) => (
+                  <span key={a.id} className="attach-chip" title={a.path}>
+                    <span className="attach-name">🖼 {a.name}</span>
+                    <button className="attach-x" title="Remove"
+                      onClick={() => setAttachments((list) => list.filter((x) => x.id !== a.id))}>✕</button>
+                  </span>
+                ))}
+              </div>
+            )}
+
             <div className="drawer-foot">
               <textarea
                 ref={taRef}
                 className="reply-input reply-textarea"
                 autoFocus
                 rows={1}
-                placeholder={ended ? "Session ended" : `Message ${agent.name}… (Enter to send · Shift+Enter for newline)`}
+                placeholder={ended ? "Session ended" : `Message ${agent.name}… (Enter to send · Shift+Enter for newline · drop or paste an image)`}
                 value={text}
                 disabled={busy}
                 onChange={(e) => setText(e.target.value)}
+                onPaste={onPaste}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); }
                   if (e.key === "Escape") onClose();
                 }}
               />
-              <button className="deskbtn" disabled={busy} onClick={() => void send()}>▸ SEND</button>
+              <button className="deskbtn" disabled={busy || (!text.trim() && attachments.length === 0)} onClick={() => void send()}>▸ SEND</button>
             </div>
           </>
         ) : (

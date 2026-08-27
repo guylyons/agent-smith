@@ -8,6 +8,7 @@ import { readOverrides, applyOverrides, setNameOverride, setSpriteOverride } fro
 import { readLineState, setLineStage } from "./lib/line-state";
 import { ALLOWED_MODELS, ALLOWED_PERMISSION_MODES, focusSession, interruptSession, killAgent, sendPrompt, spawnAgent } from "./ghostty";
 import { readRepo, countUnpushed } from "./repo";
+import { saveUpload } from "./lib/uploads";
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -140,7 +141,7 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
           return json({ ok: false, error: "cross-site blocked" }, 403);
         }
         const action = url.pathname.slice("/action/".length);
-        let body: { sessionId?: string; name?: string; text?: string; cwd?: string; palette?: number; gear?: string; body?: string; model?: string; permissionMode?: string; worktree?: string; key?: string; stage?: string; label?: string };
+        let body: { sessionId?: string; name?: string; text?: string; cwd?: string; palette?: number; gear?: string; body?: string; model?: string; permissionMode?: string; worktree?: string; key?: string; stage?: string; label?: string; type?: string; dataBase64?: string };
         try { body = await req.json(); } catch { return json({ ok: false, error: "bad body" }, 400); }
         // spawn creates a brand-new session — it has a folder + task, not a sessionId
         if (action === "spawn") {
@@ -170,6 +171,17 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
           }
           push();
           return json({ ok: true });
+        }
+        // upload: save an image dropped/pasted into a chat to a temp file, and
+        // return its path. Not tied to a session — the path is later prepended to
+        // a prompt and typed into the terminal, where Claude Code reads it.
+        if (action === "upload") {
+          const name = typeof body.name === "string" ? body.name : "image";
+          const type = typeof body.type === "string" ? body.type : "";
+          const data = typeof body.dataBase64 === "string" ? body.dataBase64 : "";
+          if (!data) return json({ ok: false, error: "no image data" }, 400);
+          const r = saveUpload(name, type, data);
+          return json(r, r.ok ? 200 : 400);
         }
         if (!validSessionId(body.sessionId)) return json({ ok: false, error: "bad sessionId" }, 400);
         if (action === "rename") {

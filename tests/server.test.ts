@@ -1,7 +1,7 @@
 // tests/server.test.ts
 import { test, expect } from "bun:test";
 import { readSnapshot } from "../src/server";
-import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const dir = "/tmp/aw-server-test";
@@ -72,6 +72,40 @@ test("POST /action/line-stage with a non-designation stage clears it", async () 
   await post("done"); // moving back off review/merged clears the designation
   const merged = readSnapshot(dir, Date.now()).line;
   expect(merged.flatMap((s) => s.items)).toEqual([]);
+  server.stop(true);
+});
+
+test("POST /action/upload saves an image and returns its path", async () => {
+  reset();
+  process.env.AGENT_STATUS_DIR = dir;
+  process.env.AGENT_UPLOAD_DIR = "/tmp/aw-server-upload-test";
+  rmSync("/tmp/aw-server-upload-test", { recursive: true, force: true });
+  const { makeServer } = await import("../src/server");
+  const server = makeServer(0);
+  const res = await fetch(`http://localhost:${server.port}/action/upload`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name: "shot.png", type: "image/png", dataBase64: Buffer.from("PNG").toString("base64") }),
+  });
+  const out = (await res.json()) as { ok: boolean; path?: string };
+  expect(out.ok).toBe(true);
+  expect(out.path!.startsWith("/tmp/aw-server-upload-test/")).toBe(true);
+  expect(readFileSync(out.path!, "utf8")).toBe("PNG");
+  server.stop(true);
+});
+
+test("POST /action/upload rejects a non-image type", async () => {
+  reset();
+  process.env.AGENT_STATUS_DIR = dir;
+  const { makeServer } = await import("../src/server");
+  const server = makeServer(0);
+  const res = await fetch(`http://localhost:${server.port}/action/upload`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name: "x.svg", type: "image/svg+xml", dataBase64: Buffer.from("<svg>").toString("base64") }),
+  });
+  expect(res.status).toBe(400);
+  expect((await res.json()).ok).toBe(false);
   server.stop(true);
 });
 
