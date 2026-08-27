@@ -45,6 +45,29 @@ test("handles a bare-string user prompt and skips sidechain noise", () => {
   expect(parseConversation(lines)).toEqual([{ role: "user", text: "hello there" }]);
 });
 
+test("reformats a slash-command invocation instead of showing raw XML", () => {
+  const lines = [
+    L({ type: "user", message: { content: "<command-name>/clear</command-name>\n  <command-message>clear</command-message>\n  <command-args></command-args>" } }),
+  ];
+  expect(parseConversation(lines)).toEqual([{ role: "tool", text: "/clear" }]);
+});
+
+test("drops local-command-stdout noise", () => {
+  const lines = [
+    L({ type: "user", message: { content: "<local-command-stdout></local-command-stdout>" } }),
+    L({ type: "user", message: { content: [{ type: "text", text: "real prompt" }] } }),
+  ];
+  expect(parseConversation(lines)).toEqual([{ role: "user", text: "real prompt" }]);
+});
+
+test("summarizes a background task-notification as an activity line", () => {
+  const tn = '<task-notification>\n<task-id>b08iqj8lz</task-id>\n<status>killed</status>\n<summary>Background command "Restart server" was stopped</summary>\n</task-notification>';
+  const lines = [L({ type: "user", message: { content: tn } })];
+  expect(parseConversation(lines)).toEqual([
+    { role: "tool", text: 'Background command "Restart server" was stopped' },
+  ]);
+});
+
 test("keeps only the last max messages", () => {
   const lines = Array.from({ length: 10 }, (_, i) => L({ type: "user", message: { content: [{ type: "text", text: `m${i}` }] } }));
   const msgs = parseConversation(lines, 3);

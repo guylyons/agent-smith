@@ -58,6 +58,32 @@ function clip(s: string, max = 4000): string {
   return t.length > max ? t.slice(0, max) + "…" : t;
 }
 
+/**
+ * Some `type: "user"` entries aren't real prompts — the harness injects slash
+ * commands, their output, and background-task notifications as user messages with
+ * no isMeta flag. Render those as a compact activity line, or drop them, instead
+ * of showing raw XML in a "YOU" bubble. Returns a replacement message, `null` to
+ * drop, or `undefined` when the text is a genuine user prompt.
+ */
+function systemActivity(text: string): ChatMessage | null | undefined {
+  const t = text.trim();
+  // A slash command invocation: <command-name>/clear</command-name> (+ message/args).
+  const cmd = t.match(/^<command-name>([^<]*)<\/command-name>/);
+  if (cmd) {
+    const name = cmd[1].trim();
+    return name ? { role: "tool", text: name } : null;
+  }
+  // Output echoed back from a slash/local command — noise in the chat view.
+  if (t.startsWith("<local-command-stdout>")) return null;
+  // A background task finished or was stopped while the user was away.
+  if (t.startsWith("<task-notification>")) {
+    const status = t.match(/<status>([^<]*)<\/status>/)?.[1]?.trim();
+    const summary = t.match(/<summary>([\s\S]*?)<\/summary>/)?.[1]?.trim();
+    return { role: "tool", text: summary || (status ? `background task ${status}` : "background task update") };
+  }
+  return undefined;
+}
+
 /** Reduce transcript lines into an ordered chat log, keeping the last `max` messages. */
 export function parseConversation(lines: string[], max = 200): ChatMessage[] {
   const out: ChatMessage[] = [];
@@ -73,7 +99,10 @@ export function parseConversation(lines: string[], max = 200): ChatMessage[] {
       // a tool_result comes back as a user entry — don't render it as a user prompt
       if (parts.some((c) => c.type === "tool_result")) continue;
       const text = parts.filter((c) => c.type === "text" || c.text).map((c) => c.text ?? "").join("").trim();
-      if (text) out.push({ role: "user", text: clip(text) });
+      if (!text) continue;
+      const sys = systemActivity(text);
+      if (sys === null) continue;              // harness noise — drop it
+      out.push(sys ?? { role: "user", text: clip(text) });
     } else if (e.type === "assistant") {
       for (const c of contentArray(e)) {
         if (c.type === "text" && typeof c.text === "string" && c.text.trim()) {
