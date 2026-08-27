@@ -136,6 +136,51 @@ Click a desk to open its pane, with two tabs:
 ![conversation pane](docs/drawer.png)
 ![live subagents](docs/subagents.png)
 
+## Personas
+
+An agent can be launched *as* someone. Pick a **PERSONA** in **+ NEW AGENT** and
+the session starts with that role's system prompt — naming the skills it should
+reach for — and takes that persona's name, role line, and sprite on the board.
+
+Four ship with the app:
+
+| persona | plays | reaches for |
+| --- | --- | --- |
+| `scrum-master` | CADENCE — sizes and clarifies work before it starts | `task-review`, `superpowers:writing-plans` |
+| `editor` | QUILL — prose, docs, changelogs, commit messages | `superpowers:requesting-code-review` |
+| `backend-dev` | ANVIL — data, state, server correctness, test-first | `superpowers:test-driven-development`, `superpowers:systematic-debugging` |
+| `frontend-ux` | PIXEL — what the user sees and touches | `superpowers:brainstorming` |
+
+They live in `personas/` — one markdown file each, YAML frontmatter plus a prompt
+body. Edit one, or drop in your own; the file's `id` must match its filename and
+`sprite.body` must be one of the characters in the sprite picker. A malformed
+file is skipped, never fatal. Changes take effect on the next launch (and on the
+next snapshot for the board), with no restart.
+
+```markdown
+---
+id: frontend-ux
+name: PIXEL
+role: Frontend UX
+sprite: { body: engineer, palette: 2 }
+skills: [superpowers:brainstorming]
+---
+You are the frontend/UX developer on this team. …
+```
+
+Two limits worth knowing. Claude Code skills are model-invoked, so `skills:`
+tells an agent what to reach for — it can't force a skill to load. And a persona
+is chosen **at launch**: it can't be applied to a session that's already running,
+and a session started outside the dashboard has none.
+
+Personas are bound to a session by an `AGENT_PERSONA` env var that the session's
+hooks read, so a scanner-only session (no `install-hooks`) still *gets* its
+system prompt but won't show the persona's name or sprite on the board — the same
+trade as precise focus, prompt, and pause.
+
+*(Not to be confused with Claude Code's own skills in `.claude/skills/` — those
+are what a persona points at, not where personas live.)*
+
 ## Controls
 
 - **Click the sprite** (on a desk or in the pane) to pick a custom character —
@@ -160,6 +205,7 @@ Click a desk to open its pane, with two tabs:
   permission mode (Default/Plan/Accept edits/Bypass). It opens in a new Ghostty
   tab running `claude [--model …] [--permission-mode …] '<task>'` and appears on
   the board via the scanner once it starts.
+- **PERSONA** in **+ NEW AGENT** starts the agent in a role — see [Personas](#personas).
 
 ![new agent](docs/newagent.png)
 ![sprite picker](docs/spritepicker.png)
