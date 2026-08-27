@@ -172,7 +172,7 @@ const robot = [
   "................"
 ];
 
-const GEAR = {
+export const GEAR = {
   headset:[
     {at:1, rows:[
       "....OOOOOOO.....",
@@ -221,6 +221,45 @@ const GEAR = {
     {at:5, rows:[
       "............GO..",
       "............GO.."]}
+  ],
+  // Eyewear sits over the worker's eyes (rows 7-8): a dark brow bar plus two
+  // lenses split by a skin-toned nose bridge (the "." cells fall through to the
+  // face). Sunglasses read dark (F); spectacles read as blue glass (G).
+  sunglasses:[
+    {at:7, rows:[
+      "....OOOOOOOO....",
+      "....FFF..FFF...."]}
+  ],
+  spectacles:[
+    {at:7, rows:[
+      "....OOOOOOOO....",
+      "....GGG..GGG...."]}
+  ],
+  // Held items sit over the lap, framed by the hands at the edges.
+  // Laptop: an open lid with a bright white screen over a dark keyboard base.
+  laptop:[
+    {at:16, rows:[
+      "...OOOOOOOOO....",
+      "...OWWWWWWWO....",
+      "..OOOOOOOOOOO...",
+      "..OFFFFFFFFFO..."]}
+  ],
+  // Keyboard: a tray of alternating keycaps on the lap, just below the hands.
+  keyboard:[
+    {at:17, rows:[
+      "..OOOOOOOOOOO...",
+      "..OWFWFWFWFWO...",
+      "..OOOOOOOOOOO..."]}
+  ],
+  // Coffee: a white mug with a side handle held at the belly, steam rising.
+  coffee:[
+    {at:13, rows:[
+      ".......WW......."]},
+    {at:14, rows:[
+      "......OOOO......",
+      "......OWWOO.....",
+      "......OWWOO.....",
+      "......OOOO......"]}
   ]
 };
 
@@ -267,7 +306,13 @@ export const PALETTES: SpritePalette[] = [
   { O: "#0e2a20", H: "#4a3a1e", B: "#3f8f6a", G: "#4fbf6a", P: "#245140" },
   { O: "#1d2030", H: "#4a4a4a", B: "#8a8fa8", G: "#d8dcf0", P: "#4c5068" },
 ];
-export const GEARS = ["headset", "goggles", "hood", "visor", "topknot"];
+// The original head gear. Default (un-customized) sprites only ever draw from
+// this set, so growing the pickable list below never shifts an existing sprite's
+// deterministic gear (paletteFor hashes against DEFAULT_GEARS.length).
+export const DEFAULT_GEARS = ["headset", "goggles", "hood", "visor", "topknot"];
+// Everything offered in the sprite picker: the original head gear plus opt-in
+// eyewear and held accessories.
+export const GEARS = [...DEFAULT_GEARS, "sunglasses", "spectacles", "laptop", "keyboard", "coffee"];
 const ROLE_GEAR: Record<string, string> = {
   "Ticket triage": "headset", "Component build": "goggles", "Migration": "hood",
   "Test & profile": "visor", "Docs & changelog": "topknot",
@@ -282,5 +327,5 @@ export function paletteFor(sessionId: string, role: string) {
   const h = hash(sessionId);
   // The default character stays `worker` so existing sprites never change shape;
   // the new bodies are opt-in through the picker.
-  return { palette: PALETTES[h % PALETTES.length], gear: ROLE_GEAR[role] ?? GEARS[h % GEARS.length], body: "worker" };
+  return { palette: PALETTES[h % PALETTES.length], gear: ROLE_GEAR[role] ?? DEFAULT_GEARS[h % DEFAULT_GEARS.length], body: "worker" };
 }
