@@ -5,8 +5,9 @@ import { buildSnapshot, type Snapshot } from "./lib/snapshot";
 import { ensureStatusDir, statusDir } from "./lib/paths";
 import { scanLiveSessions, readConversation, readSubagents } from "./scan";
 import { readOverrides, applyOverrides, setNameOverride, setSpriteOverride } from "./lib/overrides";
+import { readLineState, setLineStage } from "./lib/line-state";
 import { ALLOWED_MODELS, ALLOWED_PERMISSION_MODES, focusSession, interruptSession, killAgent, sendPrompt, spawnAgent } from "./ghostty";
-import { readRepo } from "./repo";
+import { readRepo, countUnpushed } from "./repo";
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -23,10 +24,10 @@ function loadStatus(dir: string, sessionId: string): AgentStatus | null {
   catch { return null; }
 }
 
-export function readSnapshot(dir: string, now: number): Snapshot {
+export function readSnapshot(dir: string, now: number, committedCwds: Set<string> = new Set()): Snapshot {
   const agents: AgentStatus[] = [];
   let names: string[] = [];
-  // status files are <sessionId>.json; skip dotfiles like .overrides.json
+  // status files are <sessionId>.json; skip dotfiles like .overrides.json / .line.json
   try { names = readdirSync(dir).filter((f) => f.endsWith(".json") && !f.startsWith(".")); } catch { /* no dir yet */ }
   for (const f of names) {
     try {
@@ -34,7 +35,10 @@ export function readSnapshot(dir: string, now: number): Snapshot {
       if (s) agents.push(s);
     } catch { /* half-written; skip */ }
   }
-  return buildSnapshot(applyOverrides(agents, readOverrides(dir)), now);
+  return buildSnapshot(applyOverrides(agents, readOverrides(dir)), now, {
+    committedCwds,
+    designations: readLineState(dir),
+  });
 }
 
 export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?: number } = {}) {
@@ -42,9 +46,19 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
   const dir = ensureStatusDir();
   const clients = new Set<(s: Snapshot) => void>();
 
+  // cwds with committed-but-unpushed work (-> DONE). Refreshed on the scan loop,
+  // so the per-push snapshot build stays a synchronous cache read, no git spawn.
+  let committedCwds = new Set<string>();
+  const refreshCommitted = async () => {
+    const cwds = [...new Set(readSnapshot(dir, Date.now()).agents.map((a) => a.cwd).filter(Boolean))];
+    const next = new Set<string>();
+    await Promise.all(cwds.map(async (cwd) => { if ((await countUnpushed(cwd)) > 0) next.add(cwd); }));
+    committedCwds = next;
+  };
+
   let timer: ReturnType<typeof setTimeout> | null = null;
   const push = () => {
-    const snap = readSnapshot(dir, Date.now());
+    const snap = readSnapshot(dir, Date.now(), committedCwds);
     for (const send of clients) {
       try {
         send(snap);
@@ -67,6 +81,7 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
       scanning = true;
       try { await scanLiveSessions(Date.now()); } catch { /* keep serving */ }
       finally { scanning = false; }
+      try { await refreshCommitted(); } catch { /* leave last-known committed set */ }
       push();
     };
     void runScan();
@@ -84,7 +99,7 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
             const enc = new TextEncoder();
             send = (s) => ctrl.enqueue(enc.encode(`data: ${JSON.stringify(s)}\n\n`));
             clients.add(send);
-            send(readSnapshot(dir, Date.now())); // initial
+            send(readSnapshot(dir, Date.now(), committedCwds)); // initial
           },
           cancel() { clients.delete(send); },
         });
@@ -125,7 +140,7 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
           return json({ ok: false, error: "cross-site blocked" }, 403);
         }
         const action = url.pathname.slice("/action/".length);
-        let body: { sessionId?: string; name?: string; text?: string; cwd?: string; palette?: number; gear?: string; model?: string; permissionMode?: string };
+        let body: { sessionId?: string; name?: string; text?: string; cwd?: string; palette?: number; gear?: string; model?: string; permissionMode?: string; key?: string; stage?: string; label?: string };
         try { body = await req.json(); } catch { return json({ ok: false, error: "bad body" }, 400); }
         // spawn creates a brand-new session — it has a folder + task, not a sessionId
         if (action === "spawn") {
@@ -136,6 +151,22 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
           const model = typeof body.model === "string" && ALLOWED_MODELS.has(body.model) ? body.model : undefined;
           const permissionMode = typeof body.permissionMode === "string" && ALLOWED_PERMISSION_MODES.has(body.permissionMode) ? body.permissionMode : undefined;
           return json(await spawnAgent(cwd, task, { model, permissionMode }));
+        }
+        // line-stage: your manual review/merged designation. Keyed by item key,
+        // not sessionId (a designated item may outlive its session), so it's
+        // handled before the sessionId guard below.
+        if (action === "line-stage") {
+          const key = typeof body.key === "string" ? body.key.trim() : "";
+          if (!key || key.length > 256) return json({ ok: false, error: "bad key" }, 400);
+          if (body.stage === "review" || body.stage === "merged") {
+            const label = typeof body.label === "string" && body.label.trim() ? body.label.trim() : (key.split("|").pop() || key);
+            const sessionId = validSessionId(body.sessionId) ? body.sessionId : undefined;
+            setLineStage(dir, key, { stage: body.stage, label, sessionId });
+          } else {
+            setLineStage(dir, key, null); // moving back off review/merged clears it
+          }
+          push();
+          return json({ ok: true });
         }
         if (!validSessionId(body.sessionId)) return json({ ok: false, error: "bad sessionId" }, 400);
         if (action === "rename") {

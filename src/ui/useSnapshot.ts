@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import type { Snapshot, LineStage } from "../lib/snapshot";
+import type { Snapshot } from "../lib/snapshot";
+import { LINE_STAGES } from "../lib/snapshot";
 
 export function emptySnapshot(): Snapshot {
-  const stages: LineStage["stage"][] = ["backlog","working","needs","review","merged"];
-  return { agents: [], line: stages.map((stage) => ({ stage, tickets: [] })) };
+  return { agents: [], line: LINE_STAGES.map((stage) => ({ stage, items: [] })) };
 }
 
 export function parseEvent(data: string): Snapshot | null {

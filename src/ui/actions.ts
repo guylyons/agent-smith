@@ -43,6 +43,13 @@ export function setSprite(sessionId: string, palette: number, gear: string): voi
   void act("sprite", { sessionId, palette, gear });
 }
 
+/** Designate where a crate sits on THE LINE. "review"/"merged" pin it there;
+ *  "done" (or any live stage) clears your designation. Persisted server-side so
+ *  agents can read it. */
+export function setLineStage(key: string, stage: "done" | "review" | "merged", label?: string, sessionId?: string): void {
+  void act("line-stage", { key, stage, label, sessionId });
+}
+
 export function sendPromptTo(sessionId: string, text: string): Promise<boolean> {
   return act("prompt", { sessionId, text });
 }

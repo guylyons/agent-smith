@@ -89,12 +89,33 @@ Each open session is a pixel character with:
 
 ### THE LINE
 
-A kanban strip that places each session's current work item — labelled by
-ticket (`#123`) if the branch has a number, else a short branch name, else the
-repo — into `backlog` (idle), `working`, or `needs-you` (waiting), from live
-session state. `review` and `merged` stay empty: filling them needs PR/MR and
-merge state from GitHub/GitLab, which is beyond what sessions expose — out of
-scope for now.
+A kanban strip that follows each work item — labelled by ticket (`#123`) if the
+branch has a number, else a short branch name, else the repo — left to right
+along a git lifecycle:
+
+| stage | meaning | source |
+| --- | --- | --- |
+| `BACKLOG` | idle, not begun (no commits yet) | live session state |
+| `WORKING` | actively running | live session state |
+| `NEEDS YOU` | waiting on a permission/question | live session state |
+| `DONE` | committed but not pushed anywhere | `git rev-list --count HEAD --not --remotes > 0` |
+| `REVIEW` | you're reviewing it | **your** manual move |
+| `MERGED` | you've merged it | **your** manual move |
+
+**Click** a crate to open its conversation pane. **Drag** a crate between
+`DONE` / `REVIEW` / `MERGED` to set where it sits — dragging back to `DONE`
+clears your designation. The three live columns are derived, so they don't
+accept drops.
+
+Your `REVIEW` / `MERGED` moves are stored in `~/.agent-status/.line.json`,
+keyed by item (`repo|label`), so they survive restarts **and are readable by
+any agent** — that's how a session becomes aware of what you've already reviewed
+or merged. A designated item keeps its crate even after its session ends.
+
+```jsonc
+// ~/.agent-status/.line.json
+{ "agentsmith|#123": { "stage": "review", "label": "#123", "sessionId": "…" } }
+```
 
 ## The agent pane
 
