@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { parseConversation, findPendingQuestion } from "../src/lib/conversation";
+import { parseConversation, findPendingQuestion, findBlockingTool } from "../src/lib/conversation";
 
 const L = (o: object) => JSON.stringify(o);
 
@@ -66,6 +66,44 @@ test("summarizes a background task-notification as an activity line", () => {
   expect(parseConversation(lines)).toEqual([
     { role: "tool", text: 'Background command "Restart server" was stopped' },
   ]);
+});
+
+test("findBlockingTool names the last unresolved tool_use", () => {
+  const lines = [
+    L({ type: "assistant", message: { content: [{ type: "tool_use", id: "tu_1", name: "Bash", input: { command: "rm -rf build" } }] } }),
+  ];
+  expect(findBlockingTool(lines)).toEqual({ name: "Bash", summary: "running rm -rf build" });
+});
+
+test("findBlockingTool returns null once the tool resolved", () => {
+  const lines = [
+    L({ type: "assistant", message: { content: [{ type: "tool_use", id: "tu_1", name: "Bash", input: { command: "ls" } }] } }),
+    L({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "tu_1", content: "ok" }] } }),
+  ];
+  expect(findBlockingTool(lines)).toBeNull();
+});
+
+test("findBlockingTool reports the NEWEST unresolved tool", () => {
+  const lines = [
+    L({ type: "assistant", message: { content: [{ type: "tool_use", id: "tu_1", name: "Read", input: { file_path: "/a/x.ts" } }] } }),
+    L({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "tu_1", content: "ok" }] } }),
+    L({ type: "assistant", message: { content: [{ type: "tool_use", id: "tu_2", name: "ExitPlanMode", input: {} }] } }),
+  ];
+  expect(findBlockingTool(lines)!.name).toBe("ExitPlanMode");
+});
+
+test("findBlockingTool ignores subagent sidechain traffic", () => {
+  const lines = [
+    L({ type: "assistant", isSidechain: true, message: { content: [{ type: "tool_use", id: "tu_9", name: "Bash", input: { command: "sleep 1" } }] } }),
+  ];
+  expect(findBlockingTool(lines)).toBeNull();
+});
+
+test("findPendingQuestion ignores subagent sidechain traffic", () => {
+  const lines = [
+    L({ type: "assistant", isSidechain: true, message: { content: [{ type: "tool_use", id: "tu_9", name: "AskUserQuestion", input: { questions: [{ question: "q", options: [{ label: "A" }] }] } }] } }),
+  ];
+  expect(findPendingQuestion(lines)).toBeNull();
 });
 
 test("keeps only the last max messages", () => {
