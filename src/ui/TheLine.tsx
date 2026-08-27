@@ -32,6 +32,8 @@ function ownerColor(label: string): string {
 export function TheLine({ line, onOpen }: { line: LineStage[]; onOpen: (id: string) => void }) {
   const byStage = new Map(line.map((l) => [l.stage, l.items]));
   const [dragOver, setDragOver] = useState<LineStageName | null>(null);
+  // The belt only rolls while an agent is actually working.
+  const working = (byStage.get("working") ?? []).length > 0;
 
   function onDropTo(target: LineStageName, e: DragEvent) {
     e.preventDefault();
@@ -71,7 +73,7 @@ export function TheLine({ line, onOpen }: { line: LineStage[]; onOpen: (id: stri
         })}
       </div>
       <div className="belt">
-        <div className="tread"></div>
+        <div className={`tread${working ? " running" : ""}`}></div>
       </div>
     </section>
   );
