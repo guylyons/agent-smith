@@ -173,17 +173,25 @@
   .col-instr::placeholder{color:var(--dim)}
   .cards{display:flex;flex-direction:column;gap:6px;min-height:20px}
   .card{
-    display:flex;align-items:center;gap:4px;cursor:grab;
+    display:flex;align-items:flex-start;gap:4px;cursor:pointer;
     background:var(--box);border:3px solid var(--bone);
     box-shadow:inset 0 0 0 2px rgba(110,140,224,.5),0 3px 0 rgba(0,0,0,.5);
     padding:6px;
   }
+  .card:hover{border-color:var(--gold)}
+  .card:focus{outline:none;border-color:var(--gold)}
   .card:active{cursor:grabbing}
-  .card-title{
-    flex:1;min-width:0;font-family:ui-monospace,Menlo,monospace;font-size:11px;
-    background:transparent;border:2px solid transparent;color:var(--bone);padding:3px 4px;
+  .card-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
+  .card-title-text{
+    font-family:ui-monospace,Menlo,monospace;font-size:11px;line-height:1.45;color:var(--bone);
+    padding:3px 4px;word-break:break-word;
   }
-  .card-title:focus{outline:none;border-color:var(--gold);background:var(--night);cursor:text}
+  .card-meta{display:flex;align-items:center;gap:6px;padding:0 4px;flex-wrap:wrap}
+  .card-assignee{
+    font-family:"Press Start 2P",ui-monospace,monospace;font-size:7px;letter-spacing:.5px;
+    color:var(--night);background:var(--gold);padding:3px 4px;line-height:1;
+  }
+  .card-flag{font-size:9px;color:var(--dim);line-height:1}
   .add-card{
     width:100%;box-sizing:border-box;
     font-family:ui-monospace,Menlo,monospace;font-size:10px;
@@ -501,6 +509,56 @@ body{background:transparent}
 .sprite-option:hover{border-color:var(--gold)}
 .sprite-option.selected{border-color:var(--gold);background:var(--box)}
 .sprite-option .sprite{width:28px;height:42px}
+
+/* card detail modal (THE LINE) — a roomy Trello-style view of one card */
+.cardmodal{width:min(680px,94vw);max-height:88vh;margin:6vh auto;display:flex;flex-direction:column;padding:0;overflow:hidden}
+.cardmodal-head{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:var(--px) solid var(--bone)}
+.cardmodal-crumb{flex:1;min-width:0;font-size:8px;letter-spacing:.5px;color:var(--gold);text-transform:uppercase}
+.cardmodal-x{background:transparent;border:none;color:var(--dim);cursor:pointer;font-size:14px;line-height:1;padding:2px 4px}
+.cardmodal-x:hover{color:var(--clay)}
+.cardmodal-body{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:16px}
+.cardmodal-title{
+  width:100%;box-sizing:border-box;font-family:ui-monospace,Menlo,monospace;font-size:15px;line-height:1.4;
+  color:var(--bone);background:var(--night);border:2px solid var(--bevel);padding:9px 10px;
+}
+.cardmodal-title:focus{outline:none;border-color:var(--gold)}
+.cardmodal-row{display:flex;flex-direction:column;gap:7px}
+.cardmodal-label{font-size:8px;letter-spacing:.5px;color:var(--dim);text-transform:uppercase}
+.cardmodal-select{
+  align-self:flex-start;min-width:200px;max-width:100%;cursor:pointer;
+  font-family:ui-monospace,Menlo,monospace;font-size:11px;
+  color:var(--bone);background:var(--night);border:2px solid var(--bevel);padding:7px 8px;
+}
+.cardmodal-select:focus{outline:none;border-color:var(--gold)}
+.cardmodal-desc{
+  width:100%;box-sizing:border-box;resize:vertical;min-height:88px;
+  font-family:ui-monospace,Menlo,monospace;font-size:11px;line-height:1.6;
+  color:var(--bone);background:var(--night);border:2px solid var(--bevel);padding:8px 9px;
+}
+.cardmodal-desc:focus{outline:none;border-color:var(--gold)}
+.cardmodal-desc::placeholder,.comment-input::placeholder{color:var(--dim)}
+.cardmodal-comments{display:flex;flex-direction:column;gap:9px}
+.cardmodal-empty{font-size:10px;color:var(--dim);font-style:italic}
+.comment{background:var(--box-lo);border:2px solid var(--bevel);padding:8px 10px;display:flex;flex-direction:column;gap:5px}
+.comment-meta{display:flex;align-items:center;gap:8px}
+.comment-author{font-family:"Press Start 2P",ui-monospace,monospace;font-size:8px;color:var(--gold);letter-spacing:.5px}
+.comment-time{flex:1;font-size:9px;color:var(--dim)}
+.comment-del{background:transparent;border:none;color:var(--dim);cursor:pointer;font-size:10px;line-height:1;padding:1px 3px}
+.comment-del:hover{color:var(--clay)}
+.comment-text{font-family:ui-monospace,Menlo,monospace;font-size:11px;line-height:1.6;color:var(--bone);white-space:pre-wrap;word-break:break-word}
+.comment-compose{display:flex;flex-direction:column;gap:7px;margin-top:2px}
+.comment-input{
+  width:100%;box-sizing:border-box;resize:vertical;min-height:56px;
+  font-family:ui-monospace,Menlo,monospace;font-size:11px;line-height:1.6;
+  color:var(--bone);background:var(--night);border:2px solid var(--bevel);padding:8px 9px;
+}
+.comment-input:focus{outline:none;border-color:var(--gold)}
+.comment-post{
+  align-self:flex-end;cursor:pointer;font-size:8px;letter-spacing:.5px;
+  color:var(--night);background:var(--gold);border:2px solid var(--gold);padding:7px 12px;
+}
+.comment-post:hover:not(:disabled){filter:brightness(1.08)}
+.comment-post:disabled{opacity:.4;cursor:default}
 
 /* new-agent modal: model/permission-mode option row (added for STOP/options work) */
 .newagent-opts{display:flex;gap:14px;margin-top:2px}

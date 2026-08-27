@@ -11,11 +11,26 @@
 import { join } from "node:path";
 import { readFileSync, writeFileSync, renameSync } from "node:fs";
 
-export type Card = { id: string; title: string; columnId: string };
+/** A single comment on a card. `author` is a free label ("You" for the human;
+ *  an agent appends with its own persona name). `at` is a Unix ms timestamp. */
+export type Comment = { id: string; author: string; text: string; at: number };
+/** A card's assignee — a persona (see personas/*.md): its id plus a display
+ *  name, so the label survives even if the persona file is later renamed. */
+export type Assignee = { id: string; name: string };
+export type Card = {
+  id: string;
+  title: string;
+  columnId: string;
+  // Optional detail (added in VERSION 3). Absent on cards that have none, so the
+  // on-disk format stays minimal and older boards keep working untouched.
+  description?: string;
+  assignee?: Assignee | null;
+  comments?: Comment[];
+};
 export type Column = { id: string; name: string; instruction: string };
 export type Board = { columns: Column[]; cards: Card[] };
 
-const VERSION = 2;
+const VERSION = 3;
 
 function genId(prefix: string): string {
   return `${prefix}_${crypto.randomUUID().slice(0, 8)}`;
@@ -86,6 +101,36 @@ export function deleteCard(board: Board, id: string): Board {
   return { ...board, cards: board.cards.filter((k) => k.id !== id) };
 }
 
+/** Map a single card by id to a new card. Shared by the detail mutations. */
+function mapCard(board: Board, id: string, fn: (card: Card) => Card): Board {
+  return { ...board, cards: board.cards.map((k) => (k.id === id ? fn(k) : k)) };
+}
+
+export function setCardDescription(board: Board, id: string, description: string): Board {
+  return mapCard(board, id, (k) => ({ ...k, description }));
+}
+
+/** Assign the card to a persona, or clear the assignment with `null`. */
+export function assignCard(board: Board, id: string, assignee: Assignee | null): Board {
+  return mapCard(board, id, (k) => ({ ...k, assignee }));
+}
+
+/** Append a comment authored by `author`. No-op on empty/whitespace text so a
+ *  stray Enter can't post a blank note. */
+export function addComment(board: Board, id: string, author: string, text: string): Board {
+  const body = text.trim();
+  if (!body) return board;
+  const comment: Comment = { id: genId("cmt"), author, text: body, at: Date.now() };
+  return mapCard(board, id, (k) => ({ ...k, comments: [...(k.comments ?? []), comment] }));
+}
+
+export function deleteComment(board: Board, id: string, commentId: string): Board {
+  return mapCard(board, id, (k) => ({
+    ...k,
+    comments: (k.comments ?? []).filter((m) => m.id !== commentId),
+  }));
+}
+
 /** Move a card into `toColumnId`. Without `toIndex` it appends; with one it
  *  inserts at that position among the target column's cards. No-op if the card
  *  or the target column is unknown. */
@@ -116,6 +161,36 @@ export function moveCard(board: Board, id: string, toColumnId: string, toIndex?:
 
 function str(v: unknown): string | null {
   return typeof v === "string" ? v : null;
+}
+
+/** Repair an assignee: needs a string id and name, else the card is unassigned. */
+function sanitizeAssignee(v: unknown): Assignee | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  const id = str(o.id);
+  const name = str(o.name);
+  return id !== null && name !== null ? { id, name } : null;
+}
+
+/** Repair a comment list, dropping any entry missing a valid id/author/text/at.
+ *  The file is one an agent may hand-edit, so a bad comment is skipped rather
+ *  than allowed to break the card. */
+function sanitizeComments(v: unknown): Comment[] {
+  if (!Array.isArray(v)) return [];
+  const out: Comment[] = [];
+  const ids = new Set<string>();
+  for (const c of v) {
+    if (!c || typeof c !== "object") continue;
+    const o = c as Record<string, unknown>;
+    const id = str(o.id);
+    const author = str(o.author);
+    const text = str(o.text);
+    const at = typeof o.at === "number" ? o.at : null;
+    if (id === null || author === null || text === null || at === null || ids.has(id)) continue;
+    ids.add(id);
+    out.push({ id, author, text, at });
+  }
+  return out;
 }
 
 /** Validate/repair arbitrary input into a Board. The file is documented as one
@@ -152,7 +227,16 @@ export function sanitizeBoard(input: unknown): Board {
       if (id === null || title === null || columnId === null) continue;
       if (cardIds.has(id) || !colIds.has(columnId)) continue;
       cardIds.add(id);
-      cards.push({ id, title, columnId });
+
+      // Optional detail — included only when present, so a bare card stays bare.
+      const card: Card = { id, title, columnId };
+      const description = str(o.description);
+      if (description !== null) card.description = description;
+      const assignee = sanitizeAssignee(o.assignee);
+      if (assignee) card.assignee = assignee;
+      const comments = sanitizeComments(o.comments);
+      if (comments.length) card.comments = comments;
+      cards.push(card);
     }
   }
 

@@ -1,0 +1,184 @@
+import { useEffect, useRef, useState } from "react";
+import type { Board, Card } from "../lib/board";
+import { renameCard, setCardDescription, assignCard, addComment, deleteComment } from "../lib/board";
+import { fetchPersonas, type PersonaInfo } from "./actions";
+
+type Mutate = (fn: (b: Board) => Board) => void;
+
+// The human's byline on comments they post. Agents append to .line.json with
+// their own persona name, so a thread reads clearly as a human↔agent exchange.
+const ME = "You";
+
+// A Trello-style detail view for one card, over a dimmed backdrop. Gives a
+// single card room to breathe: editable title + description, a persona
+// assignee, and a comment thread. Backdrop click or Esc closes it.
+export function CardModal({
+  card, columnName, mutate, onClose,
+}: {
+  card: Card; columnName: string; mutate: Mutate; onClose: () => void;
+}) {
+  const [personas, setPersonas] = useState<PersonaInfo[]>([]);
+
+  useEffect(() => { void fetchPersonas().then(setPersonas); }, []);
+
+  // Esc closes from anywhere in the modal.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) { if (e.key === "Escape") onClose(); }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const comments = card.comments ?? [];
+
+  return (
+    <div className="drawer-backdrop" onClick={onClose}>
+      <div className="win cardmodal" onClick={(e) => e.stopPropagation()}>
+        <div className="cardmodal-head">
+          <span className="pix cardmodal-crumb">IN {columnName || "—"}</span>
+          <button className="cardmodal-x" title="Close" onClick={onClose}>✕</button>
+        </div>
+
+        <div className="cardmodal-body">
+          <TitleField
+            value={card.title}
+            onCommit={(v) => { if (v) mutate((b) => renameCard(b, card.id, v)); }}
+          />
+
+          <div className="cardmodal-row">
+            <label className="pix cardmodal-label">ASSIGNEE</label>
+            <select
+              className="cardmodal-select"
+              value={card.assignee?.id ?? ""}
+              onChange={(e) => {
+                const p = personas.find((x) => x.id === e.target.value);
+                mutate((b) => assignCard(b, card.id, p ? { id: p.id, name: p.name } : null));
+              }}
+            >
+              <option value="">Unassigned</option>
+              {/* Keep a stale assignee selectable even if its persona file is gone. */}
+              {card.assignee && !personas.some((p) => p.id === card.assignee!.id) && (
+                <option value={card.assignee.id}>{card.assignee.name}</option>
+              )}
+              {personas.map((p) => (
+                <option key={p.id} value={p.id}>{p.name} — {p.role}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="cardmodal-row">
+            <label className="pix cardmodal-label">DESCRIPTION</label>
+            <DescriptionField
+              value={card.description ?? ""}
+              onCommit={(v) => mutate((b) => setCardDescription(b, card.id, v))}
+            />
+          </div>
+
+          <div className="cardmodal-row">
+            <label className="pix cardmodal-label">COMMENTS {comments.length ? `(${comments.length})` : ""}</label>
+            <div className="cardmodal-comments">
+              {comments.map((c) => (
+                <div key={c.id} className="comment">
+                  <div className="comment-meta">
+                    <span className="comment-author">{c.author}</span>
+                    <span className="comment-time">{timeAgo(c.at)}</span>
+                    <button
+                      className="comment-del"
+                      title="Delete comment"
+                      onClick={() => mutate((b) => deleteComment(b, card.id, c.id))}
+                    >✕</button>
+                  </div>
+                  <div className="comment-text">{c.text}</div>
+                </div>
+              ))}
+              {!comments.length && <p className="cardmodal-empty">No comments yet.</p>}
+            </div>
+            <CommentComposer onPost={(text) => mutate((b) => addComment(b, card.id, ME, text))} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// A big single-line title. Local draft while focused so a live snapshot echo
+// never yanks the text out from under the cursor (same discipline as the board).
+function TitleField({ value, onCommit }: { value: string; onCommit: (v: string) => void }) {
+  const [draft, setDraft] = useState(value);
+  const [editing, setEditing] = useState(false);
+  useEffect(() => { if (!editing) setDraft(value); }, [value, editing]);
+
+  return (
+    <input
+      className="cardmodal-title"
+      value={editing ? draft : value}
+      placeholder="Card title…"
+      onFocus={() => setEditing(true)}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => { setEditing(false); onCommit(draft.trim()); }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
+      }}
+    />
+  );
+}
+
+// Multi-line description; Enter inserts a newline, commit on blur.
+function DescriptionField({ value, onCommit }: { value: string; onCommit: (v: string) => void }) {
+  const [draft, setDraft] = useState(value);
+  const [editing, setEditing] = useState(false);
+  useEffect(() => { if (!editing) setDraft(value); }, [value, editing]);
+
+  return (
+    <textarea
+      className="cardmodal-desc"
+      value={editing ? draft : value}
+      placeholder="Add a fuller description of this task…"
+      onFocus={() => setEditing(true)}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => { setEditing(false); if (draft !== value) onCommit(draft); }}
+    />
+  );
+}
+
+// The add-comment box. Cmd/Ctrl+Enter posts (plain Enter keeps a newline, since
+// comments can be multi-line); the button posts too. Clears on post.
+function CommentComposer({ onPost }: { onPost: (text: string) => void }) {
+  const [text, setText] = useState("");
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  function post() {
+    const body = text.trim();
+    if (!body) return;
+    onPost(body);
+    setText("");
+    ref.current?.focus();
+  }
+
+  return (
+    <div className="comment-compose">
+      <textarea
+        ref={ref}
+        className="comment-input"
+        value={text}
+        placeholder="Write a comment…  (⌘↵ to post)"
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); post(); } }}
+      />
+      <button className="pix comment-post" disabled={!text.trim()} onClick={post}>POST</button>
+    </div>
+  );
+}
+
+// Compact relative time for a comment timestamp ("just now", "5m", "3h", "2d");
+// older than a week falls back to a local date.
+function timeAgo(at: number): string {
+  const s = Math.max(0, Math.round((Date.now() - at) / 1000));
+  if (s < 45) return "just now";
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.round(h / 24);
+  if (d < 7) return `${d}d ago`;
+  return new Date(at).toLocaleDateString();
+}

@@ -14,6 +14,10 @@ import {
   renameCard,
   deleteCard,
   moveCard,
+  setCardDescription,
+  assignCard,
+  addComment,
+  deleteComment,
   readBoard,
   writeBoard,
   type Board,
@@ -229,5 +233,98 @@ test("writeBoard persists a version field on disk", () => {
   const dir = tmp();
   writeBoard(dir, defaultBoard());
   const raw = JSON.parse(readFileSync(join(dir, ".line.json"), "utf8")) as { version?: number };
-  expect(raw.version).toBe(2);
+  expect(raw.version).toBe(3);
+});
+
+// ---- card detail: description, assignee, comments -------------------------
+
+test("setCardDescription stores the description on the card", () => {
+  let b = defaultBoard();
+  b = addCard(b, b.columns[0]!.id, "task");
+  const id = b.cards[0]!.id;
+  b = setCardDescription(b, id, "the full story");
+  expect(b.cards[0]!.description).toBe("the full story");
+});
+
+test("assignCard sets an assignee, and null clears it", () => {
+  let b = defaultBoard();
+  b = addCard(b, b.columns[0]!.id, "task");
+  const id = b.cards[0]!.id;
+  b = assignCard(b, id, { id: "backend-dev", name: "Backend Dev" });
+  expect(b.cards[0]!.assignee).toEqual({ id: "backend-dev", name: "Backend Dev" });
+  b = assignCard(b, id, null);
+  expect(b.cards[0]!.assignee).toBeNull();
+});
+
+test("addComment appends a comment with author, text, id, and timestamp", () => {
+  let b = defaultBoard();
+  b = addCard(b, b.columns[0]!.id, "task");
+  const id = b.cards[0]!.id;
+  b = addComment(b, id, "You", "first note");
+  const comments = b.cards[0]!.comments!;
+  expect(comments.length).toBe(1);
+  expect(comments[0]!.author).toBe("You");
+  expect(comments[0]!.text).toBe("first note");
+  expect(typeof comments[0]!.id).toBe("string");
+  expect(typeof comments[0]!.at).toBe("number");
+});
+
+test("addComment ignores empty text", () => {
+  let b = defaultBoard();
+  b = addCard(b, b.columns[0]!.id, "task");
+  const id = b.cards[0]!.id;
+  b = addComment(b, id, "You", "   ");
+  expect(b.cards[0]!.comments ?? []).toEqual([]);
+});
+
+test("deleteComment removes a comment by id", () => {
+  let b = defaultBoard();
+  b = addCard(b, b.columns[0]!.id, "task");
+  const id = b.cards[0]!.id;
+  b = addComment(b, id, "You", "keep");
+  b = addComment(b, id, "You", "drop");
+  const dropId = b.cards[0]!.comments![1]!.id;
+  b = deleteComment(b, id, dropId);
+  expect(b.cards[0]!.comments!.map((c) => c.text)).toEqual(["keep"]);
+});
+
+test("sanitizeBoard preserves valid description, assignee, and comments", () => {
+  const b = sanitizeBoard({
+    columns: [{ id: "c1", name: "A", instruction: "" }],
+    cards: [{
+      id: "k1", title: "one", columnId: "c1",
+      description: "desc",
+      assignee: { id: "backend-dev", name: "Backend Dev" },
+      comments: [{ id: "m1", author: "You", text: "hi", at: 123 }],
+    }],
+  });
+  expect(b.cards[0]).toEqual({
+    id: "k1", title: "one", columnId: "c1",
+    description: "desc",
+    assignee: { id: "backend-dev", name: "Backend Dev" },
+    comments: [{ id: "m1", author: "You", text: "hi", at: 123 }],
+  });
+});
+
+test("sanitizeBoard drops malformed comments but keeps the card", () => {
+  const b = sanitizeBoard({
+    columns: [{ id: "c1", name: "A", instruction: "" }],
+    cards: [{
+      id: "k1", title: "one", columnId: "c1",
+      comments: [{ id: "m1", author: "You", text: "ok", at: 1 }, { text: "no id" }, "garbage"],
+    }],
+  });
+  expect(b.cards[0]!.comments).toEqual([{ id: "m1", author: "You", text: "ok", at: 1 }]);
+});
+
+test("writeBoard then readBoard round-trips a fully detailed card", () => {
+  const dir = tmp();
+  let b = defaultBoard();
+  b = addCard(b, b.columns[0]!.id, "detailed");
+  const id = b.cards[0]!.id;
+  b = setCardDescription(b, id, "a description");
+  b = assignCard(b, id, { id: "backend-dev", name: "Backend Dev" });
+  b = addComment(b, id, "You", "a comment");
+  writeBoard(dir, b);
+  expect(readBoard(dir)).toEqual(b);
 });
