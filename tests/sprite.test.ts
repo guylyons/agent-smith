@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { spriteRects, paletteFor, PALETTES, BODIES, BODY_IDS } from "../src/ui/sprite-data";
+import { spriteRects, paletteFor, PALETTES, BODIES, BODY_IDS, GEARS, DEFAULT_GEARS, GEAR } from "../src/ui/sprite-data";
 
 test("paletteFor is deterministic per sessionId", () => {
   expect(paletteFor("abc", "General")).toEqual(paletteFor("abc", "General"));
@@ -33,6 +33,53 @@ test("spriteRects draws pixels for every body", () => {
     const rects = spriteRects({ body: id, gear: "headset", palette: PALETTES[0] });
     expect(rects.length).toBeGreaterThan(50);
     expect(rects[0]).toHaveProperty("fill");
+  }
+});
+
+test("the new accessories are exposed as pickable gear", () => {
+  for (const g of ["sunglasses", "spectacles", "laptop", "keyboard", "coffee"]) {
+    expect(GEARS).toContain(g);
+  }
+});
+
+test("every gear id has an overlay definition and vice versa", () => {
+  for (const g of GEARS) expect(GEAR[g as keyof typeof GEAR]).toBeDefined();
+  for (const g of Object.keys(GEAR)) expect(GEARS).toContain(g);
+});
+
+test("every gear overlay row is 16 cells wide and stays on the grid", () => {
+  for (const [id, layers] of Object.entries(GEAR)) {
+    for (const layer of layers) {
+      layer.rows.forEach((row, i) => {
+        expect(row).toHaveLength(16);
+        // must land within the 24-row body
+        expect(layer.at + i).toBeGreaterThanOrEqual(0);
+        expect(layer.at + i).toBeLessThan(24);
+      });
+    }
+  }
+});
+
+test("each gear composites a visibly different sprite onto the worker", () => {
+  const base = spriteRects({ body: "worker", gear: "__none__", palette: PALETTES[0] });
+  const seen = new Set<string>();
+  for (const g of GEARS) {
+    const rects = spriteRects({ body: "worker", gear: g, palette: PALETTES[0] });
+    const key = JSON.stringify(rects);
+    // gear actually changes the sprite...
+    expect(key).not.toEqual(JSON.stringify(base));
+    // ...and each gear looks distinct from the others
+    expect(seen.has(key)).toBe(false);
+    seen.add(key);
+  }
+});
+
+test("default sprites only ever use the original gear (no drift)", () => {
+  // paletteFor must never surface a newly-added accessory as a default,
+  // so existing agents' sprites stay stable when the picker list grows.
+  for (let i = 0; i < 200; i++) {
+    const { gear } = paletteFor(`session-${i}`, "General");
+    expect(DEFAULT_GEARS).toContain(gear);
   }
 });
 
