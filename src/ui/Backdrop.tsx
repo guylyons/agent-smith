@@ -1,9 +1,23 @@
 import { useRef, type ReactNode } from "react";
 
-// The art-background layer. The chosen background is applied to <html data-bg>
-// by the Settings panel (and on load by App); this just renders the layer.
+// The art-background layers, all behind the page (z-index:-1):
+//
+//   artbg         the chosen art background, or the user's own uploaded image
+//   artbg-scrim   a per-THEME wash — how a light theme keeps the art from
+//                 fighting its dark text, without the user having to touch it
+//   artbg-dim     the user's own DIM slider, always plain black
+//
+// Two separate layers because they answer to different owners: switching themes
+// must not throw away a dim the user set, and dragging the dim slider must not
+// undo the theme's wash. Which background is showing comes from <html data-bg>.
 export function Backdrop() {
-  return <div className="artbg" aria-hidden="true"></div>;
+  return (
+    <>
+      <div className="artbg" aria-hidden="true"></div>
+      <div className="artbg-scrim" aria-hidden="true"></div>
+      <div className="artbg-dim" aria-hidden="true"></div>
+    </>
+  );
 }
 
 // A dimmed modal backdrop that closes on a genuine backdrop click. A plain

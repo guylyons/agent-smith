@@ -8,7 +8,7 @@ test("Bash -> running command", () => {
   expect(humanizeTool("Bash", { command: "bun test" })).toBe("running bun test");
 });
 test("Bash -> long multi-line command is clipped to one short line", () => {
-  const cmd = "cd /Users/glyons/github/maine && git status --short && echo 'a very long compound command here'";
+  const cmd = "cd /Users/guy/github/maine && git status --short && echo 'a very long compound command here'";
   const out = humanizeTool("Bash", { command: cmd });
   expect(out.startsWith("running ")).toBe(true);
   expect(out.includes("\n")).toBe(false);

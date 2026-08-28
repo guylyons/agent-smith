@@ -11,7 +11,7 @@ import { loadPersonas, applyPersonas } from "./lib/personas";
 import { readBoard, writeBoard, sanitizeBoard, boardFile, addCard, moveCard, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, type Board } from "./lib/board";
 import { ALLOWED_MODELS, ALLOWED_PERMISSION_MODES, focusSession, interruptSession, killAgent, sendPrompt, sendFreshPrompt, spawnAgent } from "./ghostty";
 import { readRepo } from "./repo";
-import { saveUpload } from "./lib/uploads";
+import { saveUpload, resolveUploadPath } from "./lib/uploads";
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -429,6 +429,21 @@ export function makeServer(
           return json(await sendPrompt(status, text));
         }
         return json({ ok: false, error: "unknown action" }, 404);
+      }
+
+      // images the human dropped/pasted (chat attachments, ticket images, a
+      // custom background). Served by BASENAME only — resolveUploadPath refuses
+      // anything with a separator or dot segment, so this can't be walked out of
+      // the upload dir into the filesystem.
+      if (url.pathname.startsWith("/uploads/")) {
+        const target = resolveUploadPath(url.pathname.slice("/uploads/".length));
+        if (!target) return new Response("not found", { status: 404 });
+        const file = Bun.file(target);
+        if (!(await file.exists())) return new Response("not found", { status: 404 });
+        // Uploads are content-addressed by timestamp and never rewritten, so
+        // they cache hard — a ticket full of screenshots shouldn't refetch on
+        // every poll.
+        return new Response(file, { headers: { "cache-control": "public, max-age=31536000, immutable" } });
       }
 
       // static

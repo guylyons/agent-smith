@@ -20,7 +20,7 @@ export function uploadDir(): string {
   return process.env.AGENT_UPLOAD_DIR ?? join(tmpdir(), "agent-workshop-uploads");
 }
 
-export type SaveResult = { ok: true; path: string } | { ok: false; error: string };
+export type SaveResult = { ok: true; path: string; url: string } | { ok: false; error: string };
 
 let seq = 0;
 function stamp(): string {
@@ -45,5 +45,26 @@ export function saveUpload(name: string, type: string, dataBase64: string): Save
   mkdirSync(dir, { recursive: true });
   const path = join(dir, `${stamp()}-${baseName(name)}.${ext}`);
   writeFileSync(path, buf);
-  return { ok: true, path };
+  return { ok: true, path, url: uploadUrlFor(path) };
+}
+
+/** URL prefix the dashboard serves `uploadDir()` under. A saved upload is
+ *  reachable at `${UPLOAD_URL}${basename}` — that's how the browser shows an
+ *  image the human pasted onto a ticket, and how a custom background loads. */
+export const UPLOAD_URL = "/uploads/";
+
+/** Map a saved upload's absolute path to its browser URL. */
+export function uploadUrlFor(path: string): string {
+  return UPLOAD_URL + encodeURIComponent(path.split("/").pop() ?? "");
+}
+
+/** Resolve one `/uploads/<name>` request to a real file inside the upload dir,
+ *  or null. Only a bare basename is accepted — no separators, no dot segments —
+ *  so the route can never be walked out of the upload dir. */
+export function resolveUploadPath(name: string): string | null {
+  let decoded: string;
+  try { decoded = decodeURIComponent(name); } catch { return null; }
+  if (!decoded || decoded.includes("/") || decoded.includes("\\") || decoded.startsWith(".")) return null;
+  if (!/^[A-Za-z0-9._-]+$/.test(decoded)) return null;
+  return join(uploadDir(), decoded);
 }

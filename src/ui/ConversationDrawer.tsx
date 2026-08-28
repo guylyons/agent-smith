@@ -146,10 +146,10 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
     const images = [...files].filter((f) => f.type.startsWith("image/"));
     if (images.length === 0) return false;
     await Promise.all(images.map(async (f) => {
-      const path = await uploadImage(f);
-      if (!path) return;
+      const up = await uploadImage(f);
+      if (!up) return;
       const id = `att-${attachSeq.current++}`;
-      setAttachments((a) => [...a, { id, name: f.name || baseOf(path), path }]);
+      setAttachments((a) => [...a, { id, name: f.name || baseOf(up.path), path: up.path }]);
     }));
     return true;
   }
