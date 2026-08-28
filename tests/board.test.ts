@@ -20,6 +20,7 @@ import {
   deleteComment,
   cardTaskText,
   commentNotifyText,
+  cardTaskPrompt,
   readBoard,
   writeBoard,
   type Board,
@@ -252,8 +253,8 @@ test("assignCard sets an assignee, and null clears it", () => {
   let b = defaultBoard();
   b = addCard(b, b.columns[0]!.id, "task");
   const id = b.cards[0]!.id;
-  b = assignCard(b, id, { id: "backend-dev", name: "Backend Dev" });
-  expect(b.cards[0]!.assignee).toEqual({ id: "backend-dev", name: "Backend Dev" });
+  b = assignCard(b, id, { id: "502d0e8c-8790-4804-b767-0549edfc959c", name: "NOVA" });
+  expect(b.cards[0]!.assignee).toEqual({ id: "502d0e8c-8790-4804-b767-0549edfc959c", name: "NOVA" });
   b = assignCard(b, id, null);
   expect(b.cards[0]!.assignee).toBeNull();
 });
@@ -296,14 +297,14 @@ test("sanitizeBoard preserves valid description, assignee, and comments", () => 
     cards: [{
       id: "k1", title: "one", columnId: "c1",
       description: "desc",
-      assignee: { id: "backend-dev", name: "Backend Dev" },
+      assignee: { id: "502d0e8c-8790-4804-b767-0549edfc959c", name: "NOVA" },
       comments: [{ id: "m1", author: "You", text: "hi", at: 123 }],
     }],
   });
   expect(b.cards[0]).toEqual({
     id: "k1", title: "one", columnId: "c1",
     description: "desc",
-    assignee: { id: "backend-dev", name: "Backend Dev" },
+    assignee: { id: "502d0e8c-8790-4804-b767-0549edfc959c", name: "NOVA" },
     comments: [{ id: "m1", author: "You", text: "hi", at: 123 }],
   });
 });
@@ -325,7 +326,7 @@ test("writeBoard then readBoard round-trips a fully detailed card", () => {
   b = addCard(b, b.columns[0]!.id, "detailed");
   const id = b.cards[0]!.id;
   b = setCardDescription(b, id, "a description");
-  b = assignCard(b, id, { id: "backend-dev", name: "Backend Dev" });
+  b = assignCard(b, id, { id: "502d0e8c-8790-4804-b767-0549edfc959c", name: "NOVA" });
   b = addComment(b, id, "You", "a comment");
   writeBoard(dir, b);
   expect(readBoard(dir)).toEqual(b);
@@ -399,4 +400,124 @@ test("commentNotifyText falls back to a placeholder for an untitled card", () =>
   const id = b.cards[0]!.id;
   b = renameCard(b, id, "   ");
   expect(commentNotifyText(b, id, "note")).toBe('💬 New comment on "(untitled card)":\nnote');
+});
+
+// ---- assignee must be a live agent session, never a persona ---------------
+// Cards used to be assigned to a persona (`backend-dev`, `frontend-ux`, …).
+// They're assigned to a live grid session now, so a persona-shaped assignee is
+// legacy data that can never be sent a task — it's dropped on read.
+
+const SESSION = "502d0e8c-8790-4804-b767-0549edfc959c";
+
+test("sanitizeBoard drops a legacy persona assignee but keeps the card", () => {
+  const b = sanitizeBoard({
+    columns: [{ id: "c1", name: "A", instruction: "" }],
+    cards: [{ id: "k1", title: "one", columnId: "c1", assignee: { id: "backend-dev", name: "ANVIL" } }],
+  });
+  expect(b.cards.length).toBe(1);
+  expect(b.cards[0]!.assignee).toBeUndefined();
+});
+
+test("sanitizeBoard keeps an assignee whose id is a real session id", () => {
+  const b = sanitizeBoard({
+    columns: [{ id: "c1", name: "A", instruction: "" }],
+    cards: [{ id: "k1", title: "one", columnId: "c1", assignee: { id: SESSION, name: "NOVA" } }],
+  });
+  expect(b.cards[0]!.assignee).toEqual({ id: SESSION, name: "NOVA" });
+});
+
+test("readBoard heals a board file that still holds a persona assignee", () => {
+  const dir = tmp();
+  writeFileSync(join(dir, ".line.json"), JSON.stringify({
+    version: 3,
+    columns: [{ id: "c1", name: "A", instruction: "" }],
+    cards: [{ id: "k1", title: "one", columnId: "c1", assignee: { id: "frontend-ux", name: "PIXEL" } }],
+  }));
+  expect(readBoard(dir).cards[0]!.assignee).toBeUndefined();
+});
+
+// ---- cardTaskPrompt: the task PLUS the board protocol --------------------
+
+test("cardTaskPrompt starts with the plain task text", () => {
+  let b = defaultBoard();
+  b = addCard(b, "backlog", "Fix login bug");
+  const id = b.cards[0]!.id;
+  expect(cardTaskPrompt(b, id, "/tmp/.line.json").startsWith(cardTaskText(b, id))).toBe(true);
+});
+
+test("cardTaskPrompt names the card, the board file, and the column flow", () => {
+  let b = defaultBoard();
+  b = addCard(b, "backlog", "Fix login bug");
+  const id = b.cards[0]!.id;
+  const p = cardTaskPrompt(b, id, "/Users/me/.agent-status/.line.json");
+  expect(p).toContain(id);
+  expect(p).toContain("/Users/me/.agent-status/.line.json");
+  expect(p).toContain("backlog → in-progress → review → done");
+  expect(p).toContain('you are in: "backlog"');
+});
+
+test("cardTaskPrompt reflects the card's current column", () => {
+  let b = defaultBoard();
+  b = addCard(b, "backlog", "Fix login bug");
+  const id = b.cards[0]!.id;
+  b = moveCard(b, id, "review");
+  expect(cardTaskPrompt(b, id, "/tmp/.line.json")).toContain('you are in: "review"');
+});
+
+test("cardTaskPrompt returns empty string for an unknown card", () => {
+  expect(cardTaskPrompt(defaultBoard(), "nope", "/tmp/.line.json")).toBe("");
+});
+
+test("cardTaskPrompt names where to start and where to land, positionally", () => {
+  let b = defaultBoard();
+  b = addCard(b, "backlog", "Fix login bug");
+  const id = b.cards[0]!.id;
+  const p = cardTaskPrompt(b, id, "/tmp/.line.json");
+  expect(p).toContain('columnId\nto "in-progress"');
+  expect(p).toContain('set columnId to\n"review"');
+});
+
+test("cardTaskPrompt clamps to the last column when there's nowhere further", () => {
+  let b = defaultBoard();
+  b = addCard(b, "done", "Fix login bug");
+  const id = b.cards[0]!.id;
+  const p = cardTaskPrompt(b, id, "/tmp/.line.json");
+  // last column: both the start and the finish clamp to where it already is
+  expect(p).toContain('columnId\nto "done"');
+  expect(p).toContain('set columnId to\n"done"');
+});
+
+test("cardTaskPrompt names the agent so its comments match its desk", () => {
+  let b = defaultBoard();
+  b = addCard(b, "backlog", "Fix login bug");
+  const p = cardTaskPrompt(b, b.cards[0]!.id, "/tmp/.line.json", "VOLT");
+  expect(p).toContain("assigned agent on this card, VOLT");
+  expect(p).toContain('"author": "VOLT"');
+});
+
+test("cardTaskPrompt falls back to a placeholder author when spawning", () => {
+  let b = defaultBoard();
+  b = addCard(b, "backlog", "Fix login bug");
+  const p = cardTaskPrompt(b, b.cards[0]!.id, "/tmp/.line.json");
+  expect(p).toContain('"author": "<your agent name>"');
+});
+
+test("cardTaskPrompt demands the move happen first, as its own write", () => {
+  let b = defaultBoard();
+  b = addCard(b, "backlog", "Fix login bug");
+  const p = cardTaskPrompt(b, b.cards[0]!.id, "/tmp/.line.json");
+  expect(p).toContain("STEP 1, before any other work");
+  expect(p).toContain("as its own write");
+  expect(p).toContain("not in one write at the end");
+  // and it must Read before Edit, which is what tripped the first real run
+  expect(p).toContain("Read the board file before you edit it");
+});
+
+test("cardTaskPrompt tells the agent how to write a comment", () => {
+  let b = defaultBoard();
+  b = addCard(b, "backlog", "Fix login bug");
+  const p = cardTaskPrompt(b, b.cards[0]!.id, "/tmp/.line.json");
+  expect(p).toContain('"comments"');
+  expect(p).toContain('"author"');
+  expect(p).toContain('"columnId"');
 });
