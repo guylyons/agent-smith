@@ -26,6 +26,21 @@ function loadStatus(dir: string, sessionId: string): AgentStatus | null {
   catch { return null; }
 }
 
+/** Resolve a session id to an `{ id, name }` assignee, applying the same
+ *  persona/override name resolution the live view uses. Prefers the fresh
+ *  snapshot, but falls back to the session's own on-disk status file when it
+ *  isn't surfaced as live yet — so a NEW agent's self-assign at SessionStart
+ *  can't lose the race with the snapshot and silently leave the card unassigned.
+ *  Returns null only when no status file exists for the id at all. */
+export function resolveAssignee(dir: string, sessionId: string): { id: string; name: string } | null {
+  const live = readSnapshot(dir, Date.now()).agents.find((a) => a.sessionId === sessionId);
+  if (live) return { id: live.sessionId, name: live.name };
+  const raw = loadStatus(dir, sessionId);
+  if (!raw) return null;
+  const [resolved] = applyOverrides(applyPersonas([raw], loadPersonas()), readOverrides(dir));
+  return resolved ? { id: resolved.sessionId, name: resolved.name } : null;
+}
+
 export function readSnapshot(dir: string, now: number): Snapshot {
   const agents: AgentStatus[] = [];
   let names: string[] = [];
@@ -311,9 +326,9 @@ export function makeServer(
             return json({ ok: true });
           }
           if (!validSessionId(body.sessionId)) return json({ ok: false, error: "bad sessionId" }, 400);
-          const agent = readSnapshot(dir, Date.now()).agents.find((a) => a.sessionId === body.sessionId);
-          if (!agent) return json({ ok: false, error: "no live session with that id" }, 404);
-          writeBoard(dir, assignCard(board, cardId, { id: agent.sessionId, name: agent.name }));
+          const resolved = resolveAssignee(dir, body.sessionId);
+          if (!resolved) return json({ ok: false, error: "no session with that id" }, 404);
+          writeBoard(dir, assignCard(board, cardId, resolved));
           push();
           return json({ ok: true });
         }

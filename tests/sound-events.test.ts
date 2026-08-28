@@ -1,6 +1,7 @@
 import { test, expect } from "bun:test";
-import { soundTransitions } from "../src/ui/soundEvents";
+import { soundTransitions, boardMoves, isCompletion } from "../src/ui/soundEvents";
 import type { AgentStatus } from "../src/schema";
+import type { Board } from "../src/lib/board";
 
 const A = (o: Partial<AgentStatus>): AgentStatus => ({
   sessionId: "s", name: "A", role: "r", ticket: "#1", state: "working",
@@ -78,4 +79,51 @@ test("a disappeared agent is dropped from the carried-forward state", () => {
   const { next } = soundTransitions(prev, [A({ sessionId: "here", state: "working" })], true);
   expect(next.has("gone")).toBe(false);
   expect(next.has("here")).toBe(true);
+});
+
+// --- board moves (card column changes) ------------------------------------
+
+const board = (cards: Array<{ id: string; columnId: string; title?: string }>): Board => ({
+  columns: [
+    { id: "backlog", name: "Backlog", instruction: "" },
+    { id: "review", name: "Review", instruction: "" },
+    { id: "done", name: "Done", instruction: "" },
+  ],
+  cards: cards.map((c) => ({ id: c.id, title: c.title ?? c.id, columnId: c.columnId })),
+});
+
+test("baseline board records columns but reports no moves (unprimed)", () => {
+  const { moves, next } = boardMoves(new Map(), board([{ id: "k1", columnId: "backlog" }]), false);
+  expect(moves).toEqual([]);
+  expect(next.get("k1")).toBe("backlog");
+});
+
+test("a card changing column is reported as a move", () => {
+  const prev = new Map([["k1", "backlog"]]);
+  const { moves } = boardMoves(prev, board([{ id: "k1", columnId: "done", title: "Ship it" }]), true);
+  expect(moves).toEqual([{ cardId: "k1", title: "Ship it", from: "backlog", to: "done" }]);
+});
+
+test("a card staying in its column reports nothing", () => {
+  const prev = new Map([["k1", "backlog"]]);
+  const { moves } = boardMoves(prev, board([{ id: "k1", columnId: "backlog" }]), true);
+  expect(moves).toEqual([]);
+});
+
+test("a newly added card is recorded but not reported as a move", () => {
+  const prev = new Map([["k1", "backlog"]]);
+  const { moves, next } = boardMoves(prev, board([{ id: "k1", columnId: "backlog" }, { id: "k2", columnId: "backlog" }]), true);
+  expect(moves).toEqual([]);
+  expect(next.get("k2")).toBe("backlog");
+});
+
+test("a removed card is dropped from the carried-forward columns", () => {
+  const prev = new Map([["k1", "backlog"], ["gone", "done"]]);
+  const { next } = boardMoves(prev, board([{ id: "k1", columnId: "backlog" }]), true);
+  expect(next.has("gone")).toBe(false);
+});
+
+test("isCompletion is true only for a move into the done column", () => {
+  expect(isCompletion({ cardId: "k", title: "t", from: "review", to: "done" })).toBe(true);
+  expect(isCompletion({ cardId: "k", title: "t", from: "backlog", to: "review" })).toBe(false);
 });
