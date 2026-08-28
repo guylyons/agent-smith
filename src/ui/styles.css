@@ -498,7 +498,7 @@
 .desk-actions{position:absolute;top:6px;right:6px;display:flex;gap:5px;opacity:0;transition:opacity .1s;z-index:2}
 .desk:hover .desk-actions,.desk:focus-within .desk-actions{opacity:1}
 .deskbtn{font-family:var(--mono);font-size:13px;background:var(--box-lo);color:var(--bone);border:2px solid var(--bevel);cursor:pointer;padding:2px 6px;line-height:1.2}
-.deskbtn:hover{color:var(--gold);border-color:var(--gold)}
+.deskbtn:not(:disabled):hover{color:var(--gold);border-color:var(--gold)}
 .deskbtn:disabled{opacity:.5;cursor:default}
 .reply{display:flex;gap:6px;margin-top:10px}
 .reply-input{flex:1;min-width:0;font-family:var(--mono);font-size:13px;background:var(--night);color:var(--bone);border:2px solid var(--bevel);padding:5px 7px}
@@ -783,7 +783,7 @@ body{background:transparent}
 .name-click:hover{color:var(--gold)}
 .name-input{font-size:13px;padding:3px 6px;max-width:200px}
 .deskbtn.danger{color:var(--clay);border-color:var(--clay)}
-.deskbtn.danger:hover{color:var(--on-danger);background:var(--clay)}
+.deskbtn.danger:not(:disabled):hover{color:var(--on-danger);background:var(--clay)}
 .msg.is-pending{opacity:.55}
 .msg.is-pending .msg-text::after{content:" ⏳"}
 
@@ -862,7 +862,7 @@ body{background:transparent}
 .cardmodal-send:hover:not(:disabled){background:var(--leaf)}
 .cardmodal-send:disabled{opacity:.4;cursor:not-allowed}
 .cardmodal-spawn{color:var(--dim);border-style:dashed}
-.cardmodal-spawn:hover{color:var(--gold);border-color:var(--gold)}
+.cardmodal-spawn:not(:disabled):hover{color:var(--gold);border-color:var(--gold)}
 .cardmodal-desc{
   width:100%;box-sizing:border-box;resize:vertical;min-height:88px;
   font-family:var(--mono);font-size:13px;line-height:1.6;
@@ -1187,3 +1187,127 @@ body{background:transparent}
 .cardmodal-descview:hover{border-color:var(--gold)}
 .cardmodal-descview:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
 .cardmodal-descview.is-empty{color:var(--dim)}
+
+/* ============================================================================
+   ROLLOVER
+   One recipe for "the pointer is on this", applied to every control, rather
+   than each component inventing its own. The vocabulary was already in the
+   file — a gold edge for "you're on it", a --box-lo lift for a list row, clay
+   for destructive, .1s for the fade (the drawer tabs set that pace). This
+   section only makes sure nothing is left out of it.
+
+   Three states, always in this order of strength:
+     hover    the pointer is over it      the edge warms toward gold
+     focus    the keyboard is on it       full gold, plus a ring on buttons
+     active   it is being pressed         a pixel down, instantly
+
+   Two guards are what make it smart rather than merely present:
+     (hover:hover)              a tap on a touch screen must not leave a
+                                control stuck in its hover state, and a
+                                control that only EXISTS on hover has to come
+                                back when there is no pointer.
+     (reduced motion)           the states still change; they just stop
+                                fading. No motion, no loss of feedback.
+   ========================================================================= */
+
+:root{
+  --t-roll:.1s;                    /* the app's established rollover speed */
+  /* Halfway between the resting edge and the focus edge, so hover and focus
+     stay tellable apart on the same control. Mixed from the tokens, so every
+     theme gets its own version of "warming up" for free. */
+  --edge-roll:color-mix(in srgb, var(--gold) 55%, var(--bevel));
+  /* A ground-agnostic wash for small icon buttons: --bone is the theme's text
+     colour, so this lightens on the dark themes and darkens on Material. */
+  --wash-roll:color-mix(in srgb, var(--bone) 12%, transparent);
+}
+
+/* The fade. :where() holds it at zero specificity, so every existing rule and
+   every theme override still wins outright. transform is deliberately not in
+   the list: a press should land the instant the mouse goes down. Wrapping the
+   whole thing in no-preference is the reduced-motion guard — those users get
+   the same states, arriving immediately. */
+@media (prefers-reduced-motion:no-preference){
+  :where(button,input,textarea,select,a,
+         .card,.desk,.grip,.notif-item,.palette-row,.sprite-option,
+         .desk>.sprite-wrap,.desk>.who){
+    transition:
+      color var(--t-roll) ease-out,
+      background-color var(--t-roll) ease-out,
+      border-color var(--t-roll) ease-out,
+      box-shadow var(--t-roll) ease-out,
+      filter var(--t-roll) ease-out,
+      opacity var(--t-roll) ease-out;
+  }
+}
+/* The two rollovers that predate this section carry their own transition, so
+   the guard above can't reach them. Switch them off by hand. */
+@media (prefers-reduced-motion:reduce){
+  .drawer-tabs .tab,.desk-actions{transition:none}
+}
+
+/* ---- keyboard parity ----
+   Several controls had a rollover but no focus ring at all: the alert bell,
+   the column and card delete buttons, the card-modal close, ADD COLUMN, the
+   drawer tabs. One low-specificity rule covers the lot. The text fields keep
+   their own gold-border focus instead, because their `:focus{outline:none}`
+   rule outranks a :where(). */
+:where(button,[role="button"],a[href],select,summary):focus-visible{
+  outline:3px solid var(--gold);outline-offset:2px;
+}
+/* A board card is a focusable div whose focus style is the same gold border as
+   its hover — so the keyboard gets its own, unmistakable ring. */
+.card:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+
+/* ---- press ----
+   Every button dips a pixel. The two that float over the page on a hard drop
+   shadow lose most of that shadow at the same time, so they read as pushed
+   INTO the page rather than merely nudged. The drawer tabs keep their own,
+   deeper press (they look like physical keys), which outranks this. */
+button:not(:disabled):active{transform:translateY(1px)}
+.tube:active,.settings-btn:active{
+  box-shadow:inset 0 0 0 2px var(--bevel),0 1px 0 rgba(0,0,0,.55);
+  transition:none;   /* down is instant; the release keeps the fade */
+}
+
+/* ---- hover ----
+   Pointer devices only. */
+@media (hover:hover){
+  /* Editable surfaces should say they are editable before you click into one.
+     :not(:focus) so the warm edge never overwrites the gold focus edge on a
+     field you are already typing in. */
+  .add-card:hover:not(:focus),
+  .col-instr:hover:not(:focus),
+  .reply-input:hover:not(:focus),
+  .reply-textarea:hover:not(:focus),
+  .name-input:hover:not(:focus),
+  .palette-input:hover:not(:focus),
+  .cardmodal-title:hover:not(:focus),
+  .cardmodal-desc:hover:not(:focus),
+  .cardmodal-select:hover:not(:focus),
+  .comment-input:hover:not(:focus){border-color:var(--edge-roll)}
+  .add-card:hover:not(:focus){color:var(--bone)}
+
+  /* The grip is the only way to reorder a column, and at rest it is the same
+     grey as everything around it. */
+  .grip:hover{color:var(--gold)}
+
+  /* Small icon buttons — close, delete, remove an attachment. They already
+     change colour; a fill turns a 12px glyph into something to aim at. */
+  .col-del:hover,.card-del:hover,.cardmodal-x:hover,
+  .comment-del:hover,.attach-x:hover{background:var(--wash-roll)}
+
+  /* The two fixed chrome buttons changed text colour only, which is a weak
+     signal for a control floating over the page — bring the edge with it.
+     The :root prefix is needed to outrank the per-theme rules that restyle
+     these two borders; without it the rollover would be dead in NOSTROMO and
+     Material. */
+  :root .tube:hover,:root .settings-btn:hover{border-color:var(--gold)}
+}
+
+/* ---- no pointer ----
+   Nothing here can be hovered, so a control that only appears on hover is a
+   control that does not exist. The desk's FOCUS/STOP buttons are the only
+   ones, and they are the desk's primary actions. */
+@media (hover:none){
+  .desk-actions{opacity:1}
+}
