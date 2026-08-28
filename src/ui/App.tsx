@@ -34,11 +34,11 @@ export function App() {
     setAlertsEnabled(loadBool("aw-alerts"));
   }, []);
 
-  // Quick find: Cmd+P (mac) / Ctrl+P opens the command palette. Preventing the
-  // default stops the browser's print dialog stealing the chord.
+  // Quick find: Alt+P opens the command palette. We match on e.code because on
+  // mac Alt+P types "π" rather than a plain "p".
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && !e.altKey && (e.key === "p" || e.key === "P")) {
+      if (e.altKey && !e.metaKey && !e.ctrlKey && e.code === "KeyP") {
         e.preventDefault();
         setPaletteOpen((v) => !v);
       }
@@ -69,7 +69,7 @@ export function App() {
       <Backdrop />
       <Crt />
       <button className="settings-btn" title="Settings" onClick={() => setSettingsOpen(true)}>⚙</button>
-      <Header snap={snap} onNewAgent={() => setSpawnSeed({})} />
+      <Header snap={snap} onNewAgent={() => setSpawnSeed({})} onFind={() => setPaletteOpen(true)} />
       <Crew agents={snap.agents} board={snap.board} onOpen={setSelectedId} />
       <TheLine board={snap.board} agents={snap.agents} onSpawnForCard={(task, cardId) => setSpawnSeed({ task, cardId })} />
       {selected && selected.sessionId === selectedId && (

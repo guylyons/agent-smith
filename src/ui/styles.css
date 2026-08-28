@@ -338,6 +338,8 @@
 .newagent-btn{font-family:var(--mono);font-size:11px;letter-spacing:.5px;
   background:var(--leaf);color:#08130c;border:2px solid var(--bone);padding:6px 9px;cursor:pointer}
 .newagent-btn:hover{background:var(--gold)}
+.find-btn{background:var(--box);color:var(--bone)}
+.find-btn:hover{background:var(--gold);color:#1a1204}
 .newagent{width:min(520px,92vw);max-height:90vh;overflow-y:auto;margin:8vh auto;padding:20px;display:flex;flex-direction:column;gap:9px}
 .newagent-title{font-size:14px;letter-spacing:1px;margin-bottom:6px}
 .newagent-label{font-size:11px;color:var(--dim);margin-top:8px}
@@ -738,4 +740,8 @@ body{background:transparent}
 .palette-icon{flex:0 0 auto;width:18px;text-align:center;color:var(--dim)}
 .palette-title{flex:0 0 auto;font-family:var(--mono);font-size:13px;color:var(--bone);max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .palette-sub{flex:1;min-width:0;font-size:12px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* A body-text excerpt reads as a quotation, not as metadata — italic sets it
+   apart from the column/role subtitles that occupy the same slot. */
+.palette-sub.is-snippet{font-style:italic}
+.palette-mark{color:var(--gold);font-weight:400;font-style:normal;background:rgba(242,177,52,.14)}
 .palette-foot{padding:8px 14px;border-top:var(--px) solid var(--bone);font-size:11px;color:var(--dim);letter-spacing:.5px}

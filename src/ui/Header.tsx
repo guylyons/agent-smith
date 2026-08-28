@@ -24,7 +24,7 @@ export function headerSummary(agents: AgentStatus[]): { working: number; waiting
   return { working, waiting, repos };
 }
 
-export function Header({ snap, onNewAgent }: { snap: Snapshot; onNewAgent: () => void }) {
+export function Header({ snap, onNewAgent, onFind }: { snap: Snapshot; onNewAgent: () => void; onFind: () => void }) {
   const { agents, board } = snap;
   const idle = agents.filter((a) => a.state === "idle").length;
   const onLine = board.cards.length;
@@ -51,6 +51,7 @@ export function Header({ snap, onNewAgent }: { snap: Snapshot; onNewAgent: () =>
         <div className="pix statline">
           <span><b>{idle}</b> IDLE</span>
           <span><b>{onLine}</b> ON THE LINE</span>
+          <button className="newagent-btn find-btn" onClick={onFind} title="Find a ticket, desk, or chat (Alt+P)">FIND</button>
           <button className="newagent-btn" onClick={onNewAgent}>+ NEW AGENT</button>
         </div>
       </div>

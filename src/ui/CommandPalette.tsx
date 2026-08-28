@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { Snapshot } from "../lib/snapshot";
 import { buildSearchItems, searchItems, type SearchItem } from "../lib/search";
 import { fetchChatSearch, type ChatHit } from "./actions";
@@ -14,8 +14,27 @@ type Entry = {
   icon: string;
   title: string;
   subtitle?: string;
+  /** Indices into `subtitle` to highlight — the characters the query matched,
+   *  when this row earned its place on body text rather than its title. */
+  marks?: number[];
   activate: () => void;
 };
+
+/** Render `text` with the characters at `marks` emphasised. Marks are ascending
+ *  and in range by construction (matchSnippet maps them onto the snippet it
+ *  returns), so this just walks them in order. */
+function Marked({ text, marks }: { text: string; marks?: number[] }) {
+  if (!marks?.length) return <>{text}</>;
+  const out: React.ReactNode[] = [];
+  let at = 0;
+  for (const m of marks) {
+    if (m > at) out.push(<Fragment key={`t${at}`}>{text.slice(at, m)}</Fragment>);
+    out.push(<b className="palette-mark" key={`m${m}`}>{text[m]}</b>);
+    at = m + 1;
+  }
+  if (at < text.length) out.push(<Fragment key={`t${at}`}>{text.slice(at)}</Fragment>);
+  return <>{out}</>;
+}
 
 const KIND_ICON: Record<SearchItem["kind"], string> = { card: "▤", agent: "◈" };
 
@@ -58,7 +77,10 @@ export function CommandPalette({ snap, onClose }: { snap: Snapshot; onClose: () 
       group: browsing ? (r.kind === "card" ? "TICKETS" : "DESKS") : "RESULTS",
       icon: KIND_ICON[r.kind],
       title: r.title,
-      subtitle: r.subtitle,
+      // A body hit shows the matching text in place of the static subtitle —
+      // otherwise the row gives no clue why the query landed on it.
+      subtitle: r.snippet ?? r.subtitle,
+      marks: r.marks,
       activate: () => { r.kind === "card" ? openCard(r.id) : openAgent(r.id); onClose(); },
     }));
     const chatEntries: Entry[] = chats.map((c) => ({
@@ -132,7 +154,11 @@ export function CommandPalette({ snap, onClose }: { snap: Snapshot; onClose: () 
                 >
                   <span className="palette-icon">{en.icon}</span>
                   <span className="palette-title">{en.title}</span>
-                  {en.subtitle && <span className="palette-sub">{en.subtitle}</span>}
+                  {en.subtitle && (
+                    <span className={`palette-sub${en.marks ? " is-snippet" : ""}`}>
+                      <Marked text={en.subtitle} marks={en.marks} />
+                    </span>
+                  )}
                 </div>
               </div>
             );
