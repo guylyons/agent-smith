@@ -23,3 +23,10 @@ test("parseStatus returns null on missing field", () => {
 test("parseStatus allows null ticket/branch", () => {
   expect(parseStatus({ ...valid, ticket: null, branch: null })).not.toBeNull();
 });
+
+test("parseStatus roundtrips the usage budget (total optional)", () => {
+  expect(parseStatus({ ...valid, usage: { budgetLeft: 14_000_000, budgetTotal: 15_000_000 } })?.usage)
+    .toEqual({ budgetLeft: 14_000_000, budgetTotal: 15_000_000 });
+  expect(parseStatus({ ...valid, usage: { budgetLeft: 14_000_000 } })?.usage).toEqual({ budgetLeft: 14_000_000 });
+  expect(parseStatus(valid)?.usage).toBeUndefined();
+});

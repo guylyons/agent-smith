@@ -1,4 +1,5 @@
 import type { Snapshot } from "../lib/snapshot";
+import { UsageMeter } from "./UsageMeter";
 
 function projectName(cwd: string): string {
   const parts = cwd.split("/").filter(Boolean);
@@ -18,19 +19,22 @@ export function Header({ snap, onNewAgent }: { snap: Snapshot; onNewAgent: () =>
 
   return (
     <header>
-      <div className="pix title">AGENT WORKSHOP</div>
-      <div className="pix sub">
-        {agents.length} ON SHIFT
-        {project ? ` — ${project}` : ""}
-        {branch ? ` · ${branch}` : ""}
-        <span className="caret"></span>
-      </div>
-      <div className="pix statline">
-        <span><b>{working}</b> WORKING</span>
-        <span><b>{waiting}</b> NEED YOU</span>
-        <span><b>{idle}</b> IDLE</span>
-        <span><b>{onLine}</b> ON THE LINE</span>
-        <button className="newagent-btn" onClick={onNewAgent}>+ NEW AGENT</button>
+      <UsageMeter agents={agents} />
+      <div className="head-main">
+        <div className="pix title">AGENT WORKSHOP</div>
+        <div className="pix sub">
+          {agents.length} ON SHIFT
+          {project ? ` — ${project}` : ""}
+          {branch ? ` · ${branch}` : ""}
+          <span className="caret"></span>
+        </div>
+        <div className="pix statline">
+          <span><b>{working}</b> WORKING</span>
+          <span><b>{waiting}</b> NEED YOU</span>
+          <span><b>{idle}</b> IDLE</span>
+          <span><b>{onLine}</b> ON THE LINE</span>
+          <button className="newagent-btn" onClick={onNewAgent}>+ NEW AGENT</button>
+        </div>
       </div>
     </header>
   );

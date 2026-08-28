@@ -40,6 +40,12 @@ export const AgentStatusSchema = z.object({
   // user-chosen sprite override (palette index + gear id + character body),
   // replacing the deterministic default derived from sessionId+role
   sprite: z.object({ palette: z.number(), gear: z.string(), body: z.string().optional() }).optional(),
+  // Claude token budget, set by the scanner from the transcript's
+  // "<total_tokens>N tokens left</total_tokens>" markers: budgetLeft is the
+  // newest marker (tail), budgetTotal the session's first (head) — absent when
+  // the head is unreadable. Sessions without markers carry no usage at all.
+  // Feeds the header's usage meter.
+  usage: z.object({ budgetLeft: z.number(), budgetTotal: z.number().optional() }).optional(),
 });
 
 export type AgentStatus = z.infer<typeof AgentStatusSchema>;

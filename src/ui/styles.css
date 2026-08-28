@@ -96,7 +96,28 @@
   }
 
   /* ---- header ---- */
-  header{max-width:1080px;margin:0 auto 20px}
+  header{max-width:1080px;margin:0 auto 20px;display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap}
+  .head-main{flex:1;min-width:260px}
+
+  /* Claude usage meter — an HP bar for the fleet's token budget */
+  .usage{
+    flex:0 0 auto;
+    background:var(--box);
+    border:3px solid var(--bone);
+    box-shadow:inset 0 0 0 2px var(--bevel),0 3px 0 rgba(0,0,0,.55);
+    padding:10px 12px;
+  }
+  .usage-label{font-size:8px;color:var(--gold);letter-spacing:.5px}
+  .usage-bar{
+    display:flex;gap:2px;margin-top:9px;padding:3px;
+    background:var(--box-lo);border:2px solid var(--bevel);
+  }
+  .usage-cell{width:7px;height:12px;flex:0 0 auto;background:var(--night)}
+  .usage-cell.on{background:var(--leaf);box-shadow:inset 0 -3px 0 rgba(0,0,0,.3)}
+  .usage.hp-warn .usage-cell.on{background:var(--gold)}
+  .usage.hp-low  .usage-cell.on{background:var(--clay);animation:blink 1.1s steps(2) infinite}
+  .usage-text{font-size:8px;color:var(--dim);margin-top:9px;white-space:nowrap}
+  @media (prefers-reduced-motion:reduce){.usage-cell.on{animation:none}}
   .title{font-size:20px;letter-spacing:1px;text-shadow:0 var(--px) 0 #000}
   .sub{font-size:9px;color:var(--dim);margin-top:10px}
   .statline{display:flex;flex-wrap:wrap;gap:16px;margin-top:14px;font-size:9px}

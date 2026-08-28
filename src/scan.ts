@@ -140,6 +140,32 @@ async function tailLinesOf(file: string, bytes: number): Promise<string[]> {
 }
 const tailLines = (file: string) => tailLinesOf(file, TAIL_BYTES);
 
+// A session's starting token budget is its FIRST "<total_tokens>N tokens left"
+// marker, which lives at the head of the transcript — outside the tail window
+// once the session grows. The head never changes, so cache by path.
+const BUDGET_TOTAL_RE = /<total_tokens>(\d+) tokens left<\/total_tokens>/;
+const budgetTotalCache = new Map<string, number | null>();
+
+/** The session's starting token budget, or null when it runs without one. */
+export async function budgetTotalOf(file: string, bytes = 48 * 1024): Promise<number | null> {
+  const cached = budgetTotalCache.get(file);
+  if (cached !== undefined) return cached;
+  let total: number | null = null;
+  try {
+    const fh = await open(file, "r");
+    let head = "";
+    try {
+      const buf = Buffer.alloc(bytes);
+      const { bytesRead } = await fh.read(buf, 0, bytes, 0);
+      head = buf.toString("utf8", 0, bytesRead);
+    } finally { await fh.close(); }
+    const m = head.match(BUDGET_TOTAL_RE);
+    if (m) total = Number(m[1]);
+  } catch { /* unreadable head -> no total */ }
+  budgetTotalCache.set(file, total);
+  return total;
+}
+
 /** Find a session's transcript and parse it into a chat log, any pending question,
  *  and whatever tool it is currently blocked on. */
 export async function readConversation(sessionId: string, maxBytes = 512 * 1024): Promise<{ messages: ChatMessage[]; question: PendingQuestion | null; blocked: BlockingTool | null }> {
@@ -247,13 +273,18 @@ export function mergeForWrite(existing: AgentStatus | null, derived: AgentStatus
   // it here would strip the agent's name/sprite — and drop it out of the
   // scrum-master notification fan-out — after the first scan pass.
   if (carried.persona === undefined && existing?.persona !== undefined) carried.persona = existing.persona;
+  // And the usage meter's budget: a tail window that momentarily shows no
+  // marker must not blank a budget we already know.
+  if (carried.usage === undefined && existing?.usage !== undefined) carried.usage = existing.usage;
 
   // A hook-set block on the USER is invisible to the transcript: the session sits
   // on an unresolved tool_use, which derives as "working". Don't let that
   // overwrite it. (`question` is excluded — the scanner derives it independently.)
   if (existing && (existing.waitingReason === "permission" || existing.waitingReason === "plan")) {
     const provenStale = derived.state === "idle" || derived.waitingReason === "question";
-    if (!provenStale) return { ...existing, updatedAt: now };
+    // Keep the pin, but let a fresher budget reading through — the meter
+    // shouldn't freeze just because the session waits on a prompt.
+    if (!provenStale) return { ...existing, usage: derived.usage ?? existing.usage, updatedAt: now };
   }
   return carried;
 }
@@ -350,6 +381,7 @@ export async function scanLiveSessions(
 
   const cands: Candidate[] = [];
   if (deriveCache.size > 200) deriveCache.clear();
+  if (budgetTotalCache.size > 500) budgetTotalCache.clear();
   for (const file of await freshTranscripts(now, freshMs)) {
     try {
       const mtime = (await stat(file)).mtimeMs;
@@ -363,6 +395,14 @@ export async function scanLiveSessions(
       }
       if (!base) continue;
       const derived: AgentStatus = { ...base, updatedAt: now }; // refresh liveness
+      if (derived.usage) {
+        const total = await budgetTotalOf(file);
+        // Guard total >= left: a head that somehow reads lower than the tail
+        // would render "used" negative — better to show the total as unknown.
+        if (total !== null && total >= derived.usage.budgetLeft) {
+          derived.usage = { ...derived.usage, budgetTotal: total };
+        }
+      }
       const subs = await countActiveSubagents(file, now);
       if (subs > 0) {
         derived.subagents = subs;

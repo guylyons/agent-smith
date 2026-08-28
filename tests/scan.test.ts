@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { mergeForWrite, scanLiveSessions, freshTranscripts, chooseLive, isEphemeralCwd, readConversation, type GhosttyTerminal } from "../src/scan";
+import { mergeForWrite, scanLiveSessions, freshTranscripts, chooseLive, isEphemeralCwd, readConversation, budgetTotalOf, type GhosttyTerminal } from "../src/scan";
 import type { AgentStatus } from "../src/schema";
 import { mkdirSync, writeFileSync, rmSync, readFileSync, utimesSync, existsSync } from "node:fs";
 import { join } from "node:path";
@@ -348,4 +348,38 @@ test("mergeForWrite carries the persona forward like pid/tty", () => {
   const merged = mergeForWrite(existing, derived, 5000);
   expect(merged.persona).toBe("backend-dev");
   expect(merged.pid).toBe(42);
+});
+
+test("mergeForWrite: carries a known budget forward when the derived tail lost its marker", () => {
+  const existing = S({ usage: { budgetLeft: 14_000_000, budgetTotal: 15_000_000 } });
+  const derived = S({ state: "working" }); // tail window happened to show no marker
+  expect(mergeForWrite(existing, derived, 1000).usage).toEqual({ budgetLeft: 14_000_000, budgetTotal: 15_000_000 });
+});
+
+test("mergeForWrite: a permission pin still takes the fresher budget reading", () => {
+  const existing = S({ state: "waiting", waitingReason: "permission", usage: { budgetLeft: 14_000_000, budgetTotal: 15_000_000 } });
+  const derived = S({ state: "working", usage: { budgetLeft: 13_500_000, budgetTotal: 15_000_000 } });
+  const out = mergeForWrite(existing, derived, 1000);
+  expect(out.waitingReason).toBe("permission"); // pin kept
+  expect(out.usage).toEqual({ budgetLeft: 13_500_000, budgetTotal: 15_000_000 });
+});
+
+test("budgetTotalOf: reads the session's FIRST marker from the transcript head", async () => {
+  reset();
+  const file = join(projects, "p", "budget.jsonl");
+  mkdirSync(join(projects, "p"), { recursive: true });
+  writeFileSync(file, [
+    JSON.stringify({ type: "user", sessionId: "s9", cwd: "/r", message: { content: [{ type: "text", text: "<total_tokens>15000000 tokens left</total_tokens>" }] } }),
+    JSON.stringify({ type: "user", sessionId: "s9", cwd: "/r", message: { content: [{ type: "text", text: "<total_tokens>14000000 tokens left</total_tokens>" }] } }),
+  ].join("\n"));
+  expect(await budgetTotalOf(file)).toBe(15_000_000);
+});
+
+test("budgetTotalOf: null for a transcript without markers or a missing file", async () => {
+  reset();
+  const file = join(projects, "p", "nobudget.jsonl");
+  mkdirSync(join(projects, "p"), { recursive: true });
+  writeFileSync(file, JSON.stringify({ type: "user", sessionId: "s9", cwd: "/r", message: { content: [{ type: "text", text: "hi" }] } }));
+  expect(await budgetTotalOf(file)).toBe(null);
+  expect(await budgetTotalOf(join(projects, "p", "missing.jsonl"))).toBe(null);
 });

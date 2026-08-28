@@ -107,3 +107,20 @@ test("null/empty gitBranch -> null ticket", () => {
   expect(s.branch).toBeNull();
   expect(s.ticket).toBeNull();
 });
+
+test("derives usage.budgetLeft from the NEWEST total_tokens marker", () => {
+  const lines = [
+    L({ type: "user", sessionId: "s1", cwd: "/r", gitBranch: "b", message: { content: [{ type: "text", text: "<total_tokens>15000000 tokens left</total_tokens> start" }] } }),
+    L({ type: "assistant", sessionId: "s1", cwd: "/r", gitBranch: "b", message: { content: [{ type: "text", text: "done" }] } }),
+    L({ type: "user", sessionId: "s1", cwd: "/r", gitBranch: "b", message: { content: [{ type: "text", text: "<total_tokens>14900123 tokens left</total_tokens> next" }] } }),
+  ];
+  const s = deriveStatusFromTranscript(lines, 1)!;
+  expect(s.usage).toEqual({ budgetLeft: 14_900_123 });
+});
+
+test("a session without budget markers carries no usage at all", () => {
+  const lines = [
+    L({ type: "assistant", sessionId: "s1", cwd: "/r", gitBranch: "b", message: { content: [{ type: "text", text: "done" }] } }),
+  ];
+  expect(deriveStatusFromTranscript(lines, 1)!.usage).toBeUndefined();
+});
