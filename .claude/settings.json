@@ -1,9 +1,9 @@
 {
   "hooks": {
-    "SessionStart": [{ "hooks": [{ "type": "command", "command": "bun run /Users/glyons/Downloads/agentsmith/hooks/status.ts" }]}],
-    "PreToolUse":   [{ "matcher": "*", "hooks": [{ "type": "command", "command": "bun run /Users/glyons/Downloads/agentsmith/hooks/status.ts" }]}],
-    "Notification": [{ "hooks": [{ "type": "command", "command": "bun run /Users/glyons/Downloads/agentsmith/hooks/status.ts" }]}],
-    "Stop":         [{ "hooks": [{ "type": "command", "command": "bun run /Users/glyons/Downloads/agentsmith/hooks/status.ts" }]}],
-    "SessionEnd":   [{ "hooks": [{ "type": "command", "command": "bun run /Users/glyons/Downloads/agentsmith/hooks/status.ts" }]}]
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "bun run \"$CLAUDE_PROJECT_DIR/hooks/status.ts\"" }]}],
+    "PreToolUse":   [{ "matcher": "*", "hooks": [{ "type": "command", "command": "bun run \"$CLAUDE_PROJECT_DIR/hooks/status.ts\"" }]}],
+    "Notification": [{ "hooks": [{ "type": "command", "command": "bun run \"$CLAUDE_PROJECT_DIR/hooks/status.ts\"" }]}],
+    "Stop":         [{ "hooks": [{ "type": "command", "command": "bun run \"$CLAUDE_PROJECT_DIR/hooks/status.ts\"" }]}],
+    "SessionEnd":   [{ "hooks": [{ "type": "command", "command": "bun run \"$CLAUDE_PROJECT_DIR/hooks/status.ts\"" }]}]
   }
 }

@@ -546,3 +546,11 @@ test("cardTaskPrompt scopes the agent to its own card and constraints", () => {
   expect(p).toContain("This task replaces anything");
   expect(p).toContain("do not commit");
 });
+
+test("cardTaskPrompt offers the MCP tools as an alternative to the curls", () => {
+  const b = addCard(defaultBoard(), "backlog", "Fix it");
+  const p = cardTaskPrompt(b, b.cards[0]!.id, SRV);
+  expect(p).toContain("mcp__the-line__");
+  // still ASCII-safe for the trip through the pty
+  expect(/^[\x00-\x7f]*$/.test(p)).toBe(true);
+});

@@ -8,7 +8,9 @@
     "build": "bun build src/ui/index.html --outdir dist --minify",
     "test": "bun test",
     "scan": "bun run src/scan.ts",
+    "mcp": "bun run src/mcp.ts",
     "install-hooks": "bun run scripts/install-hooks.ts",
+    "install-mcp": "bun run scripts/install-mcp.ts",
     "uninstall-hooks": "bun run scripts/uninstall-hooks.ts"
   },
   "devDependencies": {

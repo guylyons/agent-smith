@@ -202,6 +202,8 @@ export function cardTaskPrompt(board: Board, id: string, server: string, agentNa
     "you were told before it. The board is how your progress is watched, so",
     "update it as you go, not in one write at the end. Update it ONLY with the",
     "curl commands below; never edit the board file directly.",
+    "If you have the-line MCP tools (mcp__the-line__card_move, card_comment,",
+    "board_read, ...), use those instead -- same board, same effect, no curl.",
     "",
     `STEP 1, before any other work, move this card to "${start?.id ?? card.columnId}" and say you`,
     "picked it up:",
