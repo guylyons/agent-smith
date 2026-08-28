@@ -302,3 +302,109 @@ test("card-assign binds a live session as assignee and null clears it", async ()
   expect((await post("/action/card-assign", { cardId, sessionId: "99999999-dead-4dea-bead-999999999999" })).status).toBe(404);
   server.stop(true);
 });
+
+// ---- send-task + notifications: the closed loop ---------------------------
+// send-task composes the protocol prompt server-side and delivers it to the
+// assigned live session. Worker card-comment/card-move wake the supervising
+// scrum-master session(s), so orchestration is event-driven, not polled.
+// Delivery is injected so tests capture prompts instead of driving AppleScript.
+
+const WORKER = "502d0e8c-8790-4804-b767-0549edfc959c";
+const SCRUM = "9a1b2c3d-1111-4222-8333-444455556666";
+
+async function notifyServer() {
+  reset();
+  process.env.AGENT_STATUS_DIR = dir;
+  const sent: { sessionId: string; text: string }[] = [];
+  const { makeServer } = await import("../src/server");
+  const server = makeServer(0, {
+    deliver: async (target: any, text: string) => { sent.push({ sessionId: target.sessionId, text }); return { ok: true }; },
+  });
+  const base = `http://localhost:${server.port}`;
+  const post = (path: string, body: object) =>
+    fetch(`${base}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  return { server, base, post, sent };
+}
+
+test("send-task delivers the protocol prompt to the assigned live session", async () => {
+  const { server, base, post, sent } = await notifyServer();
+  writeFileSync(join(dir, `${WORKER}.json`), valid({ sessionId: WORKER, name: "VOLT" }));
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "Fix bug" })).json()) as any;
+  await post("/action/card-assign", { cardId, sessionId: WORKER });
+  const res = await post("/action/send-task", { cardId });
+  expect(((await res.json()) as any).ok).toBe(true);
+  expect(sent.length).toBe(1);
+  expect(sent[0]!.sessionId).toBe(WORKER);
+  expect(sent[0]!.text).toContain("Fix bug");
+  expect(sent[0]!.text).toContain(cardId);
+  expect(sent[0]!.text).toContain(`${base}/action/card-move`); // curl target is this server
+  expect(sent[0]!.text).toContain('"author":"VOLT"');
+  // and the thread records the send
+  const card = readSnapshot(dir, Date.now()).board.cards[0]!;
+  expect(card.comments!.some((c) => c.text.includes("Sent task to VOLT"))).toBe(true);
+  server.stop(true);
+});
+
+test("send-task without a live assignee is refused", async () => {
+  const { server, post } = await notifyServer();
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
+  expect((await post("/action/send-task", { cardId })).status).toBe(400); // unassigned
+  expect((await post("/action/send-task", { cardId: "card_nope" })).status).toBe(404);
+  server.stop(true);
+});
+
+test("a worker's card-comment wakes the scrum master, not the worker itself", async () => {
+  const { server, post, sent } = await notifyServer();
+  writeFileSync(join(dir, `${WORKER}.json`), valid({ sessionId: WORKER, name: "VOLT" }));
+  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master" }));
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "Fix bug" })).json()) as any;
+  await post("/action/card-assign", { cardId, sessionId: WORKER });
+  sent.length = 0;
+  await post("/action/card-comment", { cardId, author: "VOLT", text: "picked up" });
+  expect(sent.map((s) => s.sessionId)).toEqual([SCRUM]);
+  expect(sent[0]!.text).toContain("VOLT");
+  expect(sent[0]!.text).toContain("picked up");
+  expect(/^[\x00-\x7f]*$/.test(sent[0]!.text)).toBe(true); // ASCII-safe transit
+  server.stop(true);
+});
+
+test("a scrum master's card-comment wakes the assignee, not itself", async () => {
+  const { server, post, sent } = await notifyServer();
+  writeFileSync(join(dir, `${WORKER}.json`), valid({ sessionId: WORKER, name: "VOLT" }));
+  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master" }));
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "Fix bug" })).json()) as any;
+  await post("/action/card-assign", { cardId, sessionId: WORKER });
+  sent.length = 0;
+  // CADENCE is the scrum-master persona's display name
+  await post("/action/card-comment", { cardId, author: "CADENCE", text: "please add a test" });
+  expect(sent.map((s) => s.sessionId)).toEqual([WORKER]);
+  expect(sent[0]!.text).toContain("please add a test");
+  server.stop(true);
+});
+
+test("a worker's card-move wakes the scrum master", async () => {
+  const { server, post, sent } = await notifyServer();
+  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master" }));
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "Fix bug" })).json()) as any;
+  sent.length = 0;
+  await post("/action/card-move", { cardId, toColumnId: "review", author: "VOLT" });
+  expect(sent.map((s) => s.sessionId)).toEqual([SCRUM]);
+  expect(sent[0]!.text).toContain('"Fix bug"');
+  expect(sent[0]!.text).toContain("review");
+  expect(sent[0]!.text).toContain("VOLT");
+  server.stop(true);
+});
+
+test("card ops without any scrum master or assignee deliver nothing", async () => {
+  const { server, post, sent } = await notifyServer();
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
+  sent.length = 0;
+  await post("/action/card-comment", { cardId, author: "X", text: "note" });
+  await post("/action/card-move", { cardId, toColumnId: "review" });
+  expect(sent).toEqual([]);
+  server.stop(true);
+});

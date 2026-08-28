@@ -6,7 +6,7 @@ import { ensureStatusDir, statusDir } from "./lib/paths";
 import { scanLiveSessions, readConversation, readSubagents } from "./scan";
 import { readOverrides, applyOverrides, setNameOverride, setSpriteOverride } from "./lib/overrides";
 import { loadPersonas, applyPersonas } from "./lib/personas";
-import { readBoard, writeBoard, sanitizeBoard, boardFile, addCard, moveCard, addComment, assignCard, setCardDescription } from "./lib/board";
+import { readBoard, writeBoard, sanitizeBoard, boardFile, addCard, moveCard, addComment, assignCard, setCardDescription, cardTaskPrompt, type Board } from "./lib/board";
 import { ALLOWED_MODELS, ALLOWED_PERMISSION_MODES, focusSession, interruptSession, killAgent, sendPrompt, spawnAgent } from "./ghostty";
 import { readRepo } from "./repo";
 import { saveUpload } from "./lib/uploads";
@@ -44,9 +44,35 @@ export function readSnapshot(dir: string, now: number): Snapshot {
   });
 }
 
-export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?: number } = {}) {
-  const { scan = false, scanIntervalMs = 20_000 } = opts;
+export function makeServer(
+  port: number,
+  opts: {
+    scan?: boolean;
+    scanIntervalMs?: number;
+    /** How a composed prompt reaches a session's terminal. Injectable so tests
+     *  capture deliveries instead of driving AppleScript. */
+    deliver?: (target: AgentStatus, text: string) => Promise<{ ok: boolean; error?: string }>;
+  } = {},
+) {
+  const { scan = false, scanIntervalMs = 20_000, deliver = sendPrompt } = opts;
   const dir = ensureStatusDir();
+
+  // Wake the sessions that care about a card event, best-effort and without
+  // blocking the response. Recipients: the card's live assignee plus every live
+  // scrum-master session — minus whoever authored the event (matched by display
+  // name), so an agent is never woken by its own update. ASCII-only text: the
+  // pty path this rides is known to mangle anything else.
+  function notifyCardEvent(board: Board, cardId: string, author: string, text: string) {
+    const card = board.cards.find((k) => k.id === cardId);
+    if (!card) return;
+    const { agents } = readSnapshot(dir, Date.now());
+    const targets = agents.filter(
+      (a) =>
+        a.name !== author &&
+        (a.persona === "scrum-master" || (card.assignee && a.sessionId === card.assignee.id)),
+    );
+    for (const t of targets) void deliver(t, text).catch(() => { /* best-effort */ });
+  }
   const clients = new Set<(s: Snapshot) => void>();
 
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -204,23 +230,48 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
           push();
           return json({ ok: true, cardId: card.id });
         }
-        if (action === "card-move" || action === "card-comment" || action === "card-assign") {
+        if (action === "card-move" || action === "card-comment" || action === "card-assign" || action === "send-task") {
           const cardId = typeof body.cardId === "string" ? body.cardId : "";
           const board = readBoard(dir);
           const card = board.cards.find((k) => k.id === cardId);
           if (!card) return json({ ok: false, error: `unknown card: ${cardId}` }, 404);
+          const title = card.title.trim() || "(untitled card)";
           if (action === "card-move") {
-            const to = typeof body.toColumnId === "string" ? body.toColumnId : "";
-            if (!board.columns.some((c) => c.id === to)) return json({ ok: false, error: `unknown column: ${to}` }, 400);
-            writeBoard(dir, moveCard(board, cardId, to));
+            const to = board.columns.find((c) => c.id === body.toColumnId);
+            if (!to) return json({ ok: false, error: `unknown column: ${String(body.toColumnId)}` }, 400);
+            const author = typeof body.author === "string" && body.author.trim() ? body.author.trim() : "someone";
+            const next = moveCard(board, cardId, to.id);
+            writeBoard(dir, next);
             push();
+            // The column id (not display name): unambiguous, and directly
+            // reusable by the recipient in a card-move call of its own.
+            notifyCardEvent(next, cardId, author, `[THE LINE] ${author} moved "${title}" to "${to.id}".`);
             return json({ ok: true });
           }
           if (action === "card-comment") {
             const author = typeof body.author === "string" ? body.author.trim() : "";
             const text = typeof body.text === "string" ? body.text.trim() : "";
             if (!author || !text) return json({ ok: false, error: "author and text are required" }, 400);
-            writeBoard(dir, addComment(board, cardId, author, text));
+            const next = addComment(board, cardId, author, text);
+            writeBoard(dir, next);
+            push();
+            notifyCardEvent(next, cardId, author, `[THE LINE] ${author} commented on "${title}":\n${text}`);
+            return json({ ok: true });
+          }
+          // send-task: compose the full protocol prompt server-side and type it
+          // into the assigned live session's terminal. The curl targets in the
+          // footer are this very server, taken from the request's own origin.
+          if (action === "send-task") {
+            const assignee = card.assignee;
+            if (!assignee) return json({ ok: false, error: "card has no assignee" }, 400);
+            const agent = readSnapshot(dir, Date.now()).agents.find((a) => a.sessionId === assignee.id);
+            if (!agent) return json({ ok: false, error: `assignee "${assignee.name}" is not a live session` }, 404);
+            const prompt = cardTaskPrompt(board, cardId, url.origin, agent.name);
+            if (!prompt.trim()) return json({ ok: false, error: "card has no task text to send" }, 400);
+            const r = await deliver(agent, prompt);
+            if (!r.ok) return json(r, 502);
+            const by = typeof body.author === "string" && body.author.trim() ? body.author.trim() : "You";
+            writeBoard(dir, addComment(readBoard(dir), cardId, by, `Sent task to ${agent.name}.`));
             push();
             return json({ ok: true });
           }

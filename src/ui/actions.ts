@@ -57,6 +57,16 @@ export function updateBoard(board: Board): void {
   void act("board", { board });
 }
 
+/** Send a card's task (with the board protocol footer) to its assigned live
+ *  agent. Composed and delivered server-side — one code path whether the send
+ *  comes from this UI or from an orchestrating agent — and the server drops the
+ *  "Sent task to …" trace comment itself. */
+export function sendCardTask(cardId: string, assigneeSessionId: string): Promise<boolean> {
+  playSubmit();
+  flashSend(assigneeSessionId);
+  return act("send-task", { cardId });
+}
+
 export function sendPromptTo(sessionId: string, text: string): Promise<boolean> {
   // Immediate feedback for the user's send (a direct gesture, so it's always on
   // — not gated by the alerts toggle): a submit blip plus a green pulse on the

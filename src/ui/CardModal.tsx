@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { AgentStatus } from "../schema";
 import type { Board, Card } from "../lib/board";
 import { renameCard, setCardDescription, assignCard, addComment, deleteComment, cardTaskPrompt, commentNotifyText } from "../lib/board";
-import { sendPromptTo } from "./actions";
+import { sendCardTask, sendPromptTo } from "./actions";
 import { ModalBackdrop } from "./Backdrop";
 import { toast } from "./toast";
 
@@ -27,17 +27,12 @@ export function CardModal({
   const assigned = card.assignee;
   const assignedIsLive = !!assigned && agents.some((a) => a.sessionId === assigned.id);
 
-  // Send the card's task to the assigned live agent: the title + description +
-  // column instruction, then the board protocol (which card it is, and the curl
-  // calls to move itself along and comment). The server the agent must call is
-  // this page's own origin. Drop a note in the thread so there's a trace.
+  // Send the card's task to the assigned live agent. The server composes the
+  // prompt (task + board protocol footer), types it into the session, and drops
+  // the "Sent task to …" trace comment, which echoes back over SSE.
   function sendToAssigned() {
     if (!assigned) return;
-    const text = cardTaskPrompt(board, card.id, location.origin, assigned.name);
-    if (!text.trim()) { toast("Card has no task text to send"); return; }
-    void sendPromptTo(assigned.id, text);
-    mutate((b) => addComment(b, card.id, ME, `Sent task to ${assigned.name}.`));
-    toast(`Sent to ${assigned.name}`);
+    void sendCardTask(card.id, assigned.id).then((ok) => { if (ok) toast(`Sent to ${assigned.name}`); });
   }
 
   // Post a comment, and — since every comment is meant for whoever's on the
