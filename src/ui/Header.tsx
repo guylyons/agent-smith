@@ -1,36 +1,54 @@
 import type { Snapshot } from "../lib/snapshot";
+import type { AgentStatus } from "../schema";
 import { UsageMeter } from "./UsageMeter";
+import { NotificationCenter } from "./NotificationCenter";
 
 function projectName(cwd: string): string {
   const parts = cwd.split("/").filter(Boolean);
   return parts[parts.length - 1] ?? cwd;
 }
 
-export function Header({ snap, onNewAgent }: { snap: Snapshot; onNewAgent: () => void }) {
-  const { agents, board } = snap;
+/**
+ * The actionable header readout: how many agents are genuinely working, how
+ * many are waiting on the human, and how many distinct repos are active. Idle
+ * agents are excluded — "on shift" should mean actually doing something — which
+ * is why the old raw agent count (idle included) and its duplicated repo/branch
+ * are gone. Pure and exported for unit testing.
+ */
+export function headerSummary(agents: AgentStatus[]): { working: number; waiting: number; repos: number } {
   const working = agents.filter((a) => a.state === "working").length;
   const waiting = agents.filter((a) => a.state === "waiting").length;
+  const repos = new Set(
+    agents.filter((a) => a.state !== "idle").map((a) => projectName(a.cwd)),
+  ).size;
+  return { working, waiting, repos };
+}
+
+export function Header({ snap, onNewAgent }: { snap: Snapshot; onNewAgent: () => void }) {
+  const { agents, board } = snap;
   const idle = agents.filter((a) => a.state === "idle").length;
   const onLine = board.cards.length;
 
-  const first = agents[0];
-  const project = first ? projectName(first.cwd) : null;
-  const branch = first?.branch ?? null;
+  const { working, waiting, repos } = headerSummary(agents);
+  // Only surface segments that carry a signal; a quiet fleet says so plainly
+  // rather than showing a row of zeros.
+  const parts: string[] = [];
+  if (working) parts.push(`${working} WORKING`);
+  if (waiting) parts.push(`${waiting} NEEDS YOU`);
+  if (repos) parts.push(`${repos} ${repos === 1 ? "REPO" : "REPOS"}`);
+  const summary = parts.length ? parts.join(" · ") : "ALL QUIET";
 
   return (
     <header>
       <UsageMeter agents={agents} />
       <div className="head-main">
+        <NotificationCenter snap={snap} />
         <div className="pix title">AGENT WORKSHOP</div>
-        <div className="pix sub">
-          {agents.length} ON SHIFT
-          {project ? ` — ${project}` : ""}
-          {branch ? ` · ${branch}` : ""}
+        <div className={`pix sub${waiting ? " needs-you" : ""}`}>
+          {summary}
           <span className="caret"></span>
         </div>
         <div className="pix statline">
-          <span><b>{working}</b> WORKING</span>
-          <span><b>{waiting}</b> NEED YOU</span>
           <span><b>{idle}</b> IDLE</span>
           <span><b>{onLine}</b> ON THE LINE</span>
           <button className="newagent-btn" onClick={onNewAgent}>+ NEW AGENT</button>

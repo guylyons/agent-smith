@@ -315,10 +315,11 @@ const SCRUM = "9a1b2c3d-1111-4222-8333-444455556666";
 async function notifyServer() {
   reset();
   process.env.AGENT_STATUS_DIR = dir;
-  const sent: { sessionId: string; text: string }[] = [];
+  const sent: { sessionId: string; text: string; fresh: boolean }[] = [];
   const { makeServer } = await import("../src/server");
   const server = makeServer(0, {
-    deliver: async (target: any, text: string) => { sent.push({ sessionId: target.sessionId, text }); return { ok: true }; },
+    deliver: async (target: any, text: string) => { sent.push({ sessionId: target.sessionId, text, fresh: false }); return { ok: true }; },
+    deliverFresh: async (target: any, text: string) => { sent.push({ sessionId: target.sessionId, text, fresh: true }); return { ok: true }; },
   });
   const base = `http://localhost:${server.port}`;
   const post = (path: string, body: object) =>
@@ -339,6 +340,7 @@ test("send-task delivers the protocol prompt to the assigned live session", asyn
   expect(((await res.json()) as any).ok).toBe(true);
   expect(sent.length).toBe(1);
   expect(sent[0]!.sessionId).toBe(WORKER);
+  expect(sent[0]!.fresh).toBe(true); // a new task clears the agent's context first
   expect(sent[0]!.text).toContain("Fix bug");
   expect(sent[0]!.text).toContain(cardId);
   expect(sent[0]!.text).toContain(`${base}/action/card-move`); // curl target is this server

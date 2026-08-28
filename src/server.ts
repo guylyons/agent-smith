@@ -7,7 +7,7 @@ import { scanLiveSessions, readConversation, readSubagents } from "./scan";
 import { readOverrides, applyOverrides, setNameOverride, setSpriteOverride } from "./lib/overrides";
 import { loadPersonas, applyPersonas } from "./lib/personas";
 import { readBoard, writeBoard, sanitizeBoard, boardFile, addCard, moveCard, addComment, assignCard, setCardDescription, cardTaskPrompt, type Board } from "./lib/board";
-import { ALLOWED_MODELS, ALLOWED_PERMISSION_MODES, focusSession, interruptSession, killAgent, sendPrompt, spawnAgent } from "./ghostty";
+import { ALLOWED_MODELS, ALLOWED_PERMISSION_MODES, focusSession, interruptSession, killAgent, sendPrompt, sendFreshPrompt, spawnAgent } from "./ghostty";
 import { readRepo } from "./repo";
 import { saveUpload } from "./lib/uploads";
 
@@ -52,9 +52,13 @@ export function makeServer(
     /** How a composed prompt reaches a session's terminal. Injectable so tests
      *  capture deliveries instead of driving AppleScript. */
     deliver?: (target: AgentStatus, text: string) => Promise<{ ok: boolean; error?: string }>;
+    /** How a NEW card task reaches a session: clears the agent's context first
+     *  (see sendFreshPrompt) so each ticket starts clean. Injectable like
+     *  deliver. */
+    deliverFresh?: (target: AgentStatus, text: string) => Promise<{ ok: boolean; error?: string }>;
   } = {},
 ) {
-  const { scan = false, scanIntervalMs = 20_000, deliver = sendPrompt } = opts;
+  const { scan = false, scanIntervalMs = 20_000, deliver = sendPrompt, deliverFresh = sendFreshPrompt } = opts;
   const dir = ensureStatusDir();
 
   // Wake the sessions that care about a card event, best-effort and without
@@ -206,6 +210,10 @@ export function makeServer(
           // name is sanitized to a slug inside createWorktree, so pass it as typed.
           const worktree = typeof body.worktree === "string" && body.worktree.trim() ? body.worktree.trim() : undefined;
           const persona = typeof body.persona === "string" && body.persona.trim() ? body.persona.trim() : undefined;
+          // The card this agent is being spawned for, if any: rides into the
+          // session env so its SessionStart hook self-assigns the card once the
+          // real session id exists.
+          const cardId = typeof body.cardId === "string" && body.cardId.trim() ? body.cardId.trim() : undefined;
           // Loop-breaker: an agent (curl sends no sec-fetch-site) may spawn
           // workers but never another orchestrator. A live run showed confused
           // scrum-masters spawning scrum-masters exponentially; only a human in
@@ -213,7 +221,7 @@ export function makeServer(
           if (persona === "scrum-master" && !req.headers.get("sec-fetch-site")) {
             return json({ ok: false, error: "agents may not spawn a scrum-master — only a human can (use the + NEW AGENT dialog)" }, 403);
           }
-          return json(await spawnAgent(cwd, task, { model, permissionMode, worktree, persona, serverUrl: url.origin }));
+          return json(await spawnAgent(cwd, task, { model, permissionMode, worktree, persona, serverUrl: url.origin, cardId }));
         }
         // board: the whole kanban board (THE LINE). The client owns the edit and
         // sends the full board; the server sanitizes it (dropping malformed
@@ -286,7 +294,9 @@ export function makeServer(
             }
             const prompt = cardTaskPrompt(board, cardId, url.origin, agent.name);
             if (!prompt.trim()) return json({ ok: false, error: "card has no task text to send" }, 400);
-            const r = await deliver(agent, prompt);
+            // Fresh delivery: clear the agent's context before the new task so
+            // the previous ticket doesn't bleed into this one.
+            const r = await deliverFresh(agent, prompt);
             if (!r.ok) return json(r, 502);
             const by = typeof body.author === "string" && body.author.trim() ? body.author.trim() : "You";
             writeBoard(dir, addComment(readBoard(dir), cardId, by, `Sent task to ${agent.name}.`));

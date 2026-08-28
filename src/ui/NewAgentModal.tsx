@@ -10,9 +10,9 @@ function repoName(cwd: string): string {
 }
 
 export function NewAgentModal({
-  recentFolders, onClose, initialTask = "", initialFolder,
+  recentFolders, onClose, initialTask = "", initialFolder, cardId,
 }: {
-  recentFolders: string[]; onClose: () => void; initialTask?: string; initialFolder?: string;
+  recentFolders: string[]; onClose: () => void; initialTask?: string; initialFolder?: string; cardId?: string;
 }) {
   const [folder, setFolder] = useState(initialFolder ?? recentFolders[0] ?? "");
   const [task, setTask] = useState(initialTask);
@@ -40,6 +40,7 @@ export function NewAgentModal({
       permissionMode: permissionMode || undefined,
       worktree: worktree.trim() || undefined,
       persona: persona || undefined,
+      cardId,
     });
     setBusy(false);
     if (ok) { toast("Launching new agent…"); onClose(); }

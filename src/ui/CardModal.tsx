@@ -4,6 +4,7 @@ import type { Board, Card } from "../lib/board";
 import { renameCard, setCardDescription, assignCard, addComment, deleteComment, cardTaskPrompt, commentNotifyText } from "../lib/board";
 import { sendCardTask, sendPromptTo } from "./actions";
 import { ModalBackdrop } from "./Backdrop";
+import { renderMarkdown } from "./markdown";
 import { toast } from "./toast";
 
 type Mutate = (fn: (b: Board) => Board) => void;
@@ -19,7 +20,7 @@ export function CardModal({
   board, card, columnName, agents, mutate, onSpawnForCard, onClose,
 }: {
   board: Board; card: Card; columnName: string; agents: AgentStatus[];
-  mutate: Mutate; onSpawnForCard: (task: string) => void; onClose: () => void;
+  mutate: Mutate; onSpawnForCard: (task: string, cardId: string) => void; onClose: () => void;
 }) {
   // The assignee is a live agent session: its assignee.id is the sessionId. If
   // that session is no longer in the snapshot it has ended — we keep it selected
@@ -60,7 +61,7 @@ export function CardModal({
   // Spawn a fresh agent seeded with this card's task (persona/model/worktree
   // chosen in the New Agent modal). Closes the card so the modal is unobstructed.
   function spawnForCard() {
-    onSpawnForCard(cardTaskPrompt(board, card.id, location.origin));
+    onSpawnForCard(cardTaskPrompt(board, card.id, location.origin), card.id);
     onClose();
   }
 
@@ -146,7 +147,7 @@ export function CardModal({
                       onClick={() => mutate((b) => deleteComment(b, card.id, c.id))}
                     >✕</button>
                   </div>
-                  <div className="comment-text">{c.text}</div>
+                  <div className="comment-text">{renderMarkdown(c.text)}</div>
                 </div>
               ))}
               {!comments.length && <p className="cardmodal-empty">No comments yet.</p>}

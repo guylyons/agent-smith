@@ -137,6 +137,31 @@ export async function sendPrompt(t: Target, text: string): Promise<ActionResult>
   return r;
 }
 
+/** The terminal input for a NEW task: submit `/clear` first, wait for it to
+ *  reset the context, then type and submit the task. Pure and exported so the
+ *  clear-first ordering is unit-tested without driving AppleScript. Handing an
+ *  agent a fresh task should not leave the previous ticket in its context. */
+export function freshTaskInput(text: string): string {
+  return `input text ${asStr("/clear")} to term
+            delay 0.1
+            send key "enter" to term
+            delay 0.7
+            input text ${asStr(text)} to term
+            delay 0.1
+            send key "enter" to term`;
+}
+
+/** Like sendPrompt, but clears the session's context first (see freshTaskInput).
+ *  Used for delivering a card's task to a live agent, so each ticket starts
+ *  clean rather than inheriting the last one. */
+export async function sendFreshPrompt(t: Target, text: string): Promise<ActionResult> {
+  const r = await runOnTerminal(t, freshTaskInput(text), false);
+  if (!r.ok && !t.tty && !t.title) {
+    return { ok: false, error: "can't pinpoint this session's terminal — run `bun run install-hooks` to enable sending prompts" };
+  }
+  return r;
+}
+
 export const ALLOWED_MODELS = new Set(["opus", "sonnet", "haiku"]);
 export const ALLOWED_PERMISSION_MODES = new Set(["default", "plan", "acceptEdits", "bypassPermissions"]);
 
@@ -153,7 +178,7 @@ function shq(s: string): string {
  *  what binds the persona to the real session id. */
 export function buildLaunchInput(
   task: string,
-  opts: { model?: string; permissionMode?: string; serverUrl?: string },
+  opts: { model?: string; permissionMode?: string; serverUrl?: string; cardId?: string },
   persona: Persona | null,
 ): string {
   let flags = "";
@@ -164,6 +189,12 @@ export function buildLaunchInput(
   // Where the dashboard's card API lives — how a launched agent addresses the
   // board (the persona prompt points it at $AGENT_WORKSHOP_URL).
   if (opts.serverUrl) env += `AGENT_WORKSHOP_URL=${shq(opts.serverUrl)} `;
+  // The card this session was spawned for. The SessionStart hook reads it and
+  // self-assigns the card to the real session id (which only exists once the
+  // new terminal is running), closing the gap where "new agent for this card"
+  // left the card unassigned. Shell-quoted: it crosses the launch command
+  // unsanitized, like the URL above.
+  if (opts.cardId) env += `AGENT_CARD=${shq(opts.cardId)} `;
   return `${env}claude${flags} ${shq(task)}\n`;
 }
 
@@ -216,7 +247,7 @@ export function workerPermissionSettings(serverUrl: string): { permissions: { al
 export async function spawnAgent(
   cwd: string,
   task: string,
-  opts?: { model?: string; permissionMode?: string; worktree?: string; persona?: string; serverUrl?: string },
+  opts?: { model?: string; permissionMode?: string; worktree?: string; persona?: string; serverUrl?: string; cardId?: string },
 ): Promise<ActionResult> {
   let launchCwd = cwd;
   if (opts?.worktree) {

@@ -10,14 +10,17 @@ import { NewAgentModal } from "./NewAgentModal";
 import { SettingsPanel } from "./SettingsPanel";
 import { Toaster } from "./Toaster";
 import { Notifier } from "./Notifier";
+import { onOpenAgent } from "./nav";
 import { applyTube, applyBg, loadSetting, loadBool, saveSetting } from "./settings";
 import type { AgentStatus } from "../schema";
 
 export function App() {
   const snap = useSnapshot();
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  // null = closed; {} = blank; {task} = seeded from a card's "new agent for this card"
-  const [spawnSeed, setSpawnSeed] = useState<{ task?: string } | null>(null);
+  // Open an agent's drawer when the notification center asks (a needs-you).
+  useEffect(() => onOpenAgent(setSelectedId), []);
+  // null = closed; {} = blank; {task, cardId} = seeded from a card's "new agent for this card"
+  const [spawnSeed, setSpawnSeed] = useState<{ task?: string; cardId?: string } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [alertsEnabled, setAlertsEnabled] = useState(false);
   const recentFolders = [...new Set(snap.agents.map((a) => a.cwd).filter(Boolean))];
@@ -53,7 +56,7 @@ export function App() {
       <button className="settings-btn" title="Settings" onClick={() => setSettingsOpen(true)}>⚙</button>
       <Header snap={snap} onNewAgent={() => setSpawnSeed({})} />
       <Crew agents={snap.agents} board={snap.board} onOpen={setSelectedId} />
-      <TheLine board={snap.board} agents={snap.agents} onSpawnForCard={(task) => setSpawnSeed({ task })} />
+      <TheLine board={snap.board} agents={snap.agents} onSpawnForCard={(task, cardId) => setSpawnSeed({ task, cardId })} />
       {selected && selected.sessionId === selectedId && (
         <ConversationDrawer agent={selected} ended={ended} onClose={() => setSelectedId(null)} />
       )}
@@ -61,6 +64,7 @@ export function App() {
         <NewAgentModal
           recentFolders={recentFolders}
           initialTask={spawnSeed.task}
+          cardId={spawnSeed.cardId}
           onClose={() => setSpawnSeed(null)}
         />
       )}

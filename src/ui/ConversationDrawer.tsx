@@ -4,6 +4,7 @@ import { Sprite } from "./Sprite";
 import { ModalBackdrop } from "./Backdrop";
 import { SpritePicker } from "./SpritePicker";
 import { renderMarkdown } from "./markdown";
+import { toast } from "./toast";
 import {
   fetchConversation, fetchSubagents, fetchRepo, fetchPersonas, sendPromptTo, uploadImage, focusSession, pauseSession, renameSession, killAgent,
   type ChatMessage, type Subagent, type RepoInfo, type PendingQuestion, type PersonaInfo, type BlockingTool,
@@ -38,6 +39,11 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
   const [confirmPause, setConfirmPause] = useState(false);
   const [confirmStop, setConfirmStop] = useState(false);
   const [pickSprite, setPickSprite] = useState(false);
+  const [focusing, setFocusing] = useState(false);
+  // Which waiting episode (by its stateSince) the user has manually dismissed.
+  // Lets a stuck/stale permission panel be closed by hand; a NEW waiting episode
+  // (different stateSince) brings the panel back.
+  const [dismissedSince, setDismissedSince] = useState<number | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const atBottomRef = useRef(true);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -325,7 +331,7 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
               </div>
             )}
 
-            {!liveQ && !ended && agent.state === "waiting" && (
+            {!liveQ && !ended && agent.state === "waiting" && dismissedSince !== (agent.stateSince ?? 0) && (
               <div className="qpanel">
                 <div className="pix qheader">
                   {agent.waitingReason === "plan" ? "PLAN APPROVAL" : "NEEDS PERMISSION"}
@@ -336,9 +342,32 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
                 <div className="qtext">
                   {blocked ? `${blocked.name} · ${blocked.summary}` : "waiting for you in the terminal — it can't be read from here"}
                 </div>
-                <button className="deskbtn primary" onClick={() => focusSession(agent.sessionId)}>
-                  ↗ ANSWER IN TERMINAL
-                </button>
+                {/* This panel can't send the answer (a permission/plan prompt takes
+                    keystrokes in the terminal, not typed text), so it stays until the
+                    agent's state clears server-side. Two escape hatches for when that
+                    feels stuck: focus reports if it actually reached a terminal, and
+                    Dismiss hides this episode by hand. */}
+                <div className="qactions">
+                  <button
+                    className="deskbtn primary"
+                    disabled={focusing}
+                    onClick={async () => {
+                      setFocusing(true);
+                      const ok = await focusSession(agent.sessionId);
+                      setFocusing(false);
+                      if (ok) toast("Opened its terminal — answer there; this clears when you do");
+                    }}
+                  >
+                    {focusing ? "OPENING…" : "↗ ANSWER IN TERMINAL"}
+                  </button>
+                  <button
+                    className="deskbtn"
+                    title="Hide this until the agent asks again"
+                    onClick={() => setDismissedSince(agent.stateSince ?? 0)}
+                  >
+                    DISMISS
+                  </button>
+                </div>
               </div>
             )}
 

@@ -10,43 +10,63 @@ export function fmtTokens(n: number): string {
 }
 
 /**
- * The header's Claude usage meter — an HP bar over the live fleet's token
- * budgets. Fill = tokens LEFT (a draining life meter), summed across every
- * session that reports a budget; sessions without one don't contribute.
- * "Used" needs each session's starting total, so it reads "?" until at least
- * one total is known.
+ * The busiest live session's remaining context, or null when nothing can be
+ * measured.
+ *
+ * The per-turn `<total_tokens> left` marker the scanner reads is the session's
+ * CONTEXT-window budget, not the account/rate-limit quota that `/usage` reports
+ * — there is no local source for the latter. So this meter tells the honest
+ * story it can: how much context headroom the most-loaded session has left
+ * (budgetLeft / budgetTotal), the one closest to needing a compact.
+ *
+ * A session with no known starting total can't be turned into a fraction, so it
+ * is excluded rather than counted as full — the bug that used to pin the old
+ * meter to 100%. The result is clamped to 0..1.
+ */
+export function contextHeadroom(
+  agents: AgentStatus[],
+): { pct: number; left: number; total: number; name: string } | null {
+  let worst: { pct: number; left: number; total: number; name: string } | null = null;
+  for (const a of agents) {
+    const u = a.usage;
+    if (!u || u.budgetTotal === undefined || u.budgetTotal <= 0) continue;
+    const pct = Math.max(0, Math.min(1, u.budgetLeft / u.budgetTotal));
+    if (!worst || pct < worst.pct) {
+      worst = { pct, left: u.budgetLeft, total: u.budgetTotal, name: a.name };
+    }
+  }
+  return worst;
+}
+
+/**
+ * The header's context meter — an HP bar showing the remaining context headroom
+ * of the busiest live session (see contextHeadroom). Fill = headroom LEFT (a
+ * draining life meter), so it only falls as a session actually fills its
+ * context. Amber under 50%, red under 25%. Empty/"no data" when nothing reports
+ * a measurable budget, rather than reading full.
  */
 export function UsageMeter({ agents }: { agents: AgentStatus[] }) {
-  const tracked = agents.filter((a) => a.usage);
-  const left = tracked.reduce((n, a) => n + a.usage!.budgetLeft, 0);
-  // A session with an unknown total contributes its "left" to both sums: the
-  // meter never claims usage it can't see.
-  const total = tracked.reduce((n, a) => n + (a.usage!.budgetTotal ?? a.usage!.budgetLeft), 0);
-  const anyTotal = tracked.some((a) => a.usage!.budgetTotal !== undefined);
-  const used = anyTotal ? total - left : null;
+  const hp = contextHeadroom(agents);
+  const pct = hp ? hp.pct : 0;
+  const lit = hp ? Math.max(1, Math.round(pct * CELLS)) : 0;
+  const tone = !hp ? "" : pct <= 0.25 ? " hp-low" : pct <= 0.5 ? " hp-warn" : "";
 
-  const pct = total > 0 ? left / total : 0;
-  const lit = tracked.length ? Math.max(pct > 0 ? 1 : 0, Math.round(pct * CELLS)) : 0;
-  const tone = !tracked.length ? "" : pct <= 0.25 ? " hp-low" : pct <= 0.5 ? " hp-warn" : "";
-
-  const text = tracked.length
-    ? `${fmtTokens(left)} LEFT · ${used !== null ? fmtTokens(used) : "?"} USED`
-    : "NO USAGE DATA";
+  const text = hp ? `${Math.round(pct * 100)}% · ${hp.name}` : "NO CONTEXT DATA";
 
   return (
     <div
       className={`usage${tone}`}
       role="meter"
-      aria-label="Claude token budget"
+      aria-label="Busiest session context headroom"
       aria-valuemin={0}
-      aria-valuemax={total}
-      aria-valuenow={left}
-      aria-valuetext={text}
-      title={tracked.length
-        ? `${left.toLocaleString()} of ${total.toLocaleString()} tokens left across ${tracked.length} session${tracked.length > 1 ? "s" : ""}`
-        : "No live session reports a token budget"}
+      aria-valuemax={100}
+      aria-valuenow={Math.round(pct * 100)}
+      aria-valuetext={hp ? `${Math.round(pct * 100)}% context left on ${hp.name}` : "no context data"}
+      title={hp
+        ? `${hp.name}: ${hp.left.toLocaleString()} of ${hp.total.toLocaleString()} context tokens left (${Math.round(pct * 100)}%) — the busiest live session`
+        : "No live session reports a context budget"}
     >
-      <div className="pix usage-label">CLAUDE USAGE</div>
+      <div className="pix usage-label">CONTEXT</div>
       <div className="usage-bar" aria-hidden="true">
         {Array.from({ length: CELLS }, (_, i) => (
           <span key={i} className={`usage-cell${i < lit ? " on" : ""}`} />

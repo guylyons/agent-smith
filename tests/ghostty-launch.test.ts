@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { buildLaunchInput, asStr, workerPermissionSettings } from "../src/ghostty";
+import { buildLaunchInput, asStr, workerPermissionSettings, freshTaskInput } from "../src/ghostty";
 import type { Persona } from "../src/lib/personas";
 
 const P: Persona = {
@@ -39,6 +39,26 @@ test("single quotes in the task and prompt are escaped", () => {
 test("a multi-line prompt is passed through intact", () => {
   const out = buildLaunchInput("t", {}, { ...P, prompt: "line one\nline two", skills: [] });
   expect(out).toContain("line one\nline two");
+});
+
+// ---- freshTaskInput: a new task starts from a cleared context -------------
+
+test("freshTaskInput submits /clear before typing the task", () => {
+  const body = freshTaskInput("do the thing");
+  const clearAt = body.indexOf("/clear");
+  const taskAt = body.indexOf("do the thing");
+  expect(clearAt).toBeGreaterThanOrEqual(0);
+  expect(taskAt).toBeGreaterThan(clearAt); // clear is submitted first
+  // two separate submissions: the /clear, then the task
+  expect(body.split('send key "enter"').length - 1).toBe(2);
+});
+
+test("freshTaskInput waits between the clear and the task", () => {
+  // a delay must sit between the /clear submission and the task, so /clear has
+  // finished resetting the context before the task is typed
+  const body = freshTaskInput("t");
+  const between = body.slice(body.indexOf("/clear"), body.lastIndexOf("input text"));
+  expect(between).toContain("delay");
 });
 
 // ---- asStr: the AppleScript string literal --------------------------------
@@ -92,6 +112,20 @@ test("serverUrl rides into the launch env so the agent can find the API", () => 
 test("serverUrl is set even without a persona", () => {
   const out = buildLaunchInput("t", { serverUrl: "http://localhost:4173" }, null);
   expect(out.startsWith("AGENT_WORKSHOP_URL='http://localhost:4173' claude ")).toBe(true);
+});
+
+test("cardId rides into the launch env so the SessionStart hook can self-assign the card", () => {
+  const out = buildLaunchInput("t", { serverUrl: "http://localhost:4173", cardId: "card_defabed5" }, P);
+  expect(out.startsWith("AGENT_PERSONA=frontend-ux AGENT_WORKSHOP_URL='http://localhost:4173' AGENT_CARD='card_defabed5' claude ")).toBe(true);
+});
+
+test("no cardId means no AGENT_CARD in the env", () => {
+  expect(buildLaunchInput("t", { serverUrl: "http://localhost:4173" }, null)).not.toContain("AGENT_CARD");
+});
+
+test("a cardId is shell-quoted so it can't inject into the launch command", () => {
+  const out = buildLaunchInput("t", { cardId: "x'; rm -rf /" }, null);
+  expect(out).toContain("AGENT_CARD='x'\\''; rm -rf /'");
 });
 
 test("workerPermissionSettings allows the board read, card writes, and local git", () => {

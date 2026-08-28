@@ -184,6 +184,31 @@ async function main() {
     rmSync(tmp, { force: true }); // don't leak our tmp if the rename fails
     throw err;
   }
+
+  // Self-assign the card this session was spawned for. A "new agent for this
+  // card" spawn can't set the assignee at launch — the session id is minted
+  // here, inside the new terminal — so the dashboard passes the card id in the
+  // env and we bind it now, once the status file above exists for the server to
+  // resolve our display name from. SessionStart only, best-effort: a failure
+  // must never break the hook.
+  if (e.hook_event_name === "SessionStart" && process.env.AGENT_CARD) {
+    await assignCardOnStart(process.env.AGENT_CARD, e.session_id);
+  }
+}
+
+/** POST the card-assign the dashboard couldn't do at spawn time. Fire-and-await
+ *  (so the request lands before this short-lived hook process exits) but never
+ *  throw — an unreachable dashboard just leaves the card unassigned, the same
+ *  state as before. */
+async function assignCardOnStart(cardId: string, sessionId: string): Promise<void> {
+  const base = process.env.AGENT_WORKSHOP_URL || "http://localhost:4173";
+  try {
+    await fetch(`${base}/action/card-assign`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ cardId, sessionId }),
+    });
+  } catch { /* dashboard down / not reachable — leave the card unassigned */ }
 }
 
 if (import.meta.main) void main();

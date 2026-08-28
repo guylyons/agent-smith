@@ -83,6 +83,12 @@ test("composePrompt teaches the board protocol to every persona", () => {
   expect(out).toContain("AGENT_WORKSHOP_URL");
 });
 
+test("composePrompt tells every persona to write board comments plainly", () => {
+  const p = parsePersona(GOOD, "frontend-ux")!;
+  const out = composePrompt(p).toLowerCase();
+  expect(out).toContain("plainly");
+});
+
 test("composePrompt's generated lines are pure ASCII", () => {
   const p = parsePersona(GOOD, "frontend-ux")!;
   // strip the author-written body; everything the code generates must be ASCII

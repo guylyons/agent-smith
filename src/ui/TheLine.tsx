@@ -7,7 +7,9 @@ import {
   addCard, deleteCard, moveCard,
 } from "../lib/board";
 import { updateBoard } from "./actions";
+import { onOpenCard } from "./nav";
 import { CardModal } from "./CardModal";
+import { Sprite } from "./Sprite";
 
 const CARD_MIME = "application/x-line-card";
 const COL_MIME = "application/x-line-column";
@@ -24,7 +26,7 @@ type Mutate = (fn: (b: Board) => Board) => void;
 export function TheLine({
   board: incoming, agents, onSpawnForCard,
 }: {
-  board: Board; agents: AgentStatus[]; onSpawnForCard: (task: string) => void;
+  board: Board; agents: AgentStatus[]; onSpawnForCard: (task: string, cardId: string) => void;
 }) {
   const [board, setBoard] = useState(incoming);
   const [addingCol, setAddingCol] = useState(false);
@@ -34,6 +36,9 @@ export function TheLine({
   // / an agent). Active text fields keep their own draft, so this never yanks a
   // value out from under the cursor.
   useEffect(() => { setBoard(incoming); }, [incoming]);
+
+  // Open a card when the notification center asks (clicking a comment/move).
+  useEffect(() => onOpenCard(setOpenCardId), []);
 
   const mutate: Mutate = (fn) =>
     setBoard((prev) => { const next = fn(prev); updateBoard(next); return next; });
@@ -57,6 +62,7 @@ export function TheLine({
           <ColumnView
             key={col.id}
             board={board}
+            agents={agents}
             mutate={mutate}
             column={col}
             index={i}
@@ -84,9 +90,9 @@ export function TheLine({
 }
 
 function ColumnView({
-  board, mutate, column, index, autoFocusName, onNamed, onOpenCard,
+  board, agents, mutate, column, index, autoFocusName, onNamed, onOpenCard,
 }: {
-  board: Board; mutate: Mutate; column: Column; index: number; autoFocusName: boolean;
+  board: Board; agents: AgentStatus[]; mutate: Mutate; column: Column; index: number; autoFocusName: boolean;
   onNamed: () => void; onOpenCard: (id: string) => void;
 }) {
   const [dragOver, setDragOver] = useState(false);
@@ -145,7 +151,7 @@ function ColumnView({
 
       <div className="cards">
         {board.cards.filter((c) => c.columnId === column.id).map((card) => (
-          <CardView key={card.id} mutate={mutate} card={card} onOpen={() => onOpenCard(card.id)} />
+          <CardView key={card.id} agents={agents} mutate={mutate} card={card} onOpen={() => onOpenCard(card.id)} />
         ))}
       </div>
 
@@ -156,10 +162,14 @@ function ColumnView({
 
 // A card face: click anywhere to open the detail modal. Kept deliberately
 // sparse — just the title and, only when there's something to show, a footer
-// with the assignee's initials and a comment count. Detail lives in the modal.
-function CardView({ mutate, card, onOpen }: { mutate: Mutate; card: Card; onOpen: () => void }) {
+// with the assignee (its agent's sprite avatar, or initials when the session has
+// ended) and a comment count. Detail lives in the modal.
+function CardView({ agents, mutate, card, onOpen }: { agents: AgentStatus[]; mutate: Mutate; card: Card; onOpen: () => void }) {
   const commentCount = card.comments?.length ?? 0;
   const hasMeta = !!card.assignee || commentCount > 0 || !!card.description;
+  // The live session behind the assignee, if any — gives us its sprite. A card
+  // assigned to a session that has since ended falls back to initials.
+  const assignedAgent = card.assignee ? agents.find((a) => a.sessionId === card.assignee!.id) : undefined;
 
   return (
     <div
@@ -175,7 +185,13 @@ function CardView({ mutate, card, onOpen }: { mutate: Mutate; card: Card; onOpen
         <span className="card-title-text">{card.title || "Untitled"}</span>
         {hasMeta && (
           <div className="card-meta">
-            {card.assignee && <span className="card-assignee" title={card.assignee.name}>{initials(card.assignee.name)}</span>}
+            {card.assignee && (
+              assignedAgent
+                ? <span className="card-avatar" title={card.assignee.name}>
+                    <Sprite sessionId={assignedAgent.sessionId} role={assignedAgent.role} state={assignedAgent.state} override={assignedAgent.sprite} />
+                  </span>
+                : <span className="card-assignee" title={`${card.assignee.name} (session ended)`}>{initials(card.assignee.name)}</span>
+            )}
             {card.description && <span className="card-flag" title="Has a description">≡</span>}
             {commentCount > 0 && <span className="card-flag" title={`${commentCount} comment${commentCount > 1 ? "s" : ""}`}>💬 {commentCount}</span>}
           </div>

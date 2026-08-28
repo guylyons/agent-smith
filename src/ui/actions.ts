@@ -30,8 +30,11 @@ async function act(action: string, body: object): Promise<boolean> {
   return r.ok;
 }
 
-export function focusSession(sessionId: string): void {
-  void act("focus", { sessionId });
+/** Bring the session's terminal window to the front. Returns whether it
+ *  succeeded so callers can give feedback (a failed focus — no Ghostty, session
+ *  gone — otherwise looks like nothing happened). */
+export function focusSession(sessionId: string): Promise<boolean> {
+  return act("focus", { sessionId });
 }
 
 export function pauseSession(sessionId: string): void {
@@ -99,9 +102,9 @@ export async function uploadImage(file: File): Promise<string | null> {
 /** Launch a new Claude agent in `cwd` with `task` as its opening prompt.
  *  `opts.model` and `opts.permissionMode` are forwarded to the server, which
  *  allowlist-checks them again before building the launch command. */
-export async function spawnAgent(cwd: string, task: string, opts?: { model?: string; permissionMode?: string; worktree?: string; persona?: string }): Promise<boolean> {
+export async function spawnAgent(cwd: string, task: string, opts?: { model?: string; permissionMode?: string; worktree?: string; persona?: string; cardId?: string }): Promise<boolean> {
   playSubmit();
-  const r = await post("spawn", { cwd, text: task, model: opts?.model, permissionMode: opts?.permissionMode, worktree: opts?.worktree, persona: opts?.persona });
+  const r = await post("spawn", { cwd, text: task, model: opts?.model, permissionMode: opts?.permissionMode, worktree: opts?.worktree, persona: opts?.persona, cardId: opts?.cardId });
   if (!r.ok) toast(r.error ?? "could not launch");
   return r.ok;
 }
