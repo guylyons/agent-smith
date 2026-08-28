@@ -243,6 +243,10 @@ export function mergeForWrite(existing: AgentStatus | null, derived: AgentStatus
   const carried = { ...derived };
   if (carried.pid === undefined && existing?.pid !== undefined) carried.pid = existing.pid;
   if (carried.tty === undefined && existing?.tty !== undefined) carried.tty = existing.tty;
+  // Same for the persona: only the launch env (via the hook) knows it, and losing
+  // it here would strip the agent's name/sprite — and drop it out of the
+  // scrum-master notification fan-out — after the first scan pass.
+  if (carried.persona === undefined && existing?.persona !== undefined) carried.persona = existing.persona;
 
   // A hook-set block on the USER is invisible to the transcript: the session sits
   // on an unresolved tool_use, which derives as "working". Don't let that

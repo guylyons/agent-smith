@@ -341,3 +341,11 @@ test("readConversation reports the blocking tool", async () => {
   expect(conv.question).toBeNull();
   expect(conv.blocked).toEqual({ name: "Bash", summary: "running rm -rf build" });
 });
+
+test("mergeForWrite carries the persona forward like pid/tty", () => {
+  const existing = S({ persona: "backend-dev", pid: 42 });
+  const derived = S({});
+  const merged = mergeForWrite(existing, derived, 5000);
+  expect(merged.persona).toBe("backend-dev");
+  expect(merged.pid).toBe(42);
+});

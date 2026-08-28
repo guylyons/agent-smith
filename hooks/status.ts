@@ -64,6 +64,19 @@ function parseQuestions(input: Record<string, unknown> | undefined): AgentStatus
 }
 
 export function applyEvent(prev: AgentStatus | null, e: HookEvent, now: number, persona?: string): AgentStatus | null {
+  const next = applyEventInner(prev, e, now, persona);
+  // Re-stamp the persona on EVERY event, not just the seed: a scanner pass can
+  // write this session's file before (or between) hook events, and a prev
+  // without the persona would otherwise carry that loss forward for the whole
+  // session — stripping the agent's name/sprite and dropping it out of the
+  // scrum-master notification fan-out.
+  if (next && next.persona === undefined && persona && PERSONA_ID_RE.test(persona)) {
+    return { ...next, persona };
+  }
+  return next;
+}
+
+function applyEventInner(prev: AgentStatus | null, e: HookEvent, now: number, persona?: string): AgentStatus | null {
   const base = prev ?? seed(e, now, persona);
   switch (e.hook_event_name) {
     case "SessionStart":

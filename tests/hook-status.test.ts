@@ -164,3 +164,22 @@ test("the captured question is cleared once the wait ends", () => {
   // and a turn that simply ends also clears it
   expect(applyEvent(asked, { hook_event_name: "Stop", session_id: "s1", cwd: "/repo", branch: start.branch } as any, 3000)!.pendingQuestion).toBeUndefined();
 });
+
+test("a later event re-stamps the persona onto a prev that lost it", () => {
+  // A scanner pass can write the status file without the persona (it doesn't
+  // know it); the next hook event must heal it from the env, not carry the loss.
+  const start = { hook_event_name: "SessionStart", session_id: "s1", cwd: "/x", branch: null };
+  const strippedPrev = { ...applyEvent(null, start as any, 1000, "frontend-ux")! };
+  delete (strippedPrev as any).persona;
+  const tool = { hook_event_name: "PreToolUse", session_id: "s1", cwd: "/x", branch: null, tool_name: "Bash", tool_input: {} };
+  const next = applyEvent(strippedPrev, tool as any, 2000, "frontend-ux")!;
+  expect(next.persona).toBe("frontend-ux");
+});
+
+test("re-stamping never overwrites a persona already on prev", () => {
+  const start = { hook_event_name: "SessionStart", session_id: "s1", cwd: "/x", branch: null };
+  const prev = applyEvent(null, start as any, 1000, "frontend-ux")!;
+  const tool = { hook_event_name: "PreToolUse", session_id: "s1", cwd: "/x", branch: null, tool_name: "Bash", tool_input: {} };
+  // env var vanished mid-session (shouldn't happen, but the stored value wins)
+  expect(applyEvent(prev, tool as any, 2000, undefined)!.persona).toBe("frontend-ux");
+});
