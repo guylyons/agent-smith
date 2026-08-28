@@ -3,10 +3,15 @@ import type { DragEvent } from "react";
 import type { AgentStatus } from "../schema";
 import type { Board, Column, Card } from "../lib/board";
 import {
-  addColumn, renameColumn, setInstruction, deleteColumn, reorderColumn,
-  addCard, deleteCard, moveCard,
+  renameColumn, setInstruction, deleteColumn, reorderColumn,
+  deleteCard, restoreCard, moveCard, restoreColumn, cardMoveTarget,
 } from "../lib/board";
-import { updateBoard } from "./actions";
+import {
+  addColumnAction, renameColumnAction, setInstructionAction, deleteColumnAction,
+  reorderColumnAction, restoreColumnAction, addCardAction, moveCardAction,
+  deleteCardAction, restoreCardAction,
+} from "./actions";
+import { toast } from "./toast";
 import { onOpenCard } from "./nav";
 import { CardModal } from "./CardModal";
 import { Sprite } from "./Sprite";
@@ -14,15 +19,19 @@ import { Sprite } from "./Sprite";
 const CARD_MIME = "application/x-line-card";
 const COL_MIME = "application/x-line-column";
 
-// A board mutation: given the latest board, return the next one.
-type Mutate = (fn: (b: Board) => Board) => void;
+// A board edit: the pure op to show immediately, and the one scoped server call
+// that makes it real. `send` is optional — an op whose id the SERVER generates
+// (adding a card or a column) has nothing to show optimistically and passes the
+// call alone, letting the SSE echo bring the new thing back.
+type Mutate = (fn: ((b: Board) => Board) | null, send: () => void) => void;
 
 // THE LINE — a simple kanban board. Columns and cards are renamable and
 // draggable; each column carries an instruction describing what to do with work
 // that lands in it. The board is held in local state (seeded from the live
-// snapshot); every edit applies a PURE op via a functional update — so rapid
-// edits build on each other instead of clobbering — and posts the result to the
-// server, which persists it and echoes it back over SSE.
+// snapshot) so an edit paints instantly, but what goes to the server is one
+// SCOPED call naming just that edit — never the whole board. The server applies
+// it against a fresh read and echoes the result back over SSE, so a rename here
+// and an agent's comment there compose instead of overwriting each other.
 export function TheLine({
   board: incoming, agents, onSpawnForCard,
 }: {
@@ -40,12 +49,14 @@ export function TheLine({
   // Open a card when the notification center asks (clicking a comment/move).
   useEffect(() => onOpenCard(setOpenCardId), []);
 
-  const mutate: Mutate = (fn) =>
-    setBoard((prev) => { const next = fn(prev); updateBoard(next); return next; });
+  const mutate: Mutate = (fn, send) => {
+    if (fn) setBoard((prev) => fn(prev));
+    send();
+  };
 
   function onAddColumn() {
     setAddingCol(true);
-    mutate((b) => addColumn(b, "")); // blank name -> its input auto-focuses
+    mutate(null, () => addColumnAction("")); // blank name -> its input auto-focuses
   }
 
   // The card behind an open modal, resolved fresh each render so live edits (and
@@ -96,14 +107,40 @@ function ColumnView({
   onNamed: () => void; onOpenCard: (id: string) => void;
 }) {
   const [dragOver, setDragOver] = useState(false);
+  // Which slot a dropped card would take in this column: 0 = above the first
+  // card, cards.length = below the last. Null while nothing is hovering, which
+  // also means "append" for a drop on the column's empty space.
+  const [dropAt, setDropAt] = useState<number | null>(null);
+  const cards = board.cards.filter((c) => c.columnId === column.id);
+
+  function clearDrag() { setDragOver(false); setDropAt(null); }
 
   function onDrop(e: DragEvent) {
     e.preventDefault();
-    setDragOver(false);
+    const at = dropAt;
+    clearDrag();
     const cardId = e.dataTransfer.getData(CARD_MIME);
-    if (cardId) { mutate((b) => moveCard(b, cardId, column.id)); return; }
+    if (cardId) {
+      // A drop straight onto the column (not onto a card) appends, as before.
+      const to = at ?? undefined;
+      mutate((b) => moveCard(b, cardId, column.id, to), () => moveCardAction(cardId, column.id, to));
+      return;
+    }
     const colId = e.dataTransfer.getData(COL_MIME);
-    if (colId && colId !== column.id) mutate((b) => reorderColumn(b, colId, index));
+    if (colId && colId !== column.id) {
+      mutate((b) => reorderColumn(b, colId, index), () => reorderColumnAction(colId, index));
+    }
+  }
+
+  // Move a card with the keyboard. Drag-and-drop is mouse-only, so without this
+  // there is no way to reorder or re-stage a card without a pointer.
+  function moveByKey(cardId: string, dir: "left" | "right" | "up" | "down") {
+    const t = cardMoveTarget(board, cardId, dir);
+    if (!t) return;
+    mutate(
+      (b) => moveCard(b, cardId, t.toColumnId, t.toIndex),
+      () => moveCardAction(cardId, t.toColumnId, t.toIndex),
+    );
   }
 
   function onDelete() {
@@ -111,20 +148,32 @@ function ColumnView({
     // back over SSE — so deleting the last column would silently resurrect the
     // stock columns. Refuse it and say why rather than surprise the user.
     if (board.columns.length <= 1) {
-      alert("Keep at least one column — an empty board resets to the default.");
+      toast("Keep at least one column — an empty board resets to the default.");
       return;
     }
-    const n = board.cards.filter((c) => c.columnId === column.id).length;
+    // Same bargain as a card: do it, then offer it back. restoreColumn returns
+    // the column to its index with the cards that went down with it.
+    const doomed = board.cards.filter((c) => c.columnId === column.id);
     const label = column.name || "this column";
-    const msg = n ? `Delete "${label}" and its ${n} card${n > 1 ? "s" : ""}?` : `Delete "${label}"?`;
-    if (confirm(msg)) mutate((b) => deleteColumn(b, column.id));
+    const n = doomed.length;
+    mutate((b) => deleteColumn(b, column.id), () => deleteColumnAction(column.id));
+    toast(
+      n ? `Deleted "${label}" and its ${n} card${n > 1 ? "s" : ""}` : `Deleted "${label}"`,
+      {
+        label: "UNDO",
+        run: () => mutate(
+          (b) => restoreColumn(b, column, index, doomed),
+          () => restoreColumnAction(column, index, doomed),
+        ),
+      },
+    );
   }
 
   return (
     <div
       className={`col${dragOver ? " dragover" : ""}`}
       onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-      onDragLeave={() => setDragOver(false)}
+      onDragLeave={clearDrag}
       onDrop={onDrop}
     >
       <div className="col-head">
@@ -139,19 +188,40 @@ function ColumnView({
           value={column.name}
           placeholder="Name…"
           autoFocus={autoFocusName}
-          onCommit={(v) => { mutate((b) => renameColumn(b, column.id, v)); onNamed(); }}
+          onCommit={(v) => {
+            mutate((b) => renameColumn(b, column.id, v), () => renameColumnAction(column.id, v));
+            onNamed();
+          }}
         />
-        <button className="col-del" title="Delete column" onClick={onDelete}>✕</button>
+        <button
+          className="col-del"
+          title="Delete column"
+          aria-label={`Delete column "${column.name || "Untitled"}"`}
+          onClick={onDelete}
+        >✕</button>
       </div>
 
       <InstructionField
         value={column.instruction}
-        onCommit={(v) => mutate((b) => setInstruction(b, column.id, v))}
+        onCommit={(v) => mutate((b) => setInstruction(b, column.id, v), () => setInstructionAction(column.id, v))}
       />
 
       <div className="cards">
-        {board.cards.filter((c) => c.columnId === column.id).map((card) => (
-          <CardView key={card.id} agents={agents} mutate={mutate} card={card} onOpen={() => onOpenCard(card.id)} />
+        {cards.map((card, i) => (
+          <CardView
+            key={card.id}
+            agents={agents}
+            mutate={mutate}
+            card={card}
+            index={i}
+            dropBefore={dropAt === i}
+            dropAfterLast={dropAt === cards.length && i === cards.length - 1}
+            // Top half of a card means "above it", bottom half "below it" — the
+            // insertion line follows the pointer instead of always appending.
+            onDragOverCard={(before) => setDropAt(before ? i : i + 1)}
+            onMoveByKey={(dir) => moveByKey(card.id, dir)}
+            onOpen={() => onOpenCard(card.id)}
+          />
         ))}
       </div>
 
@@ -164,21 +234,65 @@ function ColumnView({
 // sparse — just the title and, only when there's something to show, a footer
 // with the assignee (its agent's sprite avatar, or initials when the session has
 // ended) and a comment count. Detail lives in the modal.
-function CardView({ agents, mutate, card, onOpen }: { agents: AgentStatus[]; mutate: Mutate; card: Card; onOpen: () => void }) {
+function CardView({
+  agents, mutate, card, index, dropBefore, dropAfterLast, onDragOverCard, onMoveByKey, onOpen,
+}: {
+  agents: AgentStatus[]; mutate: Mutate; card: Card; index: number;
+  dropBefore: boolean; dropAfterLast: boolean;
+  onDragOverCard: (before: boolean) => void;
+  onMoveByKey: (dir: "left" | "right" | "up" | "down") => void;
+  onOpen: () => void;
+}) {
   const commentCount = card.comments?.length ?? 0;
   const hasMeta = !!card.assignee || commentCount > 0 || !!card.description;
   // The live session behind the assignee, if any — gives us its sprite. A card
   // assigned to a session that has since ended falls back to initials.
   const assignedAgent = card.assignee ? agents.find((a) => a.sessionId === card.assignee!.id) : undefined;
 
+  // Deleting takes the card's whole comment thread with it, so it has to be
+  // recoverable. Rather than a blocking confirm() in front of every delete
+  // (which people learn to dismiss), the delete happens and the toast offers it
+  // back — restoreCard puts the SAME card, comments and all, at the position it
+  // held. Both halves go through mutate, so they apply to the latest board.
+  function onDelete() {
+    const snapshot = card;
+    mutate((b) => deleteCard(b, card.id), () => deleteCardAction(card.id));
+    toast(`Deleted "${card.title || "Untitled"}"`, {
+      label: "UNDO",
+      run: () => mutate(
+        (b) => restoreCard(b, snapshot, index),
+        () => restoreCardAction(snapshot, index),
+      ),
+    });
+  }
+
   return (
     <div
-      className="card"
+      className={`card${dropBefore ? " drop-before" : ""}${dropAfterLast ? " drop-after" : ""}`}
       role="button"
       tabIndex={0}
       draggable
+      title="Enter opens · Alt+arrows move it"
       onClick={onOpen}
-      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); return; }
+        // Alt+arrows move the card: left/right between stages, up/down within
+        // the stack. Alt keeps them clear of the browser's own arrow scrolling.
+        if (!e.altKey || e.metaKey || e.ctrlKey) return;
+        const dir = KEY_DIR[e.key];
+        if (!dir) return;
+        e.preventDefault();
+        onMoveByKey(dir);
+        // The board re-renders around the move, so hold focus on this card to
+        // keep a run of moves going instead of dumping focus back to the body.
+        const el = e.currentTarget;
+        requestAnimationFrame(() => el.focus());
+      }}
+      onDragOver={(e) => {
+        e.preventDefault();
+        const r = e.currentTarget.getBoundingClientRect();
+        onDragOverCard(e.clientY < r.top + r.height / 2);
+      }}
       onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData(CARD_MIME, card.id); }}
     >
       <div className="card-main">
@@ -200,11 +314,16 @@ function CardView({ agents, mutate, card, onOpen }: { agents: AgentStatus[]; mut
       <button
         className="card-del"
         title="Delete card"
-        onClick={(e) => { e.stopPropagation(); mutate((b) => deleteCard(b, card.id)); }}
+        aria-label={`Delete card "${card.title || "Untitled"}"`}
+        onClick={(e) => { e.stopPropagation(); onDelete(); }}
       >✕</button>
     </div>
   );
 }
+
+const KEY_DIR: Record<string, "left" | "right" | "up" | "down" | undefined> = {
+  ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down",
+};
 
 // First letters of the first two words, for the assignee chip (e.g. "Backend
 // Dev" -> "BD"). Falls back to the first character.
@@ -220,7 +339,7 @@ function AddCard({ mutate, columnId }: { mutate: Mutate; columnId: string }) {
   function commit() {
     const t = value.trim();
     if (!t) return;
-    mutate((b) => addCard(b, columnId, t));
+    mutate(null, () => addCardAction(columnId, t)); // the server mints the id
     setValue("");
   }
   return (

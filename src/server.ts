@@ -8,7 +8,7 @@ import { matchChat } from "./lib/chatsearch";
 import type { ChatMessage } from "./lib/conversation";
 import { readOverrides, applyOverrides, setNameOverride, setSpriteOverride } from "./lib/overrides";
 import { loadPersonas, applyPersonas } from "./lib/personas";
-import { readBoard, writeBoard, sanitizeBoard, boardFile, addCard, moveCard, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, type Board } from "./lib/board";
+import { readBoard, writeBoard, sanitizeBoard, boardFile, addCard, moveCard, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, addColumn, renameColumn, setInstruction, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, sanitizeCard, sanitizeColumn, type Board, type Card, type Column } from "./lib/board";
 import { ALLOWED_MODELS, ALLOWED_PERMISSION_MODES, focusSession, interruptSession, killAgent, sendPrompt, sendFreshPrompt, spawnAgent } from "./ghostty";
 import { readRepo } from "./repo";
 import { saveUpload, resolveUploadPath } from "./lib/uploads";
@@ -247,7 +247,7 @@ export function makeServer(
           return json({ ok: false, error: "cross-site blocked" }, 403);
         }
         const action = url.pathname.slice("/action/".length);
-        let body: { sessionId?: string | null; name?: string; text?: string; cwd?: string; palette?: number; gear?: string; body?: string; model?: string; permissionMode?: string; worktree?: string; persona?: string; board?: unknown; type?: string; dataBase64?: string; cardId?: string; columnId?: string; toColumnId?: string; title?: string; description?: string; author?: string };
+        let body: { sessionId?: string | null; name?: string; text?: string; cwd?: string; palette?: number; gear?: string; body?: string; model?: string; permissionMode?: string; worktree?: string; persona?: string; board?: unknown; type?: string; dataBase64?: string; cardId?: string; columnId?: string; toColumnId?: string; title?: string; description?: string; author?: string; instruction?: string; toIndex?: number; index?: number; column?: unknown; card?: unknown; cards?: unknown; commentId?: string };
         try { body = await req.json(); } catch { return json({ ok: false, error: "bad body" }, 400); }
         // spawn creates a brand-new session — it has a folder + task, not a sessionId
         if (action === "spawn") {
@@ -274,12 +274,78 @@ export function makeServer(
           }
           return json(await spawnAgent(cwd, task, { model, permissionMode, worktree, persona, serverUrl: url.origin, cardId }));
         }
-        // board: the whole kanban board (THE LINE). The client owns the edit and
-        // sends the full board; the server sanitizes it (dropping malformed
-        // columns/cards, orphan cards) before persisting so a bad write can't
-        // corrupt the file agents read. Not tied to a sessionId.
+        // board: a whole-board write. Kept for external/scripted callers, but
+        // NOTHING in the UI uses it any more: it overwrites the file wholesale,
+        // so a writer holding a slightly stale board silently erases whatever
+        // landed since it read. Every browser edit now goes through the scoped
+        // column-*/card-* ops below instead. Not tied to a sessionId.
         if (action === "board") {
           writeBoard(dir, sanitizeBoard(body.board));
+          push();
+          return json({ ok: true });
+        }
+        // column-*: the same discipline as card-*, for the board's own shape.
+        // These exist so the UI never has to send a whole board to rename a
+        // column or drag one — each re-reads, applies one pure op, and writes.
+        if (action === "column-add") {
+          const name = typeof body.name === "string" ? body.name : "";
+          const next = addColumn(readBoard(dir), name);
+          writeBoard(dir, next);
+          push();
+          return json({ ok: true, columnId: next.columns[next.columns.length - 1]!.id });
+        }
+        if (action === "column-update" || action === "column-delete" || action === "column-reorder") {
+          const columnId = typeof body.columnId === "string" ? body.columnId : "";
+          const board = readBoard(dir);
+          if (!board.columns.some((c) => c.id === columnId)) {
+            return json({ ok: false, error: `unknown column: ${columnId}` }, 404);
+          }
+          if (action === "column-update") {
+            const hasName = typeof body.name === "string";
+            const hasInstruction = typeof body.instruction === "string";
+            if (!hasName && !hasInstruction) return json({ ok: false, error: "name or instruction is required" }, 400);
+            let next = board;
+            if (hasName) next = renameColumn(next, columnId, body.name as string);
+            if (hasInstruction) next = setInstruction(next, columnId, body.instruction as string);
+            writeBoard(dir, next);
+            push();
+            return json({ ok: true });
+          }
+          if (action === "column-delete") {
+            // writeBoard falls back to the default board when none are left, so
+            // deleting the last column would silently resurrect the stock four.
+            if (board.columns.length <= 1) {
+              return json({ ok: false, error: "cannot delete the last column" }, 400);
+            }
+            writeBoard(dir, deleteColumn(board, columnId));
+            push();
+            return json({ ok: true });
+          }
+          const toIndex = typeof body.toIndex === "number" ? body.toIndex : NaN;
+          if (!Number.isInteger(toIndex)) return json({ ok: false, error: "toIndex must be an integer" }, 400);
+          writeBoard(dir, reorderColumn(board, columnId, toIndex));
+          push();
+          return json({ ok: true });
+        }
+        // column-restore / card-restore: the undo half. The caller hands back the
+        // thing it deleted, so the id, comments and assignee return with it
+        // rather than coming back as a fresh empty card.
+        if (action === "column-restore") {
+          const column = sanitizeColumn(body.column);
+          if (!column) return json({ ok: false, error: "a valid column is required" }, 400);
+          const index = typeof body.index === "number" ? body.index : 0;
+          const cards = Array.isArray(body.cards)
+            ? (body.cards.map(sanitizeCard).filter(Boolean) as Card[])
+            : [];
+          writeBoard(dir, restoreColumn(readBoard(dir), column, index, cards));
+          push();
+          return json({ ok: true });
+        }
+        if (action === "card-restore") {
+          const card = sanitizeCard(body.card);
+          if (!card) return json({ ok: false, error: "a valid card is required" }, 400);
+          const index = typeof body.index === "number" ? body.index : 0;
+          writeBoard(dir, restoreCard(readBoard(dir), card, index));
           push();
           return json({ ok: true });
         }
@@ -302,17 +368,30 @@ export function makeServer(
           push();
           return json({ ok: true, cardId: card.id });
         }
-        if (action === "card-move" || action === "card-comment" || action === "card-update" || action === "card-assign" || action === "send-task") {
+        if (action === "card-move" || action === "card-comment" || action === "card-update" || action === "card-assign" || action === "send-task" || action === "card-delete" || action === "comment-delete") {
           const cardId = typeof body.cardId === "string" ? body.cardId : "";
           const board = readBoard(dir);
           const card = board.cards.find((k) => k.id === cardId);
           if (!card) return json({ ok: false, error: `unknown card: ${cardId}` }, 404);
           const title = card.title.trim() || "(untitled card)";
+          if (action === "card-delete") {
+            writeBoard(dir, deleteCard(board, cardId));
+            push();
+            return json({ ok: true });
+          }
+          if (action === "comment-delete") {
+            const commentId = typeof body.commentId === "string" ? body.commentId : "";
+            if (!commentId) return json({ ok: false, error: "commentId is required" }, 400);
+            writeBoard(dir, deleteComment(board, cardId, commentId));
+            push();
+            return json({ ok: true });
+          }
           if (action === "card-move") {
             const to = board.columns.find((c) => c.id === body.toColumnId);
             if (!to) return json({ ok: false, error: `unknown column: ${String(body.toColumnId)}` }, 400);
             const author = typeof body.author === "string" && body.author.trim() ? body.author.trim() : "someone";
-            const next = moveCard(board, cardId, to.id);
+            const toIndex = typeof body.toIndex === "number" && Number.isInteger(body.toIndex) ? body.toIndex : undefined;
+            const next = moveCard(board, cardId, to.id, toIndex);
             writeBoard(dir, next);
             push();
             // The column id (not display name): unambiguous, and directly

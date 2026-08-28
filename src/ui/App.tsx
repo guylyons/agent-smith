@@ -17,7 +17,7 @@ import { diffUnread, loadUnread, saveUnread, type PrevStates } from "./unread";
 import type { AgentStatus } from "../schema";
 
 export function App() {
-  const snap = useSnapshot();
+  const { snap, live } = useSnapshot();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // null = closed; {} = blank; {task, cardId} = seeded from a card's "new agent for this card"
   const [spawnSeed, setSpawnSeed] = useState<{ task?: string; cardId?: string } | null>(null);
@@ -119,7 +119,7 @@ export function App() {
       <Backdrop />
       <Crt mode={display.crt} />
       <button className="settings-btn" title="Settings" onClick={() => setSettingsOpen(true)}>⚙</button>
-      <Header snap={snap} onNewAgent={() => setSpawnSeed({})} onFind={() => setPaletteOpen(true)} />
+      <Header snap={snap} live={live} onNewAgent={() => setSpawnSeed({})} onFind={() => setPaletteOpen(true)} />
       <Crew agents={snap.agents} board={snap.board} unread={unread} onOpen={openAgent} />
       <TheLine board={snap.board} agents={snap.agents} onSpawnForCard={(task, cardId) => setSpawnSeed({ task, cardId })} />
       {selected && selected.sessionId === selectedId && (

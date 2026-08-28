@@ -79,6 +79,18 @@ export function deleteColumn(board: Board, id: string): Board {
   };
 }
 
+/** Put a deleted column back at `index`, along with the cards that went down
+ *  with it — the undo half of deleteColumn. No-op if that column id is already
+ *  back. Cards keep their own ids and comments; any whose column is not this one
+ *  is ignored. */
+export function restoreColumn(board: Board, column: Column, index: number, cards: Card[]): Board {
+  if (board.columns.some((c) => c.id === column.id)) return board;
+  const columns = [...board.columns];
+  columns.splice(Math.max(0, Math.min(index, columns.length)), 0, column);
+  const mine = cards.filter((k) => k.columnId === column.id && !board.cards.some((x) => x.id === k.id));
+  return { columns, cards: [...board.cards, ...mine] };
+}
+
 export function reorderColumn(board: Board, id: string, toIndex: number): Board {
   const from = board.columns.findIndex((c) => c.id === id);
   if (from === -1) return board;
@@ -101,6 +113,17 @@ export function renameCard(board: Board, id: string, title: string): Board {
 
 export function deleteCard(board: Board, id: string): Board {
   return { ...board, cards: board.cards.filter((k) => k.id !== id) };
+}
+
+/** Put a deleted card back where it was — the undo half of deleteCard. Keeps
+ *  the card's own identity (id, comments, assignee), so undoing a delete does
+ *  not resurrect it as a fresh empty card. No-op if that id is already on the
+ *  board (a double undo), and silently drops the card if its column has since
+ *  been deleted — there is nowhere to put it. */
+export function restoreCard(board: Board, card: Card, index: number): Board {
+  if (board.cards.some((k) => k.id === card.id)) return board;
+  if (!board.columns.some((c) => c.id === card.columnId)) return board;
+  return { ...board, cards: insertInColumn(board.cards, card, index) };
 }
 
 /** Map a single card by id to a new card. Shared by the detail mutations. */
@@ -239,20 +262,55 @@ export function moveCard(board: Board, id: string, toColumnId: string, toIndex?:
   const rest = board.cards.filter((k) => k.id !== id);
   const moved: Card = { ...card, columnId: toColumnId };
   if (toIndex === undefined) return { ...board, cards: [...rest, moved] };
+  return { ...board, cards: insertInColumn(rest, moved, toIndex) };
+}
 
-  // Insert relative to the target column's cards, preserving other columns' order.
+/** Splice `card` into `cards` at `index` counted among the cards already in its
+ *  own column, leaving every other column's order untouched. Past the end (or a
+ *  column with no cards yet) it appends. Shared by moveCard and restoreCard. */
+function insertInColumn(cards: Card[], card: Card, index: number): Card[] {
   const out: Card[] = [];
   let placed = false;
   let seen = 0;
-  for (const k of rest) {
-    if (k.columnId === toColumnId) {
-      if (seen === toIndex) { out.push(moved); placed = true; }
+  for (const k of cards) {
+    if (k.columnId === card.columnId) {
+      if (seen === index) { out.push(card); placed = true; }
       seen++;
     }
     out.push(k);
   }
-  if (!placed) out.push(moved);
-  return { ...board, cards: out };
+  if (!placed) out.push(card);
+  return out;
+}
+
+/** Where a card lands when it is moved by keyboard rather than dragged.
+ *  "left"/"right" step it a column at a time, keeping its row where the target
+ *  is long enough and clamping to the end where it is not; "up"/"down" reorder
+ *  it inside its own column. Null when there is nowhere to go — the edge of the
+ *  board, the end of a column, or an id that isn't here — so a caller can just
+ *  do nothing rather than special-case every boundary. */
+export function cardMoveTarget(
+  board: Board,
+  id: string,
+  dir: "left" | "right" | "up" | "down",
+): { toColumnId: string; toIndex: number } | null {
+  const card = board.cards.find((k) => k.id === id);
+  if (!card) return null;
+  const colAt = board.columns.findIndex((c) => c.id === card.columnId);
+  if (colAt === -1) return null;
+  const inColumn = board.cards.filter((k) => k.columnId === card.columnId);
+  const row = inColumn.findIndex((k) => k.id === id);
+
+  if (dir === "up" || dir === "down") {
+    const to = row + (dir === "down" ? 1 : -1);
+    if (to < 0 || to >= inColumn.length) return null;
+    return { toColumnId: card.columnId, toIndex: to };
+  }
+
+  const toCol = board.columns[colAt + (dir === "right" ? 1 : -1)];
+  if (!toCol) return null;
+  const target = board.cards.filter((k) => k.columnId === toCol.id).length;
+  return { toColumnId: toCol.id, toIndex: Math.min(row, target) };
 }
 
 // ---- validation & persistence --------------------------------------------
@@ -299,6 +357,38 @@ function sanitizeComments(v: unknown): Comment[] {
   return out;
 }
 
+/** Repair one column: needs a string id and name; a missing instruction is "".
+ *  Exported so a single column can be validated on its own — the restore
+ *  endpoints take one back from a client rather than a whole board. */
+export function sanitizeColumn(v: unknown): Column | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  const id = str(o.id);
+  const name = str(o.name);
+  if (id === null || name === null) return null;
+  return { id, name, instruction: str(o.instruction) ?? "" };
+}
+
+/** Repair one card: needs a string id, title and columnId; optional detail is
+ *  carried through only when present, so a bare card stays bare. Whether that
+ *  columnId actually exists is the board's business, not the card's. */
+export function sanitizeCard(v: unknown): Card | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  const id = str(o.id);
+  const title = str(o.title);
+  const columnId = str(o.columnId);
+  if (id === null || title === null || columnId === null) return null;
+  const card: Card = { id, title, columnId };
+  const description = str(o.description);
+  if (description !== null) card.description = description;
+  const assignee = sanitizeAssignee(o.assignee);
+  if (assignee) card.assignee = assignee;
+  const comments = sanitizeComments(o.comments);
+  if (comments.length) card.comments = comments;
+  return card;
+}
+
 /** Validate/repair arbitrary input into a Board. The file is documented as one
  *  any Claude session may write, so bad columns/cards are dropped here rather
  *  than crash consumers. Falls back to the default board when unusable. */
@@ -310,13 +400,10 @@ export function sanitizeBoard(input: unknown): Board {
   const colIds = new Set<string>();
   if (Array.isArray(raw.columns)) {
     for (const c of raw.columns) {
-      if (!c || typeof c !== "object") continue;
-      const o = c as Record<string, unknown>;
-      const id = str(o.id);
-      const name = str(o.name);
-      if (id === null || name === null || colIds.has(id)) continue;
-      colIds.add(id);
-      columns.push({ id, name, instruction: str(o.instruction) ?? "" });
+      const col = sanitizeColumn(c);
+      if (!col || colIds.has(col.id)) continue;
+      colIds.add(col.id);
+      columns.push(col);
     }
   }
   if (columns.length === 0) return defaultBoard();
@@ -325,23 +412,12 @@ export function sanitizeBoard(input: unknown): Board {
   const cardIds = new Set<string>();
   if (Array.isArray(raw.cards)) {
     for (const k of raw.cards) {
-      if (!k || typeof k !== "object") continue;
-      const o = k as Record<string, unknown>;
-      const id = str(o.id);
-      const title = str(o.title);
-      const columnId = str(o.columnId);
-      if (id === null || title === null || columnId === null) continue;
-      if (cardIds.has(id) || !colIds.has(columnId)) continue;
-      cardIds.add(id);
-
-      // Optional detail — included only when present, so a bare card stays bare.
-      const card: Card = { id, title, columnId };
-      const description = str(o.description);
-      if (description !== null) card.description = description;
-      const assignee = sanitizeAssignee(o.assignee);
-      if (assignee) card.assignee = assignee;
-      const comments = sanitizeComments(o.comments);
-      if (comments.length) card.comments = comments;
+      const card = sanitizeCard(k);
+      if (!card) continue;
+      // Board-level rules the card can't judge for itself: no duplicate ids, and
+      // no orphans pointing at a column that isn't here.
+      if (cardIds.has(card.id) || !colIds.has(card.columnId)) continue;
+      cardIds.add(card.id);
       cards.push(card);
     }
   }

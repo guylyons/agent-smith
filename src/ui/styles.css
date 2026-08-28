@@ -338,6 +338,9 @@
   @media (prefers-reduced-motion:reduce){.usage-cell.on{animation:none}}
   .title{font-family:var(--display);font-size:20px;letter-spacing:calc(1px + var(--track));text-shadow:0 var(--px) 0 #000}
   .sub{font-size:12px;color:var(--dim);margin-top:10px}
+  /* Not an error to fix, but the board is not live — say it in the one line the
+     eye already goes to for status. */
+  .sub.offline{color:var(--clay)}
   .statline{display:flex;flex-wrap:wrap;gap:16px;margin-top:14px;font-size:12px}
   .statline b{color:var(--gold)}
   .caret{display:inline-block;width:8px;height:12px;background:var(--gold);vertical-align:-2px;animation:blink 1s steps(2) infinite}
@@ -349,6 +352,15 @@
     display:grid;gap:14px;
     grid-template-columns:repeat(auto-fit,minmax(300px,1fr));
   }
+  /* The empty grid is one block, not a column of cards, so it drops out of the
+     auto-fit track and centres under the header. */
+  .crew-empty{
+    display:block;text-align:center;
+    border:2px dashed var(--bevel);padding:26px 18px;
+    color:var(--gold);font-size:12px;line-height:1.9;
+  }
+  .crew-empty-hint{color:var(--dim);font-size:12px;margin-top:6px}
+  .crew-empty-hint b{color:var(--bone);font-weight:400}
   .desk{padding:14px;display:flex;gap:14px;align-items:flex-start}
   /* An idle desk fades its CONTENT, never the panel: fading the whole card makes
      the surface translucent, which turns into a hole in the layout the moment
@@ -413,18 +425,25 @@
     background:transparent;border:2px solid transparent;padding:4px 5px;
   }
   .col-name:hover{border-color:var(--bevel)}
-  .col-name:focus{outline:none;border-color:var(--gold);background:var(--night)}
+  .col-name:focus{border-color:var(--gold);background:var(--night)}
+  .col-name:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+  /* Destructive, and previously a 17x15 target. Sized to the 24px minimum and
+     given the same focus ring as every other button, so a keyboard user can see
+     when they are sitting on Delete. */
   .col-del,.card-del{
-    background:transparent;border:none;color:var(--dim);cursor:pointer;
-    font-size:13px;padding:2px 4px;line-height:1;
+    flex:0 0 auto;background:transparent;border:none;color:var(--dim);cursor:pointer;
+    font-size:13px;line-height:1;
+    min-width:24px;min-height:24px;display:inline-flex;align-items:center;justify-content:center;
   }
   .col-del:hover,.card-del:hover{color:var(--clay)}
+  .col-del:focus-visible,.card-del:focus-visible{outline:3px solid var(--gold);outline-offset:-1px;color:var(--clay)}
   .col-instr{
     width:100%;box-sizing:border-box;resize:vertical;min-height:44px;
     font-family:var(--mono);font-size:12px;line-height:1.5;
     background:var(--night);color:var(--bone);border:2px solid var(--bevel);padding:5px 6px;
   }
-  .col-instr:focus{outline:none;border-color:var(--gold)}
+  .col-instr:focus{border-color:var(--gold)}
+  .col-instr:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
   .col-instr::placeholder{color:var(--dim)}
   .cards{display:flex;flex-direction:column;gap:6px;min-height:20px}
   .card{
@@ -433,8 +452,13 @@
     box-shadow:inset 0 0 0 2px rgba(110,140,224,.5),0 3px 0 rgba(0,0,0,.5);
     padding:6px;
   }
+  /* Where a dragged card would land. The line sits in the gap the flex row
+     already leaves, so nothing shifts as the pointer moves between slots. */
+  .card.drop-before{box-shadow:inset 0 0 0 2px rgba(110,140,224,.5),0 3px 0 rgba(0,0,0,.5),0 -5px 0 -2px var(--gold)}
+  .card.drop-after{box-shadow:inset 0 0 0 2px rgba(110,140,224,.5),0 3px 0 rgba(0,0,0,.5),0 7px 0 -2px var(--gold)}
   .card:hover{border-color:var(--gold)}
-  .card:focus{outline:none;border-color:var(--gold)}
+  .card:focus{border-color:var(--gold)}
+  .card:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
   .card:active{cursor:grabbing}
   .card-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
   .card-title-text{
@@ -455,7 +479,8 @@
     font-family:var(--mono);font-size:12px;
     background:transparent;color:var(--dim);border:2px dashed var(--bevel);padding:5px 6px;
   }
-  .add-card:focus{outline:none;border-style:solid;border-color:var(--gold);color:var(--bone)}
+  .add-card:focus{border-style:solid;border-color:var(--gold);color:var(--bone)}
+  .add-card:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
   .add-card::placeholder{color:var(--dim)}
   .add-col{
     flex:0 0 auto;align-self:stretch;cursor:pointer;
@@ -466,8 +491,28 @@
 
   footer{max-width:1080px;margin:22px auto 0;font-size:12px;color:var(--dim);line-height:2}
 
+  /* The layout was desktop-only: one breakpoint that changed a font size, fixed
+     210px columns in a horizontal scroller, and everything pinned to 1080px. On
+     a phone that meant a column and a half and a lot of sideways scrolling. */
   @media (max-width:720px){
+    body{padding:14px 12px 28px}
     .title{font-size:14px}
+    header{gap:12px}
+    /* The usage meter is ambient, not actionable — it goes first when space is short. */
+    .usage{display:none}
+    .statline{gap:10px}
+    /* One desk per row: two columns of 300px never fit, so auto-fit was
+       overflowing rather than wrapping. */
+    .crew{grid-template-columns:1fr}
+    .line{margin-top:16px;padding:12px}
+    .line .hint{font-size:11px}
+    /* A column just under the viewport, so the next one peeks in and the board
+       still reads as a row you swipe rather than a mystery cut off at the edge. */
+    .col{flex:0 0 82vw;min-width:82vw;scroll-snap-align:start}
+    .board{scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch}
+    /* Touch targets, not mouse targets. */
+    .col-del,.card-del{min-width:32px;min-height:32px}
+    .card{padding:8px}
   }
   @media (prefers-reduced-motion:reduce){
     *{animation:none !important}
@@ -814,7 +859,18 @@ body{background:transparent}
 
 /* toasts */
 .toaster{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:120;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}
-.toast{background:var(--clay);color:var(--on-danger);border:3px solid var(--bone);box-shadow:0 3px 0 rgba(0,0,0,.55);padding:9px 13px;font-size:12px;max-width:80vw}
+.toast{background:var(--clay);color:var(--on-danger);border:3px solid var(--bone);box-shadow:0 3px 0 rgba(0,0,0,.55);padding:9px 13px;font-size:12px;max-width:80vw;
+  display:flex;align-items:center;gap:10px}
+/* The toaster ignores the pointer so it never blocks the board underneath; a
+   toast carrying an action has to take it back, or its button is unclickable. */
+.toast:has(.toast-action){pointer-events:auto}
+.toast-text{flex:1;min-width:0}
+.toast-action{
+  flex:0 0 auto;cursor:pointer;font-family:inherit;font-size:11px;letter-spacing:.5px;
+  background:var(--on-danger);color:var(--clay);border:2px solid var(--on-danger);padding:3px 8px;
+}
+.toast-action:hover{background:transparent;color:var(--on-danger)}
+.toast-action:focus-visible{outline:3px solid var(--bone);outline-offset:2px}
 
 /* a11y: keyboard-focus outline for the "jump to terminal" button on a crew
    card, mirroring .desk:focus-visible so both the card and its button get a

@@ -530,3 +530,109 @@ test("card-update rejects a blank title, no fields, and an unknown card", async 
   expect(readSnapshot(dir, Date.now()).board.cards[0]!.title).toBe("T");
   server.stop(true);
 });
+
+// ---- column-* and the destructive card ops: the write half the UI needs so it
+// never has to send a whole board. Each is applied against a fresh read, so a
+// browser edit can no longer erase an agent's concurrent comment.
+
+test("column-add appends a column and returns its id", async () => {
+  const { server, base, post } = await cardApiServer();
+  const res = await post("/action/column-add", { name: "Blocked" });
+  expect(res.status).toBe(200);
+  const { ok, columnId } = (await res.json()) as any;
+  expect(ok).toBe(true);
+  const { board } = (await (await fetch(`${base}/board`)).json()) as any;
+  expect(board.columns.at(-1)).toEqual({ id: columnId, name: "Blocked", instruction: "" });
+  server.stop(true);
+});
+
+test("column-update changes name and instruction independently", async () => {
+  const { server, base, post } = await cardApiServer();
+  await post("/action/column-update", { columnId: "backlog", instruction: "read me" });
+  await post("/action/column-update", { columnId: "backlog", name: "Icebox" });
+  const { board } = (await (await fetch(`${base}/board`)).json()) as any;
+  const col = board.columns.find((c: any) => c.id === "backlog");
+  expect(col.name).toBe("Icebox");
+  expect(col.instruction).toBe("read me"); // the rename did not wipe it
+  expect((await post("/action/column-update", { columnId: "backlog" })).status).toBe(400);
+  expect((await post("/action/column-update", { columnId: "ghost", name: "x" })).status).toBe(404);
+  server.stop(true);
+});
+
+test("column-delete removes the column and its cards; the last column is refused", async () => {
+  const { server, base, post } = await cardApiServer();
+  await post("/action/card-add", { columnId: "review", title: "doomed" });
+  expect((await (await post("/action/column-delete", { columnId: "review" })).json()).ok).toBe(true);
+  let { board } = (await (await fetch(`${base}/board`)).json()) as any;
+  expect(board.columns.some((c: any) => c.id === "review")).toBe(false);
+  expect(board.cards).toHaveLength(0);
+
+  for (const id of ["backlog", "in-progress"]) await post("/action/column-delete", { columnId: id });
+  const res = await post("/action/column-delete", { columnId: "done" });
+  expect(res.status).toBe(400); // an empty board would reset to the default
+  ({ board } = (await (await fetch(`${base}/board`)).json()) as any);
+  expect(board.columns.map((c: any) => c.id)).toEqual(["done"]);
+  server.stop(true);
+});
+
+test("column-reorder moves a column to an index", async () => {
+  const { server, base, post } = await cardApiServer();
+  await post("/action/column-reorder", { columnId: "done", toIndex: 0 });
+  const { board } = (await (await fetch(`${base}/board`)).json()) as any;
+  expect(board.columns.map((c: any) => c.id)).toEqual(["done", "backlog", "in-progress", "review"]);
+  server.stop(true);
+});
+
+test("card-delete removes one card and card-restore puts it back with its comments", async () => {
+  const { server, base, post } = await cardApiServer();
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "keep me" })).json()) as any;
+  await post("/action/card-add", { columnId: "backlog", title: "neighbour" });
+  await post("/action/card-comment", { cardId, author: "VOLT", text: "do not lose this" });
+
+  const before = (await (await fetch(`${base}/board`)).json()) as any;
+  const card = before.board.cards.find((c: any) => c.id === cardId);
+  expect((await (await post("/action/card-delete", { cardId })).json()).ok).toBe(true);
+  expect((await post("/action/card-delete", { cardId: "card_nope" })).status).toBe(404);
+
+  expect((await (await post("/action/card-restore", { card, index: 0 })).json()).ok).toBe(true);
+  const { board } = (await (await fetch(`${base}/board`)).json()) as any;
+  expect(board.cards.map((c: any) => c.title)).toEqual(["keep me", "neighbour"]);
+  expect(board.cards[0].comments).toHaveLength(1);
+  server.stop(true);
+});
+
+test("column-restore puts a deleted column back at its index with its cards", async () => {
+  const { server, base, post } = await cardApiServer();
+  await post("/action/card-add", { columnId: "in-progress", title: "rides along" });
+  const before = (await (await fetch(`${base}/board`)).json()) as any;
+  const column = before.board.columns.find((c: any) => c.id === "in-progress");
+  const cards = before.board.cards.filter((c: any) => c.columnId === "in-progress");
+
+  await post("/action/column-delete", { columnId: "in-progress" });
+  expect((await (await post("/action/column-restore", { column, index: 1, cards })).json()).ok).toBe(true);
+
+  const { board } = (await (await fetch(`${base}/board`)).json()) as any;
+  expect(board.columns.map((c: any) => c.id)).toEqual(["backlog", "in-progress", "review", "done"]);
+  expect(board.cards.map((c: any) => c.title)).toEqual(["rides along"]);
+  server.stop(true);
+});
+
+test("a card-scoped UI edit no longer erases a comment posted since the browser's last read", async () => {
+  const { server, base, post } = await cardApiServer();
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "shared" })).json()) as any;
+
+  // The browser reads the board here, then the user starts typing a rename.
+  const stale = (await (await fetch(`${base}/board`)).json()) as any;
+  expect(stale.board.cards[0].comments).toBeUndefined();
+
+  // An agent comments while that rename is in flight.
+  await post("/action/card-comment", { cardId, author: "ANVIL", text: "found the bug" });
+
+  // The rename lands as a card-scoped edit, applied against a FRESH read.
+  await post("/action/card-update", { cardId, title: "shared (renamed)" });
+
+  const { board } = (await (await fetch(`${base}/board`)).json()) as any;
+  expect(board.cards[0].title).toBe("shared (renamed)");
+  expect(board.cards[0].comments).toHaveLength(1); // survived the rename
+  server.stop(true);
+});

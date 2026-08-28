@@ -152,6 +152,21 @@ export function assignedCardLabel(board: Board, sessionId: string): string {
 export function Crew({ agents, board, unread, onOpen }: {
   agents: AgentStatus[]; board: Board; unread: Set<string>; onOpen: (id: string) => void;
 }) {
+  // An empty grid used to render as nothing at all — a blank gap between the
+  // header and THE LINE, with no hint that this is where sessions appear or how
+  // to start one. Every other panel says what it would hold; so does this one.
+  if (!agents.length) {
+    return (
+      <main className="crew crew-empty">
+        <p className="pix">NO SESSIONS ON THE FLOOR</p>
+        <p className="pix crew-empty-hint">
+          Open a Claude Code session in any repo and its desk appears here, or hit
+          <b> + NEW AGENT</b> to start one.
+        </p>
+      </main>
+    );
+  }
+
   return (
     <main className="crew">
       {agents.map((a) => (

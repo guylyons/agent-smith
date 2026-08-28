@@ -9,11 +9,14 @@ import {
   renameColumn,
   setInstruction,
   deleteColumn,
+  restoreColumn,
   reorderColumn,
   addCard,
   renameCard,
   deleteCard,
+  restoreCard,
   moveCard,
+  cardMoveTarget,
   setCardDescription,
   assignCard,
   addComment,
@@ -553,4 +556,112 @@ test("cardTaskPrompt offers the MCP tools as an alternative to the curls", () =>
   expect(p).toContain("mcp__the-line__");
   // still ASCII-safe for the trip through the pty
   expect(/^[\x00-\x7f]*$/.test(p)).toBe(true);
+});
+
+test("restoreCard puts a deleted card back at its old position, comments intact", () => {
+  let b = defaultBoard();
+  const col = b.columns[0]!.id;
+  b = addCard(b, col, "a");
+  b = addCard(b, col, "b");
+  b = addCard(b, col, "c");
+  const b2 = b.cards.find((x) => x.title === "b")!;
+  b = addComment(b, b2.id, "PROBE", "worth keeping");
+  const doomed = b.cards.find((x) => x.id === b2.id)!;
+  const index = b.cards.filter((x) => x.columnId === col).findIndex((x) => x.id === doomed.id);
+
+  b = deleteCard(b, doomed.id);
+  b = restoreCard(b, doomed, index);
+
+  expect(b.cards.filter((x) => x.columnId === col).map((x) => x.title)).toEqual(["a", "b", "c"]);
+  expect(b.cards.find((x) => x.id === doomed.id)!.comments).toHaveLength(1);
+});
+
+test("restoreCard is a no-op when the card id is already on the board", () => {
+  let b = defaultBoard();
+  const col = b.columns[0]!.id;
+  b = addCard(b, col, "only");
+  const card = b.cards[0]!;
+  b = restoreCard(b, card, 0);
+  expect(b.cards).toHaveLength(1);
+});
+
+test("restoreCard drops a card whose column has since been deleted", () => {
+  let b = defaultBoard();
+  const col = b.columns[1]!.id;
+  b = addCard(b, col, "orphan");
+  const card = b.cards[0]!;
+  b = deleteCard(b, card.id);
+  b = deleteColumn(b, col);
+  b = restoreCard(b, card, 0);
+  expect(b.cards).toHaveLength(0);
+});
+
+test("restoreColumn puts a deleted column back at its index with its cards", () => {
+  let b = defaultBoard();
+  const col = b.columns[1]!;
+  b = addCard(b, col.id, "one");
+  b = addCard(b, col.id, "two");
+  const cards = b.cards.filter((c) => c.columnId === col.id);
+
+  b = deleteColumn(b, col.id);
+  expect(b.cards).toHaveLength(0);
+
+  b = restoreColumn(b, col, 1, cards);
+  expect(b.columns.map((c) => c.id)).toEqual(defaultBoard().columns.map((c) => c.id));
+  expect(b.cards.map((c) => c.title)).toEqual(["one", "two"]);
+});
+
+test("restoreColumn is a no-op when that column id is back already", () => {
+  const b = defaultBoard();
+  const col = b.columns[0]!;
+  const out = restoreColumn(b, col, 0, []);
+  expect(out.columns).toHaveLength(b.columns.length);
+});
+
+// cardMoveTarget: where a card goes when someone moves it with the keyboard.
+// Drag-and-drop is mouse-only, so this is the path for keyboard and touch users.
+
+function threeColumnBoard(): { b: Board; col: string; next: string } {
+  let b = defaultBoard();
+  const col = b.columns[0]!.id;
+  b = addCard(b, col, "a");
+  b = addCard(b, col, "b");
+  b = addCard(b, col, "c");
+  return { b, col, next: b.columns[1]!.id };
+}
+
+test("cardMoveTarget moves a card to the next column, keeping its row when it fits", () => {
+  let { b, next } = threeColumnBoard();
+  // Give the target column two rows, so row 1 is a real position there.
+  b = addCard(b, next, "n0");
+  b = addCard(b, next, "n1");
+  const mid = b.cards.find((c) => c.title === "b")!.id;
+  expect(cardMoveTarget(b, mid, "right")).toEqual({ toColumnId: next, toIndex: 1 });
+  expect(cardMoveTarget(b, mid, "left")).toBeNull(); // already in the first column
+});
+
+test("cardMoveTarget reorders within a column and stops at the ends", () => {
+  const { b, col } = threeColumnBoard();
+  const first = b.cards.find((c) => c.title === "a")!.id;
+  const last = b.cards.find((c) => c.title === "c")!.id;
+  expect(cardMoveTarget(b, first, "down")).toEqual({ toColumnId: col, toIndex: 1 });
+  expect(cardMoveTarget(b, first, "up")).toBeNull();   // already at the top
+  expect(cardMoveTarget(b, last, "down")).toBeNull();  // already at the bottom
+});
+
+test("cardMoveTarget lands past the end of a shorter column rather than vanishing", () => {
+  let b = defaultBoard();
+  const from = b.columns[0]!.id;
+  const to = b.columns[1]!.id;
+  b = addCard(b, from, "x");
+  b = addCard(b, from, "y");
+  b = addCard(b, from, "z");
+  const third = b.cards.find((c) => c.title === "z")!.id;
+  // Row 2 of an empty target column: clamped to the end, not left dangling.
+  expect(cardMoveTarget(b, third, "right")).toEqual({ toColumnId: to, toIndex: 0 });
+});
+
+test("cardMoveTarget returns null for an unknown card", () => {
+  const { b } = threeColumnBoard();
+  expect(cardMoveTarget(b, "card_nope", "right")).toBeNull();
 });

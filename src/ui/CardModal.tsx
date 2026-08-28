@@ -1,18 +1,20 @@
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from "react";
 import type { AgentStatus } from "../schema";
 import type { Board, Card } from "../lib/board";
-import { renameCard, setCardDescription, assignCard, addComment, deleteComment, cardTaskPrompt, commentNotifyText } from "../lib/board";
-import { sendCardTask, sendPromptTo, uploadImage } from "./actions";
+import { renameCard, setCardDescription, assignCard, addComment, deleteComment, moveCard, cardTaskPrompt, commentNotifyText } from "../lib/board";
+import {
+  sendCardTask, sendPromptTo, uploadImage, ME,
+  renameCardAction, setCardDescriptionAction, assignCardAction,
+  addCommentAction, deleteCommentAction, moveCardAction,
+} from "./actions";
 import { ModalBackdrop } from "./Backdrop";
 import { renderMarkdown, imageSrc } from "./markdown";
 import { imagesIn, imageMarkdown, appendImage, removeImage } from "./cardImages";
 import { toast } from "./toast";
 
-type Mutate = (fn: (b: Board) => Board) => void;
-
-// The human's byline on comments they post. Agents append to .line.json with
-// their own persona name, so a thread reads clearly as a human↔agent exchange.
-const ME = "You";
+// Matches TheLine's: the pure op to paint immediately, plus the one scoped
+// server call that makes it real. See actions.ts for why nothing sends a board.
+type Mutate = (fn: ((b: Board) => Board) | null, send: () => void) => void;
 
 // Which field a dropped/pasted image lands in. Drops anywhere on the modal go to
 // whichever field the user last touched, defaulting to the comment box — the
@@ -78,7 +80,9 @@ export function CardModal({
 
   function commitDesc(next: string) {
     setDesc(next);
-    if (next !== (card.description ?? "")) mutate((b) => setCardDescription(b, card.id, next));
+    if (next !== (card.description ?? "")) {
+      mutate((b) => setCardDescription(b, card.id, next), () => setCardDescriptionAction(card.id, next));
+    }
   }
 
   // Attach images to `to`, or to whichever field was last touched.
@@ -125,7 +129,7 @@ export function CardModal({
   // ambiguous whether the note reached anyone. A live send also pulses that
   // agent's crew card green (see sendPromptTo).
   function postComment(text: string) {
-    mutate((b) => addComment(b, card.id, ME, text));
+    mutate((b) => addComment(b, card.id, ME, text), () => addCommentAction(card.id, text));
     if (assigned && assignedIsLive) {
       const msg = commentNotifyText(board, card.id, text);
       // Only claim "Notified" once the send actually succeeds — otherwise the
@@ -190,8 +194,29 @@ export function CardModal({
         <div className="cardmodal-body">
           <TitleField
             value={card.title}
-            onCommit={(v) => { if (v) mutate((b) => renameCard(b, card.id, v)); }}
+            onCommit={(v) => { if (v) mutate((b) => renameCard(b, card.id, v), () => renameCardAction(card.id, v)); }}
           />
+
+          {/* Dragging is the fast way to re-stage a card, but it is mouse-only:
+              on a touch screen HTML5 drag events never fire at all. A plain
+              select is the path that works for touch, keyboard and screen
+              readers alike. */}
+          <div className="cardmodal-row">
+            <label className="pix cardmodal-label" htmlFor="cardmodal-column">STAGE</label>
+            <select
+              id="cardmodal-column"
+              className="cardmodal-select"
+              value={card.columnId}
+              onChange={(e) => {
+                const to = e.target.value;
+                mutate((b) => moveCard(b, card.id, to), () => moveCardAction(card.id, to));
+              }}
+            >
+              {board.columns.map((c) => (
+                <option key={c.id} value={c.id}>{c.name || "Untitled"}</option>
+              ))}
+            </select>
+          </div>
 
           <div className="cardmodal-row">
             <label className="pix cardmodal-label">ASSIGNEE</label>
@@ -200,7 +225,10 @@ export function CardModal({
               value={assigned?.id ?? ""}
               onChange={(e) => {
                 const a = agents.find((x) => x.sessionId === e.target.value);
-                mutate((b) => assignCard(b, card.id, a ? { id: a.sessionId, name: a.name } : null));
+                mutate(
+                  (b) => assignCard(b, card.id, a ? { id: a.sessionId, name: a.name } : null),
+                  () => assignCardAction(card.id, a ? a.sessionId : null),
+                );
               }}
             >
               <option value="">Unassigned</option>
@@ -283,7 +311,7 @@ export function CardModal({
                     <button
                       className="comment-del"
                       title="Delete comment"
-                      onClick={() => mutate((b) => deleteComment(b, card.id, c.id))}
+                      onClick={() => mutate((b) => deleteComment(b, card.id, c.id), () => deleteCommentAction(card.id, c.id))}
                     >✕</button>
                   </div>
                   <div className="comment-text">{renderMarkdown(c.text)}</div>

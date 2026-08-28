@@ -24,7 +24,7 @@ export function headerSummary(agents: AgentStatus[]): { working: number; waiting
   return { working, waiting, repos };
 }
 
-export function Header({ snap, onNewAgent, onFind }: { snap: Snapshot; onNewAgent: () => void; onFind: () => void }) {
+export function Header({ snap, live, onNewAgent, onFind }: { snap: Snapshot; live: boolean; onNewAgent: () => void; onFind: () => void }) {
   const { agents, board } = snap;
   const idle = agents.filter((a) => a.state === "idle").length;
   const onLine = board.cards.length;
@@ -44,8 +44,11 @@ export function Header({ snap, onNewAgent, onFind }: { snap: Snapshot; onNewAgen
       <div className="head-main">
         <NotificationCenter snap={snap} />
         <div className="pix title">AGENT WORKSHOP</div>
-        <div className={`pix sub${waiting ? " needs-you" : ""}`}>
-          {summary}
+        {/* A dropped connection leaves the whole page showing stale data with no
+            outward sign, which reads as "nothing is happening" rather than "you
+            are not connected". Say so, and let the summary stand aside. */}
+        <div className={`pix sub${!live ? " offline" : waiting ? " needs-you" : ""}`}>
+          {live ? summary : "RECONNECTING — BOARD MAY BE STALE"}
           <span className="caret"></span>
         </div>
         <div className="pix statline">

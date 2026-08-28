@@ -3,7 +3,7 @@
 import { toast } from "./toast";
 import { flashSend } from "./flash";
 import { playSubmit } from "./sounds";
-import type { Board } from "../lib/board";
+import type { Board, Card, Column } from "../lib/board";
 // Shared with the UI as types only — nothing server-side is bundled into the browser.
 import type { ChatMessage, QuestionOption, Question, PendingQuestion, BlockingTool } from "../lib/conversation";
 import type { Subagent } from "../lib/subagents";
@@ -53,12 +53,38 @@ export function setSprite(sessionId: string, palette: number, gear: string, body
   void act("sprite", { sessionId, palette, gear, body });
 }
 
-/** Persist the whole kanban board (THE LINE). The client owns board edits and
- *  sends the full board; the server sanitizes and stores it to `.line.json`, which
- *  any Claude session can read. */
-export function updateBoard(board: Board): void {
-  void act("board", { board });
+// ---- THE LINE: one scoped call per edit ------------------------------------
+// The UI used to POST the ENTIRE board on every keystroke-commit and drag. That
+// write overwrites `.line.json` wholesale, so anything an agent posted between
+// the browser's last snapshot and its next edit — a comment, a move, a new card
+// — was silently erased. Each function below names the one thing it changes;
+// the server applies it against a fresh read, so concurrent writers compose
+// instead of clobbering. Nothing here sends a whole board.
+
+export function addColumnAction(name: string): void { void act("column-add", { name }); }
+export function renameColumnAction(columnId: string, name: string): void { void act("column-update", { columnId, name }); }
+export function setInstructionAction(columnId: string, instruction: string): void { void act("column-update", { columnId, instruction }); }
+export function deleteColumnAction(columnId: string): void { void act("column-delete", { columnId }); }
+export function reorderColumnAction(columnId: string, toIndex: number): void { void act("column-reorder", { columnId, toIndex }); }
+export function restoreColumnAction(column: Column, index: number, cards: Card[]): void {
+  void act("column-restore", { column, index, cards });
 }
+
+export function addCardAction(columnId: string, title: string): void { void act("card-add", { columnId, title }); }
+export function renameCardAction(cardId: string, title: string): void { void act("card-update", { cardId, title }); }
+export function setCardDescriptionAction(cardId: string, description: string): void { void act("card-update", { cardId, description }); }
+export function moveCardAction(cardId: string, toColumnId: string, toIndex?: number): void {
+  void act("card-move", { cardId, toColumnId, author: ME, ...(toIndex === undefined ? {} : { toIndex }) });
+}
+export function deleteCardAction(cardId: string): void { void act("card-delete", { cardId }); }
+export function restoreCardAction(card: Card, index: number): void { void act("card-restore", { card, index }); }
+export function assignCardAction(cardId: string, sessionId: string | null): void { void act("card-assign", { cardId, sessionId }); }
+export function addCommentAction(cardId: string, text: string): void { void act("card-comment", { cardId, author: ME, text }); }
+export function deleteCommentAction(cardId: string, commentId: string): void { void act("comment-delete", { cardId, commentId }); }
+
+/** The human's byline on comments and moves they make. Agents append with their
+ *  own persona name, so a thread reads clearly as a human<->agent exchange. */
+export const ME = "You";
 
 /** Send a card's task (with the board protocol footer) to its assigned live
  *  agent. Composed and delivered server-side — one code path whether the send
