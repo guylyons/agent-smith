@@ -9,7 +9,7 @@ import type { ChatMessage, QuestionOption, Question, PendingQuestion, BlockingTo
 import type { Subagent } from "../lib/subagents";
 import type { RepoInfo } from "../repo";
 
-type Result = { ok: boolean; error?: string; path?: string };
+type Result = { ok: boolean; error?: string; path?: string; url?: string };
 
 async function post(action: string, body: object): Promise<Result> {
   try {
@@ -79,10 +79,15 @@ export function sendPromptTo(sessionId: string, text: string): Promise<boolean> 
   return act("prompt", { sessionId, text });
 }
 
-/** Upload an image dropped/pasted into a chat. The server saves it to a temp
- *  file and returns the path, which the caller prepends to the prompt so the
- *  agent reads the image by path. Returns null (and toasts) on any failure. */
-export async function uploadImage(file: File): Promise<string | null> {
+/** A saved upload: `path` is the absolute file an agent can read, `url` is the
+ *  dashboard route the browser renders it from. */
+export type Upload = { path: string; url: string };
+
+/** Upload an image dropped/pasted into a chat or onto a ticket. The server saves
+ *  it to a temp file and returns both its path (prepended to a prompt so the
+ *  agent reads the image by path) and its URL (so the browser can show it).
+ *  Returns null (and toasts) on any failure. */
+export async function uploadImage(file: File): Promise<Upload | null> {
   try {
     const buf = await file.arrayBuffer();
     let bin = "";
@@ -91,8 +96,8 @@ export async function uploadImage(file: File): Promise<string | null> {
       bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
     }
     const r = await post("upload", { name: file.name || "image", type: file.type, dataBase64: btoa(bin) });
-    if (!r.ok || !r.path) { toast(r.error ?? "upload failed"); return null; }
-    return r.path;
+    if (!r.ok || !r.path || !r.url) { toast(r.error ?? "upload failed"); return null; }
+    return { path: r.path, url: r.url };
   } catch (e) {
     toast(`upload failed: ${String(e)}`);
     return null;

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSnapshot } from "./useSnapshot";
 import { Backdrop } from "./Backdrop";
 import { Crt } from "./Crt";
@@ -12,27 +12,77 @@ import { SettingsPanel } from "./SettingsPanel";
 import { Toaster } from "./Toaster";
 import { Notifier } from "./Notifier";
 import { onOpenAgent } from "./nav";
-import { applyTube, applyBg, loadSetting, loadBool, saveSetting } from "./settings";
+import { applyAllSettings, readDisplay, writeDisplay, loadBool, saveSetting, KEYS, type Display } from "./settings";
+import { diffUnread, loadUnread, saveUnread, type PrevStates } from "./unread";
 import type { AgentStatus } from "../schema";
 
 export function App() {
   const snap = useSnapshot();
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  // Open an agent's drawer when the notification center asks (a needs-you).
-  useEffect(() => onOpenAgent(setSelectedId), []);
   // null = closed; {} = blank; {task, cardId} = seeded from a card's "new agent for this card"
   const [spawnSeed, setSpawnSeed] = useState<{ task?: string; cardId?: string } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [alertsEnabled, setAlertsEnabled] = useState(false);
+  // Theme / CRT / background live here rather than in the Settings panel: the
+  // CRT overlay needs the mode to play its power-on sweep, and the panel is
+  // unmounted most of the time.
+  const [display, setDisplay] = useState<Display>(() => ({ theme: "default", crt: "on", bg: "night", bgImage: "", bgDim: 0 }));
   const recentFolders = [...new Set(snap.agents.map((a) => a.cwd).filter(Boolean))];
 
   // Apply saved display settings once on load.
   useEffect(() => {
-    applyTube(loadSetting("aw-tube", ""));
-    applyBg(loadSetting("aw-bg", "night"));
-    setAlertsEnabled(loadBool("aw-alerts"));
+    applyAllSettings();
+    setDisplay(readDisplay());
+    setAlertsEnabled(loadBool(KEYS.alerts));
   }, []);
+
+  const changeDisplay = useCallback((patch: Partial<Display>) => {
+    setDisplay((d) => { const next = { ...d, ...patch }; writeDisplay(next); return next; });
+  }, []);
+
+  // ---- "this agent has something for you to read" badges -------------------
+  // Flagged when an agent finishes or stops to ask (see diffUnread), cleared
+  // when you open its drawer. Persisted, so the badge survives a reload the way
+  // an unread message should.
+  const [unread, setUnread] = useState<Set<string>>(() => new Set());
+  const prevStates = useRef<PrevStates>(new Map());
+  const primed = useRef(false);
+
+  useEffect(() => { setUnread(loadUnread()); }, []);
+
+  useEffect(() => {
+    const { ids, next } = diffUnread(prevStates.current, snap.agents, primed.current);
+    prevStates.current = next;
+    if (snap.agents.length > 0) primed.current = true;
+    setUnread((cur) => {
+      // Never badge the agent whose drawer is already open — you're reading it.
+      const fresh = ids.filter((id) => id !== selectedId && !cur.has(id));
+      if (!fresh.length) return cur;
+      const nextSet = new Set([...cur, ...fresh]);
+      saveUnread(nextSet, snap.agents);
+      return nextSet;
+    });
+  }, [snap, selectedId]);
+
+  // Opening an agent is reading it.
+  const openAgent = useCallback((id: string) => {
+    setSelectedId(id);
+    setUnread((cur) => {
+      if (!cur.has(id)) return cur;
+      const next = new Set(cur);
+      next.delete(id);
+      saveUnread(next, snap.agents);
+      return next;
+    });
+  }, [snap.agents]);
+
+  // Open an agent's drawer when the notification center or quick-find asks. Goes
+  // through a ref so this subscribes once, while still calling the CURRENT
+  // openAgent — which also clears that agent's unread badge.
+  const openRef = useRef(openAgent);
+  openRef.current = openAgent;
+  useEffect(() => onOpenAgent((id: string) => openRef.current(id)), []);
 
   // Quick find: Cmd+P (mac) / Ctrl+P opens the command palette. Preventing the
   // default stops the browser's print dialog stealing the chord.
@@ -53,7 +103,7 @@ export function App() {
       Notification.requestPermission().catch(() => {});
     }
     setAlertsEnabled(next);
-    saveSetting("aw-alerts", next ? "1" : "0");
+    saveSetting(KEYS.alerts, next ? "1" : "0");
   }
 
   // Keep the last-known agent so the drawer doesn't slam shut (losing unsent
@@ -67,10 +117,10 @@ export function App() {
   return (
     <>
       <Backdrop />
-      <Crt />
+      <Crt mode={display.crt} />
       <button className="settings-btn" title="Settings" onClick={() => setSettingsOpen(true)}>⚙</button>
       <Header snap={snap} onNewAgent={() => setSpawnSeed({})} />
-      <Crew agents={snap.agents} board={snap.board} onOpen={setSelectedId} />
+      <Crew agents={snap.agents} board={snap.board} unread={unread} onOpen={openAgent} />
       <TheLine board={snap.board} agents={snap.agents} onSpawnForCard={(task, cardId) => setSpawnSeed({ task, cardId })} />
       {selected && selected.sessionId === selectedId && (
         <ConversationDrawer agent={selected} ended={ended} onClose={() => setSelectedId(null)} />
@@ -84,7 +134,15 @@ export function App() {
         />
       )}
       {paletteOpen && <CommandPalette snap={snap} onClose={() => setPaletteOpen(false)} />}
-      {settingsOpen && <SettingsPanel alertsEnabled={alertsEnabled} onToggleAlerts={toggleAlerts} onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && (
+        <SettingsPanel
+          display={display}
+          onChange={changeDisplay}
+          alertsEnabled={alertsEnabled}
+          onToggleAlerts={toggleAlerts}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
       <Toaster />
       <Notifier snap={snap} enabled={alertsEnabled} />
     </>

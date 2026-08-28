@@ -188,7 +188,7 @@ const C = (sid: string, cwd: string, mtime: number) => ({ derived: S({ sessionId
 test("isEphemeralCwd flags tmp/scratchpad dirs", () => {
   expect(isEphemeralCwd("/private/tmp/claude-501/x/scratchpad")).toBe(true);
   expect(isEphemeralCwd("/tmp/whatever")).toBe(true);
-  expect(isEphemeralCwd("/Users/glyons/github/mho-drupal")).toBe(false);
+  expect(isEphemeralCwd("/Users/guy/github/mho-drupal")).toBe(false);
 });
 
 test("chooseLive caps sessions per cwd at the running-process count (newest win)", () => {

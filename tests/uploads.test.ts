@@ -1,6 +1,6 @@
 // tests/uploads.test.ts
 import { test, expect, beforeEach } from "bun:test";
-import { saveUpload, uploadDir, MAX_UPLOAD_BYTES } from "../src/lib/uploads";
+import { saveUpload, uploadDir, uploadUrlFor, resolveUploadPath, MAX_UPLOAD_BYTES } from "../src/lib/uploads";
 import { rmSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 
@@ -52,4 +52,26 @@ test("saveUpload refuses an oversize image", () => {
 
 test("uploadDir honors AGENT_UPLOAD_DIR", () => {
   expect(uploadDir()).toBe(dir);
+});
+
+test("uploadUrlFor maps a saved path to its /uploads route", () => {
+  expect(uploadUrlFor("/tmp/aw-upload-test/abc-shot.png")).toBe("/uploads/abc-shot.png");
+});
+
+test("resolveUploadPath accepts a plain basename", () => {
+  expect(resolveUploadPath("abc-shot.png")).toBe(`${dir}/abc-shot.png`);
+});
+
+test("resolveUploadPath refuses anything that could escape the upload dir", () => {
+  for (const bad of ["../secret", "..%2Fsecret", "a/b.png", "..", ".hidden", "", "%2e%2e%2fetc%2fpasswd", "a b.png"]) {
+    expect(resolveUploadPath(bad)).toBeNull();
+  }
+});
+
+test("resolveUploadPath decodes a percent-encoded name back to its file", () => {
+  // uploadUrlFor encodes the basename; the route must decode to the same file.
+  const r = saveUpload("my shot.png", "image/png", b64("x"));
+  expect(r.ok).toBe(true);
+  if (!r.ok) return;
+  expect(resolveUploadPath(r.url.slice("/uploads/".length))).toBe(r.path);
 });

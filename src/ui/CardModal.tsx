@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from "react";
 import type { AgentStatus } from "../schema";
 import type { Board, Card } from "../lib/board";
 import { renameCard, setCardDescription, assignCard, addComment, deleteComment, cardTaskPrompt, commentNotifyText } from "../lib/board";
-import { sendCardTask, sendPromptTo } from "./actions";
+import { sendCardTask, sendPromptTo, uploadImage } from "./actions";
 import { ModalBackdrop } from "./Backdrop";
-import { renderMarkdown } from "./markdown";
+import { renderMarkdown, imageSrc } from "./markdown";
+import { imagesIn, imageMarkdown, appendImage, removeImage } from "./cardImages";
 import { toast } from "./toast";
 
 type Mutate = (fn: (b: Board) => Board) => void;
@@ -13,9 +14,37 @@ type Mutate = (fn: (b: Board) => Board) => void;
 // their own persona name, so a thread reads clearly as a human↔agent exchange.
 const ME = "You";
 
+// Which field a dropped/pasted image lands in. Drops anywhere on the modal go to
+// whichever field the user last touched, defaulting to the comment box — the
+// common case is "here's a screenshot of the bug" on an existing ticket.
+type Target = "desc" | "comment";
+
+// A ticket's images are just markdown in the card's own text (see cardImages.ts),
+// so attaching one is: upload, then append the token to that field's draft.
+function useImageAttach() {
+  const [busy, setBusy] = useState(false);
+
+  /** Upload every image in `files`, in order. Non-images are ignored; a failed
+   *  upload is dropped (uploadImage has already said why). */
+  async function upload(files: Iterable<File>): Promise<{ name: string; path: string }[]> {
+    const images = [...files].filter((f) => f.type.startsWith("image/"));
+    if (!images.length) return [];
+    setBusy(true);
+    const ups = await Promise.all(images.map(async (f) => {
+      const up = await uploadImage(f);
+      return up ? { name: f.name || "image", path: up.path } : null;
+    }));
+    setBusy(false);
+    return ups.filter((u): u is { name: string; path: string } => u !== null);
+  }
+
+  return { busy, upload };
+}
+
 // A Trello-style detail view for one card, over a dimmed backdrop. Gives a
 // single card room to breathe: editable title + description, an agent
-// assignee, and a comment thread. Backdrop click or Esc closes it.
+// assignee, a comment thread, and images you can paste, drop, or pick.
+// Backdrop click or Esc closes it.
 export function CardModal({
   board, card, columnName, agents, mutate, onSpawnForCard, onClose,
 }: {
@@ -27,6 +56,59 @@ export function CardModal({
   // and labelled so the card still shows who had it.
   const assigned = card.assignee;
   const assignedIsLive = !!assigned && agents.some((a) => a.sessionId === assigned.id);
+
+  // Both editable texts live here rather than in the fields, so an image dropped
+  // anywhere on the modal can be appended to whichever one is active.
+  const [desc, setDesc] = useState(card.description ?? "");
+  const [editingDesc, setEditingDesc] = useState(false);
+  const [comment, setComment] = useState("");
+  // A comment's images are held aside until POST rather than pasted into the
+  // draft as markdown: an upload path is long enough to bury the sentence you're
+  // writing. The description is the opposite case — there the markdown IS the
+  // saved content, so it lives in the text.
+  const [commentImgs, setCommentImgs] = useState<{ name: string; path: string }[]>([]);
+  const [target, setTarget] = useState<Target>("comment");
+  const [dragOver, setDragOver] = useState(false);
+  const { busy: uploading, upload } = useImageAttach();
+  const commentRef = useRef<HTMLTextAreaElement>(null);
+
+  // A live snapshot echo must never yank the description out from under the
+  // cursor, so only re-sync it while the field is idle.
+  useEffect(() => { if (!editingDesc) setDesc(card.description ?? ""); }, [card.description, editingDesc]);
+
+  function commitDesc(next: string) {
+    setDesc(next);
+    if (next !== (card.description ?? "")) mutate((b) => setCardDescription(b, card.id, next));
+  }
+
+  // Attach images to `to`, or to whichever field was last touched.
+  async function attach(files: Iterable<File>, to: Target = target) {
+    const ups = await upload(files);
+    if (!ups.length) return;
+    if (to === "comment") {
+      setCommentImgs((list) => [...list, ...ups]);
+      commentRef.current?.focus();
+      return;
+    }
+    const block = ups.map((u) => imageMarkdown(u.name, u.path)).join("\n");
+    // While the description is open for editing, the draft is the truth and its
+    // blur will commit it; from the resting view there's no blur coming, so the
+    // append has to save itself.
+    const next = appendImage(desc, block);
+    if (editingDesc) setDesc(next); else commitDesc(next);
+  }
+
+  // Paste only intercepts when the clipboard actually carries an image, so
+  // ordinary text paste is untouched.
+  function pasteInto(to: Target) {
+    return (e: ClipboardEvent) => {
+      const files = e.clipboardData?.files;
+      if (files?.length && [...files].some((f) => f.type.startsWith("image/"))) {
+        e.preventDefault();
+        void attach(files, to);
+      }
+    };
+  }
 
   // Send the card's task to the assigned live agent. The server composes the
   // prompt (task + board protocol footer), types it into the session, and drops
@@ -58,6 +140,20 @@ export function CardModal({
     }
   }
 
+  // What POST actually sends: the typed note, then each attached image on its
+  // own line. Either half alone is a valid comment — a screenshot with no words
+  // is often the whole point.
+  const commentBody = [comment.trim(), ...commentImgs.map((i) => imageMarkdown(i.name, i.path))]
+    .filter(Boolean).join("\n\n");
+
+  function post() {
+    if (!commentBody) return;
+    postComment(commentBody);
+    setComment("");
+    setCommentImgs([]);
+    commentRef.current?.focus();
+  }
+
   // Spawn a fresh agent seeded with this card's task (persona/model/worktree
   // chosen in the New Agent modal). Closes the card so the modal is unobstructed.
   function spawnForCard() {
@@ -76,7 +172,16 @@ export function CardModal({
 
   return (
     <ModalBackdrop onClose={onClose}>
-      <div className="win cardmodal">
+      <div
+        className={`win cardmodal${dragOver ? " drag-over" : ""}`}
+        onDragOver={(e: DragEvent) => { if (e.dataTransfer?.types.includes("Files")) { e.preventDefault(); setDragOver(true); } }}
+        onDragLeave={(e: DragEvent) => { if (e.currentTarget === e.target) setDragOver(false); }}
+        onDrop={(e: DragEvent) => {
+          const files = e.dataTransfer?.files;
+          if (files?.length) { e.preventDefault(); void attach(files); }
+          setDragOver(false);
+        }}
+      >
         <div className="cardmodal-head">
           <span className="pix cardmodal-crumb">IN {columnName || "—"}</span>
           <button className="cardmodal-x" title="Close" onClick={onClose}>✕</button>
@@ -127,10 +232,44 @@ export function CardModal({
 
           <div className="cardmodal-row">
             <label className="pix cardmodal-label">DESCRIPTION</label>
-            <DescriptionField
-              value={card.description ?? ""}
-              onCommit={(v) => mutate((b) => setCardDescription(b, card.id, v))}
-            />
+            {/* Read first, edit on click. An attached image is a markdown token in
+                this very text, and a screenshot's file path is long enough to bury
+                the prose — so the resting state renders it, and the raw source only
+                appears while you're actually typing in it. */}
+            {editingDesc ? (
+              <>
+                <textarea
+                  className="cardmodal-desc"
+                  autoFocus
+                  value={desc}
+                  placeholder="Add a fuller description of this task…  (paste or drop an image)"
+                  onFocus={() => setTarget("desc")}
+                  onChange={(e) => setDesc(e.target.value)}
+                  onPaste={pasteInto("desc")}
+                  onBlur={() => { setEditingDesc(false); commitDesc(desc); }}
+                />
+                <ImageStrip
+                  images={imagesIn(desc)}
+                  onRemove={(token) => setDesc((t) => removeImage(t, token))}
+                />
+              </>
+            ) : (
+              <div
+                className={`cardmodal-descview${desc.trim() ? "" : " is-empty"}`}
+                role="button"
+                tabIndex={0}
+                title="Click to edit"
+                onClick={() => { setEditingDesc(true); setTarget("desc"); }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") { e.preventDefault(); setEditingDesc(true); setTarget("desc"); }
+                }}
+              >
+                {desc.trim()
+                  ? renderMarkdown(desc)
+                  : "Add a fuller description of this task…  (paste or drop an image)"}
+              </div>
+            )}
+            <AttachButton busy={uploading} onFiles={(f) => void attach(f, "desc")} />
           </div>
 
           <div className="cardmodal-row">
@@ -152,11 +291,78 @@ export function CardModal({
               ))}
               {!comments.length && <p className="cardmodal-empty">No comments yet.</p>}
             </div>
-            <CommentComposer onPost={postComment} />
+
+            <div className="comment-compose">
+              <textarea
+                ref={commentRef}
+                className="comment-input"
+                value={comment}
+                placeholder="Write a comment…  (⌘↵ to post · paste or drop an image)"
+                onFocus={() => setTarget("comment")}
+                onChange={(e) => setComment(e.target.value)}
+                onPaste={pasteInto("comment")}
+                onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); post(); } }}
+              />
+              <ImageStrip
+                images={commentImgs.map((i) => ({ token: i.path, alt: i.name, src: i.path }))}
+                onRemove={(path) => setCommentImgs((list) => list.filter((i) => i.path !== path))}
+              />
+              <div className="comment-actions">
+                <AttachButton busy={uploading} onFiles={(f) => void attach(f, "comment")} />
+                <button className="pix comment-post" disabled={!commentBody} onClick={post}>POST</button>
+              </div>
+            </div>
           </div>
         </div>
+        {dragOver && <div className="cardmodal-droplabel pix">DROP IMAGE TO ATTACH</div>}
       </div>
     </ModalBackdrop>
+  );
+}
+
+// Thumbnails of the images currently in a field's text, each removable. Direct
+// manipulation, so nobody has to hand-edit a markdown token to drop a screenshot.
+function ImageStrip({ images, onRemove }: { images: { token: string; alt: string; src: string }[]; onRemove: (token: string) => void }) {
+  if (!images.length) return null;
+  return (
+    <div className="card-imgs">
+      {images.map((img, i) => {
+        const src = imageSrc(img.src);
+        return (
+          <span key={`${img.token}-${i}`} className="card-img" title={img.alt || img.src}>
+            {src
+              ? <a href={src} target="_blank" rel="noreferrer"><img src={src} alt={img.alt || "attachment"} loading="lazy" /></a>
+              : <span className="card-img-missing">🖼</span>}
+            <button className="card-img-x" title="Remove this image" aria-label={`Remove ${img.alt || "image"}`}
+              onClick={() => onRemove(img.token)}>✕</button>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+// A real file picker, so images can be attached without a drag or a clipboard —
+// and so the whole feature is reachable from the keyboard.
+function AttachButton({ busy, onFiles }: { busy: boolean; onFiles: (files: FileList) => void }) {
+  const ref = useRef<HTMLInputElement>(null);
+  return (
+    <>
+      <button className="deskbtn card-attach" disabled={busy} onClick={() => ref.current?.click()}>
+        {busy ? "UPLOADING…" : "📎 ATTACH IMAGE"}
+      </button>
+      <input
+        ref={ref}
+        type="file"
+        accept="image/png,image/jpeg,image/gif,image/webp"
+        multiple
+        hidden
+        onChange={(e) => {
+          if (e.target.files?.length) onFiles(e.target.files);
+          e.target.value = ""; // so picking the same file twice fires again
+        }}
+      />
+    </>
   );
 }
 
@@ -179,53 +385,6 @@ function TitleField({ value, onCommit }: { value: string; onCommit: (v: string) 
         if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
       }}
     />
-  );
-}
-
-// Multi-line description; Enter inserts a newline, commit on blur.
-function DescriptionField({ value, onCommit }: { value: string; onCommit: (v: string) => void }) {
-  const [draft, setDraft] = useState(value);
-  const [editing, setEditing] = useState(false);
-  useEffect(() => { if (!editing) setDraft(value); }, [value, editing]);
-
-  return (
-    <textarea
-      className="cardmodal-desc"
-      value={editing ? draft : value}
-      placeholder="Add a fuller description of this task…"
-      onFocus={() => setEditing(true)}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={() => { setEditing(false); if (draft !== value) onCommit(draft); }}
-    />
-  );
-}
-
-// The add-comment box. Cmd/Ctrl+Enter posts (plain Enter keeps a newline, since
-// comments can be multi-line); the button posts too. Clears on post.
-function CommentComposer({ onPost }: { onPost: (text: string) => void }) {
-  const [text, setText] = useState("");
-  const ref = useRef<HTMLTextAreaElement>(null);
-
-  function post() {
-    const body = text.trim();
-    if (!body) return;
-    onPost(body);
-    setText("");
-    ref.current?.focus();
-  }
-
-  return (
-    <div className="comment-compose">
-      <textarea
-        ref={ref}
-        className="comment-input"
-        value={text}
-        placeholder="Write a comment…  (⌘↵ to post)"
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); post(); } }}
-      />
-      <button className="pix comment-post" disabled={!text.trim()} onClick={post}>POST</button>
-    </div>
   );
 }
 

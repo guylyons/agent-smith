@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 // text rather than throwing.
 //
 // Supported:
+//  - images: ![alt](src) — a pasted screenshot on a ticket or in chat
 //  - fenced code blocks: ```lang\n...\n```
 //  - inline `code`
 //  - **bold** and *italic*
@@ -19,17 +20,50 @@ function nextKey(): string {
   return `md${keySeed}`;
 }
 
-/** Render inline markdown (bold/italic/code) within a single line of text. */
+/**
+ * Resolve a markdown image `src` to something the browser may actually load,
+ * or null to fall back to the alt text.
+ *
+ * Images pasted onto a ticket are saved to the upload dir and referenced by
+ * their ABSOLUTE FILE PATH, because `.line.json` is read by agents and a path is
+ * what an agent can open. A browser can't load that path, so it is mapped here
+ * to the dashboard's /uploads route (basename only — the server refuses
+ * anything else). Everything that isn't an http(s) URL or a local path is
+ * refused, so a `javascript:` or `data:` src can never reach an <img>.
+ */
+export function imageSrc(raw: string): string | null {
+  let src = raw.trim();
+  if (!src) return null;
+  if (src.startsWith("/uploads/")) return src;
+  if (/^https?:\/\//i.test(src)) return src;
+  if (src.startsWith("file://")) src = src.slice("file://".length);
+  if (!src.startsWith("/")) return null;
+  const base = src.split("/").pop();
+  return base ? "/uploads/" + encodeURIComponent(base) : null;
+}
+
+/** Render inline markdown (image/bold/italic/code) within a single line of text. */
 function renderInline(text: string): ReactNode[] {
   const out: ReactNode[] = [];
-  // Matches, in priority order: inline code, bold (**x** or __x__), italic (*x* or _x_)
-  const re = /(`[^`]+`)|(\*\*[^*]+\*\*)|(__[^_]+__)|(\*[^*\s][^*]*\*)|(_[^_\s][^_]*_)/g;
+  // Matches, in priority order: image, inline code, bold (**x** or __x__), italic (*x* or _x_)
+  const re = /(!\[[^\]]*\]\([^)]*\))|(`[^`]+`)|(\*\*[^*]+\*\*)|(__[^_]+__)|(\*[^*\s][^*]*\*)|(_[^_\s][^_]*_)/g;
   let last = 0;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text))) {
     if (m.index > last) out.push(text.slice(last, m.index));
     const chunk = m[0];
-    if (chunk.startsWith("`")) {
+    if (chunk.startsWith("![")) {
+      const cut = chunk.indexOf("](");
+      const alt = chunk.slice(2, cut);
+      const src = imageSrc(chunk.slice(cut + 2, -1));
+      // An unloadable src degrades to its alt text rather than a broken image.
+      if (!src) out.push(alt || chunk);
+      else out.push(
+        <a key={nextKey()} className="md-img-link" href={src} target="_blank" rel="noreferrer" title={alt || "open full size"}>
+          <img className="md-img" src={src} alt={alt || "attached image"} loading="lazy" />
+        </a>,
+      );
+    } else if (chunk.startsWith("`")) {
       out.push(<code key={nextKey()}>{chunk.slice(1, -1)}</code>);
     } else if (chunk.startsWith("**") || chunk.startsWith("__")) {
       out.push(<strong key={nextKey()}>{renderInline(chunk.slice(2, -2))}</strong>);

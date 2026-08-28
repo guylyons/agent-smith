@@ -1,3 +1,17 @@
+  /* ---- design tokens -------------------------------------------------------
+     Every theme is these same names with different values (see the [data-theme]
+     blocks at the end of this file), so a component never hard-codes a colour,
+     a radius or a border. The palette below is the DEFAULT theme: the 16-bit
+     workshop the app shipped with.
+
+       --night/box/box-lo   page ground, panel, sunken panel
+       --bevel/bone/dim     panel edge, primary text, secondary text
+       --gold/leaf/clay     accent, success, danger
+       --on-*               text that sits ON one of those fills
+       --win-*              the panel's own border/shadow recipe
+       --radius(-sm)        0 for the pixel themes, real corners for Material
+       --scrim/--scrim-a    the theme's wash over the art background
+  */
   :root{
     --night:#0d1424;
     --box:#243059;
@@ -8,11 +22,44 @@
     --gold:#f2b134;
     --leaf:#4fbf6a;
     --clay:#e0533d;
+    --on-accent:#1a1204;
+    --on-ok:#08130c;
+    --on-danger:#fff;
+    --on-bevel:#0b1020;
     --px:4px;
+    --radius:0;
+    --radius-sm:0;
+    --track:0;                 /* extra letter-spacing on labels */
+    --glow:none;               /* phosphor text-shadow, used by NOSTROMO */
+    --rule:var(--px) solid var(--bone);
+    --code:var(--mono);
+    --scrim:transparent;
+    --scrim-a:0;
+    --crt-strength:1;          /* per-theme multiplier on the whole CRT stack */
     /* One font for everything: Source Code Pro, with monospace fallbacks. */
     --mono:"Source Code Pro",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --display:var(--mono);     /* the face for titles; themes may differ */
+    /* The panel recipe. Themes swap the whole thing — Material trades the
+       chunky bevel for elevation, NOSTROMO for a thin glowing edge. */
+    --win-border:var(--px) solid var(--bone);
+    --win-shadow:
+      inset 0 0 0 var(--px) var(--bevel),
+      inset 0 var(--px) 0 calc(var(--px)*2) rgba(255,255,255,.10),
+      0 var(--px) 0 0 rgba(0,0,0,.55);
+    --win-shadow-hover:
+      inset 0 0 0 var(--px) var(--gold),
+      inset 0 var(--px) 0 calc(var(--px)*2) rgba(255,255,255,.10),
+      0 var(--px) 0 0 rgba(0,0,0,.55);
+    --win-shadow-send:
+      inset 0 0 0 var(--px) var(--leaf),
+      inset 0 var(--px) 0 calc(var(--px)*2) rgba(255,255,255,.10),
+      0 var(--px) 0 0 rgba(0,0,0,.55),
+      0 0 12px 2px rgba(79,191,106,.7);
   }
   *{box-sizing:border-box;margin:0;padding:0}
+  /* Corners are a theme decision, so every control asks the token rather than
+     each rule repeating a radius. 0 in the pixel themes; real corners in Material. */
+  button,input,textarea,select{border-radius:var(--radius-sm)}
   html,body{background:var(--night);color:var(--bone)}
   body{
     font-family:var(--mono);
@@ -25,15 +72,44 @@
   }
   body::after{content:none}
 
-  /* ---- CRT stack ---- */
-  .crt{position:fixed;inset:0;pointer-events:none;z-index:90}
+  /* ---- CRT stack -----------------------------------------------------------
+     A layered fake of a real tube, drawn over the page. Strength comes from
+     <html data-crt="off|soft|on|max"> and is multiplied by the theme's
+     --crt-strength, so a light theme can keep the texture without going muddy.
+     The whole stack is inert: pointer-events:none, aria-hidden, no layout.
+
+     Order matters — raster first, glass last:
+       scan    the raster lines
+       grille  the RGB triad of an aperture-grille tube
+       bloom   phosphor halation, brightening what's under it
+       glow    tube glow at the top, falloff at the corners
+       bezel   the curved tube FACE: rounded, with a dark rolled edge
+       glare   one soft diagonal reflection in the glass
+       hum     the slow un-synced brightness bar
+       power   the switch-on sweep (played once, on change)
+  */
+  /* display:contents on the wrapper is deliberate: an opacity on a PARENT would
+     make the layers a blend group, so their multiply/screen would mix with each
+     other instead of with the page underneath — the whole effect would vanish.
+     The intensity therefore rides on each layer, where it composites correctly. */
+  .crt-stack{display:contents}
+  .crt{
+    position:fixed;inset:0;pointer-events:none;z-index:90;
+    opacity:calc(var(--crt-a,1) * var(--crt-strength));
+  }
+
+  /* Per-mode intensity. One number drives the stack, so "a bit less CRT" is a
+     real dial rather than a pile of per-layer overrides. */
+  :root[data-crt="soft"]{--crt-a:.45}
+  :root[data-crt="on"]  {--crt-a:1}
+  :root[data-crt="max"] {--crt-a:1.35}
 
   /* horizontal scanlines — soft-edged so they don't moiré, and sized
      to land on whole device pixels at 1x and 2x */
   .crt-scan{
     background-image:linear-gradient(to bottom,
-      rgba(0,0,0,.44) 0%,
-      rgba(0,0,0,.44) 34%,
+      rgba(0,0,0,.42) 0%,
+      rgba(0,0,0,.42) 34%,
       rgba(0,0,0,0)   62%,
       rgba(0,0,0,0)   100%);
     background-size:100% 3px;
@@ -46,34 +122,138 @@
   /* aperture grille — the vertical triad is what actually reads as CRT */
   .crt-grille{
     background-image:repeating-linear-gradient(90deg,
-      rgba(255,40,90,.07)  0 1px,
-      rgba(40,255,140,.07) 1px 2px,
-      rgba(70,130,255,.07) 2px 3px);
+      rgba(255,40,90,.075)  0 1px,
+      rgba(40,255,140,.075) 1px 2px,
+      rgba(70,130,255,.075) 2px 3px);
+    mix-blend-mode:screen;
+  }
+
+  /* phosphor bloom — a wide, very faint lift so bright UI seems to bleed into
+     the glass. Screen blend, so it can only ever brighten. */
+  .crt-bloom{
+    background:
+      radial-gradient(120% 70% at 50% 30%, rgba(190,215,255,.055), transparent 70%),
+      radial-gradient(70% 45% at 50% 92%, rgba(190,215,255,.035), transparent 72%);
     mix-blend-mode:screen;
   }
 
   /* tube glow + corner falloff */
   .crt-glow{
     background:
-      radial-gradient(90% 55% at 50% -4%, rgba(150,185,255,.09), transparent 62%),
-      radial-gradient(125% 105% at 50% 50%, transparent 54%, rgba(0,0,0,.6) 100%);
+      radial-gradient(90% 55% at 50% -4%, rgba(150,185,255,.10), transparent 62%),
+      radial-gradient(125% 105% at 50% 50%, transparent 52%, rgba(0,0,0,.55) 100%);
+  }
+
+  /* the tube FACE. An inset shadow on a rounded rect is what sells curvature:
+     the picture appears to bend away at the edges, and the corners go black the
+     way a real mask does. The 2vmin outer ring is the rolled edge of the glass. */
+  .crt-bezel{
+    border-radius:2.2vmin;
+    box-shadow:
+      inset 0 0 6vmin 2vmin rgba(0,0,0,.30),
+      inset 0 0 1.2vmin .3vmin rgba(0,0,0,.55),
+      inset 0 0 0 .16vmin rgba(190,215,255,.10);
+  }
+  /* Fill the four corners the rounded face leaves behind with the page ground,
+     so the picture ends at a curve rather than at the window's square edge. A
+     huge outer spread paints everything OUTSIDE the rounded rect. */
+  .crt-bezel::after{
+    content:"";position:absolute;inset:0;
+    border-radius:2.2vmin;
+    box-shadow:0 0 0 100vmax var(--night);
+  }
+
+  /* a single soft reflection across the glass, top-left to centre */
+  .crt-glare{
+    background:linear-gradient(148deg,
+      rgba(255,255,255,.055) 0%,
+      rgba(255,255,255,.018) 22%,
+      transparent 44%);
+    mix-blend-mode:screen;
   }
 
   /* slow hum bar drifting down the tube */
   .crt-hum{
     top:-24vh;left:0;right:0;bottom:auto;height:24vh;
     background:linear-gradient(to bottom,
-      transparent 0%, rgba(200,220,255,.05) 42%,
-      rgba(200,220,255,.05) 58%, transparent 100%);
+      transparent 0%, rgba(200,220,255,.055) 42%,
+      rgba(200,220,255,.055) 58%, transparent 100%);
     mix-blend-mode:screen;
     animation:hum 11s linear infinite;
   }
   @keyframes hum{to{transform:translateY(124vh)}}
 
-  html.crt-off  .crt{display:none}
-  html.crt-soft .crt-grille,
-  html.crt-soft .crt-hum{display:none}
-  html.crt-soft .crt-scan{opacity:.5}
+  /* switch-on sweep: the picture blooms out of a bright horizontal line, the
+     way a tube strikes. Rendered only for the ~0.9s it plays. */
+  .crt-power{
+    background:linear-gradient(to bottom,
+      transparent 0 calc(50% - 1px),
+      rgba(220,235,255,.9) calc(50% - 1px) calc(50% + 1px),
+      transparent calc(50% + 1px) 100%),
+      rgba(0,0,0,.55);
+    mix-blend-mode:screen;
+    animation:crt-power .9s cubic-bezier(.2,.8,.2,1) forwards;
+  }
+  @keyframes crt-power{
+    0%  {transform:scaleY(.004);opacity:1}
+    45% {transform:scaleY(.05);opacity:1}
+    100%{transform:scaleY(1);opacity:0}
+  }
+
+  /* MAX is a tired tube, not just a louder one. Opacity alone can't carry it —
+     the stack is already at 1 on CRT — so each layer is genuinely stronger:
+     deeper raster, a triad you can see, a harder corner falloff. */
+  :root[data-crt="max"] .crt-scan{
+    background-image:linear-gradient(to bottom,
+      rgba(0,0,0,.62) 0%,
+      rgba(0,0,0,.62) 38%,
+      rgba(0,0,0,0)   66%,
+      rgba(0,0,0,0)   100%);
+  }
+  :root[data-crt="max"] .crt-grille{
+    background-image:repeating-linear-gradient(90deg,
+      rgba(255,40,90,.13)  0 1px,
+      rgba(40,255,140,.13) 1px 2px,
+      rgba(70,130,255,.13) 2px 3px);
+  }
+  :root[data-crt="max"] .crt-glow{
+    background:
+      radial-gradient(90% 55% at 50% -4%, rgba(150,185,255,.14), transparent 62%),
+      radial-gradient(115% 95% at 50% 50%, transparent 42%, rgba(0,0,0,.78) 100%);
+  }
+  :root[data-crt="max"] .crt-bezel{
+    border-radius:3.4vmin;
+    box-shadow:
+      inset 0 0 9vmin 3vmin rgba(0,0,0,.42),
+      inset 0 0 1.6vmin .4vmin rgba(0,0,0,.65),
+      inset 0 0 0 .2vmin rgba(190,215,255,.14);
+  }
+  :root[data-crt="max"] .crt-bezel::after{border-radius:3.4vmin}
+
+  /* ...plus the things a healthy tube does NOT do: a faint mains flicker, and a
+     touch of chromatic fringing on the text, as if the convergence is off. */
+  :root[data-crt="max"] .crt-scan{animation:crt-flicker 4.6s steps(24) infinite}
+  @keyframes crt-flicker{
+    0%,100%{opacity:1}
+    52%{opacity:.86}
+    54%{opacity:1}
+    77%{opacity:.92}
+  }
+  :root[data-crt="max"] body{
+    text-shadow:.4px 0 0 rgba(255,60,90,.22), -.4px 0 0 rgba(60,150,255,.22);
+  }
+
+  /* SOFT is the quiet setting: raster and glass only — no grille, no roll bar,
+     nothing that moves. */
+  :root[data-crt="soft"] .crt-grille,
+  :root[data-crt="soft"] .crt-hum,
+  :root[data-crt="soft"] .crt-glare{display:none}
+
+  /* Motion is decoration here; strip every moving part but keep the texture. */
+  @media (prefers-reduced-motion:reduce){
+    .crt-hum,.crt-power{display:none}
+    :root[data-crt="max"] .crt-scan{animation:none}
+  }
 
   /* ---- tube control ---- */
   .tube{
@@ -88,16 +268,14 @@
   .tube:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
   /* Was the Press Start 2P pixel face; now Source Code Pro like everything else.
      Weight + tracking keep these reading as labels/headings. */
-  .pix{font-family:var(--mono);font-weight:600;letter-spacing:.3px;line-height:1.5}
+  .pix{font-family:var(--mono);font-weight:600;letter-spacing:calc(.3px + var(--track));line-height:1.5}
 
   /* ---- SNES window chrome ---- */
   .win{
     background:var(--box);
-    border:var(--px) solid var(--bone);
-    box-shadow:
-      inset 0 0 0 var(--px) var(--bevel),
-      inset 0 var(--px) 0 calc(var(--px)*2) rgba(255,255,255,.10),
-      0 var(--px) 0 0 rgba(0,0,0,.55);
+    border:var(--win-border);
+    border-radius:var(--radius);
+    box-shadow:var(--win-shadow);
     position:relative;
   }
 
@@ -111,7 +289,7 @@
     color:var(--bone);cursor:pointer;padding:5px 8px;font-size:15px;line-height:1}
   .notif-bell:hover{background:var(--box-lo)}
   .notif-bell.has-unread{border-color:var(--gold)}
-  .notif-badge{position:absolute;top:-7px;right:-7px;background:var(--clay);color:#fff;
+  .notif-badge{position:absolute;top:-7px;right:-7px;background:var(--clay);color:var(--on-danger);
     min-width:17px;height:17px;padding:0 4px;font-size:12px;font-weight:700;line-height:17px;text-align:center}
   .notif-scrim{position:fixed;inset:0;z-index:39}
   .notif-panel{position:absolute;top:34px;right:0;z-index:41;width:340px;max-width:88vw;
@@ -158,7 +336,7 @@
   .usage.hp-low  .usage-cell.on{background:var(--clay);animation:blink 1.1s steps(2) infinite}
   .usage-text{font-size:11px;color:var(--dim);margin-top:9px;white-space:nowrap}
   @media (prefers-reduced-motion:reduce){.usage-cell.on{animation:none}}
-  .title{font-size:20px;letter-spacing:1px;text-shadow:0 var(--px) 0 #000}
+  .title{font-family:var(--display);font-size:20px;letter-spacing:calc(1px + var(--track));text-shadow:0 var(--px) 0 #000}
   .sub{font-size:12px;color:var(--dim);margin-top:10px}
   .statline{display:flex;flex-wrap:wrap;gap:16px;margin-top:14px;font-size:12px}
   .statline b{color:var(--gold)}
@@ -172,7 +350,10 @@
     grid-template-columns:repeat(auto-fit,minmax(300px,1fr));
   }
   .desk{padding:14px;display:flex;gap:14px;align-items:flex-start}
-  .desk.is-idle{opacity:.55}
+  /* An idle desk fades its CONTENT, never the panel: fading the whole card makes
+     the surface translucent, which turns into a hole in the layout the moment
+     there's a background image behind it. */
+  .desk.is-idle>.sprite-wrap,.desk.is-idle>.who{opacity:.55}
   .sprite-wrap{position:relative;flex:0 0 auto;width:56px}
   .sprite{width:56px;height:84px;display:block;image-rendering:pixelated}
   .desk.is-working .sprite{animation:bob .5s steps(2) infinite}
@@ -204,8 +385,9 @@
   .state{display:flex;align-items:center;gap:7px;margin-top:10px;font-size:12px}
   .statefor{color:var(--dim)}
   /* a desk idle past the stale threshold: still present, visibly dormant */
-  .desk.is-stale{opacity:.55}
-  .desk.is-stale:hover,.desk.is-stale:focus-visible{opacity:1}
+  .desk.is-stale>.sprite-wrap,.desk.is-stale>.who{opacity:.4}
+  .desk.is-stale:hover>.sprite-wrap,.desk.is-stale:hover>.who,
+  .desk.is-stale:focus-visible>.sprite-wrap,.desk.is-stale:focus-visible>.who{opacity:1}
   .lamp{width:10px;height:10px;flex:0 0 auto}
   .lamp.working{background:var(--gold);animation:blink 1.1s steps(2) infinite}
   .lamp.waiting{background:var(--clay)}
@@ -262,7 +444,7 @@
   .card-meta{display:flex;align-items:center;gap:6px;padding:0 4px;flex-wrap:wrap}
   .card-assignee{
     font-family:var(--mono);font-size:11px;letter-spacing:.5px;
-    color:var(--night);background:var(--gold);padding:3px 4px;line-height:1;
+    color:var(--on-accent);background:var(--gold);padding:3px 4px;line-height:1;
   }
   .card-flag{font-size:12px;color:var(--dim);line-height:1}
   /* the assignee's agent sprite, shrunk to a small avatar on the card face */
@@ -298,31 +480,20 @@
 
 /* interactive desks: click to focus its Ghostty terminal */
 .desk{position:relative;cursor:pointer}
-.desk:hover{box-shadow:inset 0 0 0 var(--px) var(--gold),inset 0 var(--px) 0 calc(var(--px)*2) rgba(255,255,255,.10),0 var(--px) 0 0 rgba(0,0,0,.55)}
+.desk:hover{box-shadow:var(--win-shadow-hover)}
 .desk:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
 /* input-sent pulse: the card rings green, then fades back to its resting bevel.
    The 100% frame equals the base .win box-shadow (+ a spent glow) so the return
    to rest is seamless. Green wins over :hover's gold ring while it plays. */
 .desk.flash-send{animation:sendflash .7s ease-out}
 @keyframes sendflash{
-  0%{box-shadow:
-    inset 0 0 0 var(--px) var(--leaf),
-    inset 0 var(--px) 0 calc(var(--px)*2) rgba(255,255,255,.10),
-    0 var(--px) 0 0 rgba(0,0,0,.55),
-    0 0 12px 2px rgba(79,191,106,.7)}
-  100%{box-shadow:
-    inset 0 0 0 var(--px) var(--bevel),
-    inset 0 var(--px) 0 calc(var(--px)*2) rgba(255,255,255,.10),
-    0 var(--px) 0 0 rgba(0,0,0,.55),
-    0 0 0 0 rgba(79,191,106,0)}
+  0%{box-shadow:var(--win-shadow-send)}
+  100%{box-shadow:var(--win-shadow)}
 }
 /* Reduced motion strips all animation globally, so give a motionless card a
    plain green ring for the same brief hold instead of no feedback at all. */
 @media (prefers-reduced-motion:reduce){
-  .desk.flash-send{box-shadow:
-    inset 0 0 0 var(--px) var(--leaf),
-    inset 0 var(--px) 0 calc(var(--px)*2) rgba(255,255,255,.10),
-    0 var(--px) 0 0 rgba(0,0,0,.55)}
+  .desk.flash-send{box-shadow:var(--win-shadow-send)}
 }
 .desk-actions{position:absolute;top:6px;right:6px;display:flex;gap:5px;opacity:0;transition:opacity .1s;z-index:2}
 .desk:hover .desk-actions,.desk:focus-within .desk-actions{opacity:1}
@@ -336,7 +507,7 @@
 
 /* new agent */
 .newagent-btn{font-family:var(--mono);font-size:11px;letter-spacing:.5px;
-  background:var(--leaf);color:#08130c;border:2px solid var(--bone);padding:6px 9px;cursor:pointer}
+  background:var(--leaf);color:var(--on-ok);border:2px solid var(--bone);padding:6px 9px;cursor:pointer}
 .newagent-btn:hover{background:var(--gold)}
 .newagent{width:min(520px,92vw);max-height:90vh;overflow-y:auto;margin:8vh auto;padding:20px;display:flex;flex-direction:column;gap:9px}
 .newagent-title{font-size:14px;letter-spacing:1px;margin-bottom:6px}
@@ -344,8 +515,8 @@
 .newagent .reply-input{flex:0 0 auto}
 .newagent-task{resize:vertical;line-height:1.5;min-height:110px}
 .newagent-recent{display:flex;flex-wrap:wrap;gap:6px;margin-top:2px}
-.deskbtn.on{background:var(--bevel);color:#0b1020}
-.deskbtn.primary{background:var(--gold);color:#1a1204;border-color:var(--bone);font-family:var(--mono);font-size:12px;padding:9px 12px}
+.deskbtn.on{background:var(--bevel);color:var(--on-bevel)}
+.deskbtn.primary{background:var(--gold);color:var(--on-accent);border-color:var(--bone);font-family:var(--mono);font-size:12px;padding:9px 12px}
 .deskbtn.primary:hover:not(:disabled){background:var(--leaf)}
 .newagent-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
 .newagent-hint{font-size:11px;color:var(--dim);line-height:1.8;margin-top:10px}
@@ -359,7 +530,7 @@
 .settings-btn:hover{color:var(--gold)}
 .settings-btn:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
 .settings{width:min(420px,92vw);max-height:90vh;overflow-y:auto;margin:8vh auto;padding:0;display:flex;flex-direction:column}
-.settings-head{display:flex;align-items:center;justify-content:space-between;padding:14px;border-bottom:var(--px) solid var(--bone)}
+.settings-head{display:flex;align-items:center;justify-content:space-between;padding:14px;border-bottom:var(--rule)}
 .settings-title{font-size:14px;letter-spacing:1px}
 .settings-body{padding:16px;display:flex;flex-direction:column;gap:6px}
 .settings-label{font-size:11px;color:var(--gold);letter-spacing:.5px;margin-top:12px}
@@ -518,14 +689,14 @@ body{background:transparent}
 /* subagent count badge on a crew sprite */
 .crew-badge{
   position:absolute;bottom:-6px;right:-8px;
-  background:var(--bevel);color:#0b1020;font-size:12px;
+  background:var(--bevel);color:var(--on-bevel);font-size:12px;
   padding:2px 5px;border:2px solid var(--bone);line-height:1;
 }
 
 /* drawer tabs — raised, tactile buttons rather than flat segments. Each sits in
    its own bordered cap with a bottom bevel so it reads as pressable; the active
    tab looks pushed in (inset shadow + nudged down) and glows gold. */
-.drawer-tabs{display:flex;gap:6px;padding:8px 8px 0;border-bottom:var(--px) solid var(--bone)}
+.drawer-tabs{display:flex;gap:6px;padding:8px 8px 0;border-bottom:var(--rule)}
 .drawer-tabs .tab{
   flex:1;font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:.5px;
   background:var(--box-lo);color:var(--dim);
@@ -550,7 +721,7 @@ body{background:transparent}
 .info-hash{color:var(--leaf);flex:0 0 auto;font-family:ui-monospace,monospace}
 
 /* subagents strip in the conversation drawer */
-.subagents{border-bottom:var(--px) solid var(--bone);padding:10px 14px;display:flex;flex-direction:column;gap:7px;max-height:34%;overflow-y:auto}
+.subagents{border-bottom:var(--rule);padding:10px 14px;display:flex;flex-direction:column;gap:7px;max-height:34%;overflow-y:auto}
 .subagents-head{font-size:11px;letter-spacing:.5px;color:var(--dim)}
 .subagent{display:flex;align-items:center;gap:8px;font-size:13px}
 .subagent .lamp{flex:0 0 auto}
@@ -562,7 +733,7 @@ body{background:transparent}
 /* conversation drawer */
 .drawer-backdrop{position:fixed;inset:0;z-index:80;background:rgba(4,8,18,.55);display:flex;justify-content:flex-end}
 .drawer{width:min(560px,94vw);height:100%;display:flex;flex-direction:column;background:var(--box);padding:0;overflow:hidden}
-.drawer-head{display:flex;align-items:center;gap:12px;padding:14px;border-bottom:var(--px) solid var(--bone)}
+.drawer-head{display:flex;align-items:center;gap:12px;padding:14px;border-bottom:var(--rule)}
 .drawer-sprite{width:40px;flex:0 0 auto}
 .drawer-sprite .sprite{width:40px;height:60px}
 .drawer-id{flex:1;min-width:0}
@@ -582,7 +753,7 @@ body{background:transparent}
 .msg-tool .msg-text{font-size:13px;color:var(--dim)}
 .msg-tool .msg-text::before{content:"⚙ "}
 .msg-empty{color:var(--dim);font-size:13px;text-align:center;margin:auto}
-.drawer-foot{display:flex;gap:6px;padding:12px 14px;border-top:var(--px) solid var(--bone);align-items:flex-end}
+.drawer-foot{display:flex;gap:6px;padding:12px 14px;border-top:var(--rule);align-items:flex-end}
 .reply-textarea{resize:none;overflow-y:auto;line-height:1.5;min-height:34px;font-family:var(--mono)}
 /* image attachments dropped/pasted into the composer */
 .attach-row{display:flex;flex-wrap:wrap;gap:6px;padding:8px 14px 0}
@@ -610,7 +781,7 @@ body{background:transparent}
 .name-click:hover{color:var(--gold)}
 .name-input{font-size:13px;padding:3px 6px;max-width:200px}
 .deskbtn.danger{color:var(--clay);border-color:var(--clay)}
-.deskbtn.danger:hover{color:#fff;background:var(--clay)}
+.deskbtn.danger:hover{color:var(--on-danger);background:var(--clay)}
 .msg.is-pending{opacity:.55}
 .msg.is-pending .msg-text::after{content:" ⏳"}
 
@@ -621,11 +792,11 @@ body{background:transparent}
 .msg-text p:last-child,.comment-text p:last-child{margin-bottom:0}
 .msg-text strong,.comment-text strong{color:var(--gold);font-weight:700}
 .msg-text em,.comment-text em{font-style:italic}
-.msg-text code,.comment-text code{font-family:var(--mono);font-size:.92em;background:var(--box-lo);border:1px solid var(--bevel);padding:1px 4px;border-radius:2px;word-break:break-word}
+.msg-text code,.comment-text code{font-family:var(--code);font-size:.92em;background:var(--box-lo);border:1px solid var(--bevel);padding:1px 4px;border-radius:2px;word-break:break-word}
 .msg-text pre.md-code,.comment-text pre.md-code{
   background:var(--box-lo);border:2px solid var(--bevel);
   padding:8px 10px;margin:6px 0;overflow-x:auto;
-  font-family:var(--mono);font-size:13px;line-height:1.45;
+  font-family:var(--code);font-size:13px;line-height:1.45;
   white-space:pre;
 }
 .msg-text pre.md-code:last-child,.comment-text pre.md-code:last-child{margin-bottom:0}
@@ -641,7 +812,7 @@ body{background:transparent}
 
 /* toasts */
 .toaster{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:120;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}
-.toast{background:var(--clay);color:#fff;border:3px solid var(--bone);box-shadow:0 3px 0 rgba(0,0,0,.55);padding:9px 13px;font-size:12px;max-width:80vw}
+.toast{background:var(--clay);color:var(--on-danger);border:3px solid var(--bone);box-shadow:0 3px 0 rgba(0,0,0,.55);padding:9px 13px;font-size:12px;max-width:80vw}
 
 /* a11y: keyboard-focus outline for the "jump to terminal" button on a crew
    card, mirroring .desk:focus-visible so both the card and its button get a
@@ -662,7 +833,7 @@ body{background:transparent}
 
 /* card detail modal (THE LINE) — a roomy Trello-style view of one card */
 .cardmodal{width:min(680px,94vw);max-height:88vh;margin:6vh auto;display:flex;flex-direction:column;padding:0;overflow:hidden}
-.cardmodal-head{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:var(--px) solid var(--bone)}
+.cardmodal-head{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:var(--rule)}
 .cardmodal-crumb{flex:1;min-width:0;font-size:11px;letter-spacing:.5px;color:var(--gold);text-transform:uppercase}
 .cardmodal-x{background:transparent;border:none;color:var(--dim);cursor:pointer;font-size:14px;line-height:1;padding:2px 4px}
 .cardmodal-x:hover{color:var(--clay)}
@@ -685,7 +856,7 @@ body{background:transparent}
   cursor:pointer;font-size:11px;letter-spacing:.5px;padding:8px 10px;
   border:2px solid var(--bevel);background:var(--box-lo);color:var(--bone);
 }
-.cardmodal-send{background:var(--gold);color:#1a1204;border-color:var(--bone)}
+.cardmodal-send{background:var(--gold);color:var(--on-accent);border-color:var(--bone)}
 .cardmodal-send:hover:not(:disabled){background:var(--leaf)}
 .cardmodal-send:disabled{opacity:.4;cursor:not-allowed}
 .cardmodal-spawn{color:var(--dim);border-style:dashed}
@@ -715,7 +886,7 @@ body{background:transparent}
 .comment-input:focus{outline:none;border-color:var(--gold)}
 .comment-post{
   align-self:flex-end;cursor:pointer;font-size:11px;letter-spacing:.5px;
-  color:var(--night);background:var(--gold);border:2px solid var(--gold);padding:7px 12px;
+  color:var(--on-accent);background:var(--gold);border:2px solid var(--gold);padding:7px 12px;
 }
 .comment-post:hover:not(:disabled){filter:brightness(1.08)}
 .comment-post:disabled{opacity:.4;cursor:default}
@@ -728,7 +899,7 @@ body{background:transparent}
 /* ---- quick-find command palette (Cmd+P) ---- */
 .palette-backdrop{position:fixed;inset:0;z-index:90;background:rgba(4,8,18,.6);display:flex;justify-content:center;align-items:flex-start}
 .palette{width:min(620px,94vw);margin-top:12vh;display:flex;flex-direction:column;max-height:70vh;overflow:hidden}
-.palette-inputrow{display:flex;align-items:center;gap:9px;padding:12px 14px;border-bottom:var(--px) solid var(--bone)}
+.palette-inputrow{display:flex;align-items:center;gap:9px;padding:12px 14px;border-bottom:var(--rule)}
 .palette-prompt{color:var(--gold);font-size:16px;line-height:1}
 .palette-input{font-size:14px}
 .palette-list{flex:1;overflow-y:auto;padding:6px}
@@ -738,4 +909,273 @@ body{background:transparent}
 .palette-icon{flex:0 0 auto;width:18px;text-align:center;color:var(--dim)}
 .palette-title{flex:0 0 auto;font-family:var(--mono);font-size:13px;color:var(--bone);max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .palette-sub{flex:1;min-width:0;font-size:12px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.palette-foot{padding:8px 14px;border-top:var(--px) solid var(--bone);font-size:11px;color:var(--dim);letter-spacing:.5px}
+.palette-foot{padding:8px 14px;border-top:var(--rule);font-size:11px;color:var(--dim);letter-spacing:.5px}
+
+/* ---- background layers ----------------------------------------------------
+   Behind everything: the art background, then the THEME's wash, then the USER's
+   dim. Two separate washes on purpose — switching theme must not discard a dim
+   the user set, and dragging the dim slider must not undo the theme's wash. */
+.artbg-scrim,.artbg-dim{position:fixed;inset:0;z-index:-1;pointer-events:none}
+.artbg-scrim{background:var(--scrim);opacity:var(--scrim-a)}
+.artbg-dim{background:#000;opacity:var(--bg-dim,0)}
+
+/* MINE — the user's own uploaded image. --bg-image is set on <html> from the
+   saved /uploads URL; the art layer just shows it, cover-fit and centred. */
+:root[data-bg="custom"] .artbg{
+  background-image:var(--bg-image,none);
+  background-size:cover;
+  background-position:center;
+  background-repeat:no-repeat;
+}
+
+/* ---- images on a ticket ---------------------------------------------------
+   A pasted screenshot is markdown inside the card's own text, so it renders
+   through the same path as any other message image. */
+.md-img-link{display:inline-block;max-width:100%;line-height:0;margin:4px 0}
+.md-img{
+  display:block;max-width:100%;max-height:340px;width:auto;height:auto;
+  border:2px solid var(--bevel);border-radius:var(--radius-sm);background:var(--box-lo);
+}
+.md-img-link:hover .md-img,.md-img-link:focus-visible .md-img{border-color:var(--gold)}
+.md-img-link:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+
+/* thumbnails of the images in a field being edited, each removable — so an
+   attachment can be dropped without hand-editing a markdown token */
+.card-imgs{display:flex;flex-wrap:wrap;gap:8px}
+.card-img{position:relative;display:inline-flex;line-height:0}
+.card-img img{
+  width:76px;height:76px;object-fit:cover;display:block;
+  border:2px solid var(--bevel);border-radius:var(--radius-sm);background:var(--box-lo);
+}
+.card-img a:hover img,.card-img a:focus-visible img{border-color:var(--gold)}
+.card-img-missing{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:76px;height:76px;font-size:20px;line-height:1;color:var(--dim);
+  border:2px dashed var(--bevel);border-radius:var(--radius-sm);
+}
+.card-img-x{
+  position:absolute;top:-7px;right:-7px;
+  width:20px;height:20px;padding:0;line-height:1;font-size:11px;cursor:pointer;
+  background:var(--clay);color:var(--on-danger);border:2px solid var(--bone);border-radius:var(--radius-sm);
+}
+.card-img-x:hover{filter:brightness(1.15)}
+.card-img-x:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+.card-attach{align-self:flex-start;font-size:11px;letter-spacing:calc(.5px + var(--track))}
+.comment-actions{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.comment-actions .comment-post{align-self:auto}
+/* drop target: the whole card lights up, with a label so it's unmistakable */
+.cardmodal.drag-over{border-color:var(--gold);box-shadow:var(--win-shadow-hover)}
+.cardmodal-droplabel{
+  position:absolute;inset:0;z-index:2;display:flex;align-items:center;justify-content:center;
+  background:rgba(0,0,0,.45);color:var(--gold);font-size:13px;letter-spacing:calc(1px + var(--track));
+  border:3px dashed var(--gold);pointer-events:none;
+}
+
+/* ---- "unread" bubble on a crew desk ---------------------------------------
+   An agent that finished, or stopped to ask, has something for you to READ. The
+   alert centre says so once; this stays on the desk until the drawer is opened. */
+.desk-unread{
+  position:absolute;top:-10px;left:-10px;z-index:3;
+  width:26px;height:26px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:14px;font-weight:700;line-height:1;
+  color:var(--on-danger);background:var(--clay);
+  border:3px solid var(--bone);border-radius:var(--radius-sm);
+  box-shadow:0 2px 0 rgba(0,0,0,.5);
+  animation:unread-pop 1.8s ease-in-out infinite;
+}
+@keyframes unread-pop{
+  0%,100%{transform:translateY(0)}
+  50%{transform:translateY(-3px)}
+}
+/* A ring so the desk itself reads as unread, not just the corner bubble. */
+.desk.has-unread{box-shadow:var(--win-shadow),0 0 0 2px var(--clay)}
+.desk.has-unread:hover{box-shadow:var(--win-shadow-hover),0 0 0 2px var(--clay)}
+@media (prefers-reduced-motion:reduce){.desk-unread{animation:none}}
+
+/* ---- settings: background upload + dim -------------------------------------- */
+.settings-bgfile{margin-top:8px}
+.settings-bgpreview{
+  height:84px;margin-top:8px;
+  background-size:cover;background-position:center;
+  border:2px solid var(--bevel);border-radius:var(--radius-sm);
+}
+.settings-slider{
+  width:100%;margin-top:6px;accent-color:var(--gold);
+  background:transparent;cursor:pointer;
+}
+.settings-slider:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
+
+/* ============================================================================
+   THEMES
+   Each block is the same token names with different values, plus the few
+   structural overrides a look genuinely needs. Nothing below re-implements a
+   component — it only re-colours or re-shapes one.
+   ========================================================================= */
+
+/* ---- NOSTROMO -------------------------------------------------------------
+   The first Alien: a ship's terminal, not a computer. Phosphor green on near
+   black, amber for anything the ship wants you to notice, thin bright rules,
+   heavy tracking, and a glow on every glyph as if the text is being emitted
+   rather than printed. The CRT stack is pushed up because on this look the tube
+   IS the interface. */
+:root[data-theme="alien"]{
+  --night:#02060a;
+  --box:#061109;
+  --box-lo:#030a06;
+  --bevel:#1d8a4e;
+  --bone:#8dffb4;
+  --dim:#41a06c;
+  --gold:#ffb000;
+  --leaf:#2fe37a;
+  --clay:#ff4438;
+  --on-accent:#150a00;
+  --on-ok:#02170b;
+  --on-danger:#1a0300;
+  --on-bevel:#02170b;
+  --px:2px;
+  --track:1.1px;
+  --glow:0 0 7px rgba(120,255,170,.35);
+  --rule:1px solid var(--bevel);
+  --scrim:#000206;
+  --scrim-a:.62;
+  --crt-strength:1.25;
+  --mono:"Share Tech Mono","Source Code Pro",ui-monospace,"SF Mono",Menlo,monospace;
+  --code:"Share Tech Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  --display:"VT323","Share Tech Mono",ui-monospace,monospace;
+  --win-border:1px solid var(--bevel);
+  --win-shadow:
+    inset 0 0 0 1px rgba(45,255,150,.10),
+    inset 0 0 26px rgba(0,255,140,.045),
+    0 0 24px rgba(0,255,140,.06);
+  --win-shadow-hover:
+    inset 0 0 0 1px var(--gold),
+    inset 0 0 26px rgba(255,176,0,.09),
+    0 0 26px rgba(255,176,0,.16);
+  --win-shadow-send:
+    inset 0 0 0 1px var(--leaf),
+    0 0 30px rgba(47,227,122,.30);
+}
+/* the phosphor itself */
+:root[data-theme="alien"] body{text-shadow:var(--glow)}
+:root[data-theme="alien"] .title{
+  font-size:30px;letter-spacing:4px;
+  text-shadow:0 0 12px rgba(120,255,170,.55);
+}
+/* thin bright edges everywhere a chunky bone border used to be */
+:root[data-theme="alien"] .card,
+:root[data-theme="alien"] .usage,
+:root[data-theme="alien"] .tube,
+:root[data-theme="alien"] .settings-btn,
+:root[data-theme="alien"] .newagent-btn,
+:root[data-theme="alien"] .desk-unread,
+:root[data-theme="alien"] .card-img-x,
+:root[data-theme="alien"] .bubble{border-width:1px;border-color:var(--bevel)}
+:root[data-theme="alien"] .card{box-shadow:none}
+:root[data-theme="alien"] .usage,
+:root[data-theme="alien"] .settings-btn{box-shadow:var(--win-shadow)}
+:root[data-theme="alien"] .drawer-tabs .tab{box-shadow:none}
+:root[data-theme="alien"] .drawer-tabs .tab.on{box-shadow:inset 0 0 14px rgba(255,176,0,.16)}
+/* the ship talks in capitals */
+:root[data-theme="alien"] .name,
+:root[data-theme="alien"] .col-name,
+:root[data-theme="alien"] .settings-title,
+:root[data-theme="alien"] .cardmodal-crumb{text-transform:uppercase}
+
+/* ---- MATERIAL -------------------------------------------------------------
+   Material Design's shape: light surfaces lifted by elevation rather than
+   outlined by bevels, generous corner radii, a single purple key colour, and
+   Roboto. The art background stays, washed back far enough that dark text on a
+   light surface still holds its contrast — hence the high --scrim-a. */
+:root[data-theme="material"]{
+  --night:#f4f1f8;
+  --box:#fffbfe;
+  --box-lo:#eae3f0;
+  --bevel:#cac4d0;
+  --bone:#1c1b1f;
+  --dim:#5d5866;
+  --gold:#6750a4;
+  --leaf:#146c2e;
+  --clay:#b3261e;
+  --on-accent:#fff;
+  --on-ok:#fff;
+  --on-danger:#fff;
+  --on-bevel:#1c1b1f;
+  --px:1px;
+  --radius:16px;
+  --radius-sm:10px;
+  --track:0;
+  --rule:1px solid var(--bevel);
+  --scrim:#f4f1f8;
+  --scrim-a:.9;
+  /* Scanlines over a light surface go muddy fast — keep the texture, lose the
+     weight. The user can still pick MAX if they want it. */
+  --crt-strength:.28;
+  --mono:"Roboto","Helvetica Neue",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --code:"Roboto Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  --display:var(--mono);
+  --win-border:1px solid rgba(0,0,0,.05);
+  --win-shadow:0 1px 2px rgba(28,27,31,.10),0 4px 14px rgba(28,27,31,.08);
+  --win-shadow-hover:0 2px 4px rgba(28,27,31,.12),0 10px 28px rgba(103,80,164,.20);
+  --win-shadow-send:0 2px 4px rgba(28,27,31,.12),0 0 0 2px var(--leaf);
+}
+/* elevation instead of bevels */
+:root[data-theme="material"] .card,
+:root[data-theme="material"] .usage,
+:root[data-theme="material"] .settings-btn,
+:root[data-theme="material"] .tube{
+  border:1px solid rgba(0,0,0,.05);border-radius:var(--radius-sm);box-shadow:var(--win-shadow);
+}
+:root[data-theme="material"] .card:hover{box-shadow:var(--win-shadow-hover)}
+/* A selected chip and the primary action are the KEY colour in Material, not a
+   grey outline fill — the token default (--bevel) is nearly invisible here. */
+:root[data-theme="material"] .deskbtn.on{background:var(--gold);color:var(--on-accent);border-color:var(--gold)}
+:root[data-theme="material"] .newagent-btn{background:var(--gold);color:var(--on-accent)}
+:root[data-theme="material"] .newagent-btn:hover{background:#7b64b8}
+:root[data-theme="material"] .newagent-btn,
+:root[data-theme="material"] .cardmodal-send,
+:root[data-theme="material"] .deskbtn.primary{border-color:transparent}
+:root[data-theme="material"] .drawer-tabs .tab{box-shadow:none;border-radius:var(--radius-sm) var(--radius-sm) 0 0}
+:root[data-theme="material"] .drawer-tabs .tab.on{box-shadow:inset 0 -3px 0 var(--gold);transform:none}
+:root[data-theme="material"] .drawer-tabs .tab:active{transform:none}
+:root[data-theme="material"] .title{text-shadow:none;font-weight:500;letter-spacing:.2px}
+:root[data-theme="material"] .desk-unread,
+:root[data-theme="material"] .card-img-x,
+:root[data-theme="material"] .bubble{border-color:var(--box);border-width:2px;border-radius:999px}
+/* Material's status dots are dots. */
+:root[data-theme="material"] .lamp{border-radius:50%}
+:root[data-theme="material"] .msg-user .msg-text{border-radius:var(--radius-sm)}
+:root[data-theme="material"] .toast{border:none;box-shadow:var(--win-shadow);border-radius:var(--radius-sm)}
+/* The pixel sprites are the app's identity; on a light ground they need a
+   little separation from the surface rather than a redesign. */
+:root[data-theme="material"] .sprite{filter:drop-shadow(0 1px 1px rgba(28,27,31,.25))}
+/* A wallpaper the user picked themselves should actually be visible — the wash
+   that makes the built-in art recede would erase it. The panels are opaque, so
+   the text keeps its contrast either way, and DIM is there for a busy photo. */
+:root[data-theme="material"][data-bg="custom"]{--scrim-a:.42}
+
+/* ---- scrollbars -----------------------------------------------------------
+   The platform default is a bright slab that reads as a UI element in its own
+   right — very loud against a dark panel, clunky against a light one. Drawn
+   from the tokens instead, so each theme gets a bar that belongs to it. */
+*{scrollbar-color:var(--bevel) transparent;scrollbar-width:thin}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{
+  background:var(--bevel);border:2px solid transparent;background-clip:padding-box;
+  border-radius:var(--radius-sm);
+}
+::-webkit-scrollbar-thumb:hover{background:var(--gold);background-clip:padding-box}
+::-webkit-scrollbar-corner{background:transparent}
+
+/* The card description at rest: rendered, click to edit. Sized and bordered like
+   the textarea it swaps with, so opening it doesn't shift the layout. */
+.cardmodal-descview{
+  width:100%;min-height:88px;cursor:text;
+  font-family:var(--mono);font-size:13px;line-height:1.6;
+  color:var(--bone);background:var(--night);
+  border:2px solid var(--bevel);border-radius:var(--radius-sm);padding:8px 9px;
+}
+.cardmodal-descview:hover{border-color:var(--gold)}
+.cardmodal-descview:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+.cardmodal-descview.is-empty{color:var(--dim)}

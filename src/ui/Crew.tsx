@@ -58,7 +58,7 @@ function useSendFlash(sessionId: string): boolean {
 // card when a field it actually shows changed. `onCard` is the board card this
 // agent is assigned to ("title · column"), computed by Crew so the comparator
 // stays a flat prop check.
-const AgentCard = memo(function AgentCard({ a, onCard, onOpen }: { a: AgentStatus; onCard: string; onOpen: (id: string) => void }) {
+const AgentCard = memo(function AgentCard({ a, onCard, unread, onOpen }: { a: AgentStatus; onCard: string; unread: boolean; onOpen: (id: string) => void }) {
   const { palette } = paletteFor(a.sessionId, a.role);
   const flashing = useSendFlash(a.sessionId);
   const now = Date.now();
@@ -70,10 +70,10 @@ const AgentCard = memo(function AgentCard({ a, onCard, onOpen }: { a: AgentStatu
   const repo = a.cwd.split("/").filter(Boolean).pop() ?? "";
   return (
     <article
-      className={`win desk is-${a.state}${flashing ? " flash-send" : ""}${stale ? " is-stale" : ""}`}
+      className={`win desk is-${a.state}${flashing ? " flash-send" : ""}${stale ? " is-stale" : ""}${unread ? " has-unread" : ""}`}
       role="button"
       tabIndex={0}
-      title="Click to open this agent's conversation"
+      title={unread ? `${a.name} has something for you to read` : "Click to open this agent's conversation"}
       onClick={() => onOpen(a.sessionId)}
       onKeyDown={(e) => {
         if (e.key === "Enter") onOpen(a.sessionId);
@@ -83,6 +83,14 @@ const AgentCard = memo(function AgentCard({ a, onCard, onOpen }: { a: AgentStatu
       }}
       onKeyUp={(e) => { if (e.key === " " || e.key === "Spacebar") onOpen(a.sessionId); }}
     >
+      {/* Something to READ: this agent finished, or stopped to ask. The alert
+          centre says so once and scrolls away; this stays on the desk until the
+          conversation is opened. */}
+      {unread && (
+        <div className="pix desk-unread" role="status" aria-label={`${a.name} has an unread message`}>
+          <span aria-hidden="true">!</span>
+        </div>
+      )}
       <div className="desk-actions" onClick={stop}>
         <button className="deskbtn" title="Jump to this terminal in Ghostty"
           onClick={() => focusSession(a.sessionId)}>↗ TERMINAL</button>
@@ -119,6 +127,7 @@ const AgentCard = memo(function AgentCard({ a, onCard, onOpen }: { a: AgentStatu
 }, (prev, next) => {
   const x = prev.a, y = next.a;
   return prev.onOpen === next.onOpen && prev.onCard === next.onCard &&
+    prev.unread === next.unread &&
     x.sessionId === y.sessionId && x.name === y.name && x.role === y.role &&
     x.ticket === y.ticket && x.state === y.state && x.doing === y.doing &&
     x.waitingReason === y.waitingReason && x.stateSince === y.stateSince &&
@@ -140,11 +149,19 @@ export function assignedCardLabel(board: Board, sessionId: string): string {
   return `${first.title} · ${col?.name ?? first.columnId}${more}`;
 }
 
-export function Crew({ agents, board, onOpen }: { agents: AgentStatus[]; board: Board; onOpen: (id: string) => void }) {
+export function Crew({ agents, board, unread, onOpen }: {
+  agents: AgentStatus[]; board: Board; unread: Set<string>; onOpen: (id: string) => void;
+}) {
   return (
     <main className="crew">
       {agents.map((a) => (
-        <AgentCard key={a.sessionId} a={a} onCard={assignedCardLabel(board, a.sessionId)} onOpen={onOpen} />
+        <AgentCard
+          key={a.sessionId}
+          a={a}
+          onCard={assignedCardLabel(board, a.sessionId)}
+          unread={unread.has(a.sessionId)}
+          onOpen={onOpen}
+        />
       ))}
     </main>
   );

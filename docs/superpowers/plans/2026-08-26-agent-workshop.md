@@ -65,7 +65,7 @@ tests/
 - [ ] **Step 1: Init the project**
 
 ```bash
-cd /Users/glyons/Downloads/agentsmith
+cd /Users/guy/github/agent-smith
 bun init -y
 bun add react react-dom zod
 bun add -d @types/react @types/react-dom

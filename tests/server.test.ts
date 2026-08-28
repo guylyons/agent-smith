@@ -103,6 +103,34 @@ test("POST /action/upload saves an image and returns its path", async () => {
   server.stop(true);
 });
 
+test("GET /uploads serves a saved image back, and refuses a traversal", async () => {
+  reset();
+  process.env.AGENT_STATUS_DIR = dir;
+  process.env.AGENT_UPLOAD_DIR = "/tmp/aw-server-upload-serve-test";
+  rmSync("/tmp/aw-server-upload-serve-test", { recursive: true, force: true });
+  const { makeServer } = await import("../src/server");
+  const server = makeServer(0);
+  const saved = await fetch(`http://localhost:${server.port}/action/upload`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name: "shot.png", type: "image/png", dataBase64: Buffer.from("PNGBYTES").toString("base64") }),
+  });
+  const out = (await saved.json()) as { ok: boolean; url?: string };
+  expect(out.ok).toBe(true);
+  expect(out.url!.startsWith("/uploads/")).toBe(true);
+
+  // the URL the browser is handed round-trips to the file's bytes
+  const got = await fetch(`http://localhost:${server.port}${out.url}`);
+  expect(got.status).toBe(200);
+  expect(await got.text()).toBe("PNGBYTES");
+
+  // and the route can't be walked out of the upload dir
+  for (const bad of ["/uploads/../../etc/passwd", "/uploads/..%2f..%2fetc%2fpasswd", "/uploads/nope.png"]) {
+    expect((await fetch(`http://localhost:${server.port}${bad}`)).status).toBe(404);
+  }
+  server.stop(true);
+});
+
 test("POST /action/upload rejects a non-image type", async () => {
   reset();
   process.env.AGENT_STATUS_DIR = dir;

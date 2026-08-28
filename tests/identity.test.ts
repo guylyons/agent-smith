@@ -7,7 +7,7 @@ test("keeps the persona when a work-type keyword matches", () => {
 });
 
 test("falls back to a codename + repo role for generic sessions", () => {
-  const id = identify("sess-abc", "main", "/Users/glyons/github/mho-drupal");
+  const id = identify("sess-abc", "main", "/Users/guy/github/mho-drupal");
   expect(id.role).toBe("mho-drupal");
   expect(id.name).not.toBe("AGENT");
   expect(id.name.length).toBeGreaterThan(0);
