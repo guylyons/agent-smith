@@ -51,6 +51,8 @@ showing them in the meantime.
 | `bun test` | Runs the unit test suite |
 | `bun run scan` | Runs one scan pass over your real transcripts, reports how many open sessions it wrote |
 | `bun run install-hooks` | Merges the status hooks into `~/.claude/settings.json` (backs it up first) |
+| `bun run install-mcp` | Registers the board's MCP server with Claude Code (user scope) — see [the MCP server](#the-board-as-mcp-tools) |
+| `bun run mcp` | Runs the board MCP server on stdio (what the registration launches; handy for debugging) |
 | `bun run uninstall-hooks` | Removes only this repo's hook entries |
 
 ## Connecting your sessions
@@ -128,10 +130,11 @@ protocol footer every sent task carries teaches the agent to use it:
 
 - `GET /board` — columns (with instructions), cards, comments, and the board's
   path; `GET /agents` — the live sessions with resolved names/roles.
-- `POST /action/card-add | card-move | card-comment | card-assign | send-task` —
-  each is applied server-side against a fresh read of the board, so an agent's
-  move or comment can never clobber (or be clobbered by) the UI's whole-board
-  write or another agent.
+- `POST /action/card-add | card-move | card-update | card-comment | card-assign |
+  send-task` — each is applied server-side against a fresh read of the board, so
+  an agent's move or comment can never clobber (or be clobbered by) the UI's
+  whole-board write or another agent. `card-update` edits a card's own text
+  (title, description); fields you leave out are untouched.
 
 A worker follows the footer: move its card to the working column and comment
 before starting, comment as it learns things, comment and move it on when done.
@@ -149,6 +152,42 @@ advancing a card, and nudges stalled ones. A fresh worktree is seeded with a
 `.claude/settings.local.json` allowlisting exactly the board `curl`s and local
 git verbs, so a worker updates its ticket without stalling on permission
 prompts (spawn/kill/prompt endpoints and `git push` still require a human).
+
+### The board as MCP tools
+
+The same card API, as tools instead of `curl`. Register it once and every Claude
+session — in any project — can read the board and drive its ticket directly:
+
+```bash
+bun run install-mcp     # claude mcp add --scope user the-line -- bun run src/mcp.ts
+claude mcp list         # the-line: … - ✔ Connected
+```
+
+Nine tools, named for what they do:
+
+| Tool | What it does |
+| --- | --- |
+| `board_read` | Every column with its instruction, one line per card — the digest you start from |
+| `card_read` | One card in full: description, assignee, column instruction, every comment |
+| `card_create` | New card in a column, with a description |
+| `card_update` | Rename a card, rewrite its description, or both |
+| `card_move` | Move it to another column (notifies the other side) |
+| `card_comment` | Post a comment (notifies the other side) |
+| `card_assign` | Bind a live session to the card, or `null` to clear |
+| `card_send_task` | Hand the card's composed task to its assigned session |
+| `agents_list` | The live sessions — the only things a card can be assigned to |
+
+Writes go through the dashboard's HTTP actions, not the board file, so an MCP
+write is exactly as safe as the `curl` it replaces: applied against a fresh read,
+and pushed straight to the open UI. **The dashboard has to be running** — if it
+isn't, every tool says so and tells you to start it.
+
+Comments and moves are signed automatically. `AGENT_WORKSHOP_AUTHOR` names the
+author if you set it; otherwise the server asks the dashboard which live agent is
+working in this folder and signs with that codename, falling back to a generic
+one when the folder is ambiguous.
+
+Remove it with `claude mcp remove --scope user the-line`.
 
 The board itself is stored in `~/.agent-status/.line.json` so it survives
 restarts. The browser client owns manual edits and writes the full board; the

@@ -8,7 +8,7 @@ import { matchChat } from "./lib/chatsearch";
 import type { ChatMessage } from "./lib/conversation";
 import { readOverrides, applyOverrides, setNameOverride, setSpriteOverride } from "./lib/overrides";
 import { loadPersonas, applyPersonas } from "./lib/personas";
-import { readBoard, writeBoard, sanitizeBoard, boardFile, addCard, moveCard, addComment, assignCard, setCardDescription, cardTaskPrompt, type Board } from "./lib/board";
+import { readBoard, writeBoard, sanitizeBoard, boardFile, addCard, moveCard, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, type Board } from "./lib/board";
 import { ALLOWED_MODELS, ALLOWED_PERMISSION_MODES, focusSession, interruptSession, killAgent, sendPrompt, sendFreshPrompt, spawnAgent } from "./ghostty";
 import { readRepo } from "./repo";
 import { saveUpload } from "./lib/uploads";
@@ -302,7 +302,7 @@ export function makeServer(
           push();
           return json({ ok: true, cardId: card.id });
         }
-        if (action === "card-move" || action === "card-comment" || action === "card-assign" || action === "send-task") {
+        if (action === "card-move" || action === "card-comment" || action === "card-update" || action === "card-assign" || action === "send-task") {
           const cardId = typeof body.cardId === "string" ? body.cardId : "";
           const board = readBoard(dir);
           const card = board.cards.find((k) => k.id === cardId);
@@ -318,6 +318,24 @@ export function makeServer(
             // The column id (not display name): unambiguous, and directly
             // reusable by the recipient in a card-move call of its own.
             notifyCardEvent(next, cardId, author, `[THE LINE] ${author} moved "${title}" to "${to.id}".`);
+            return json({ ok: true });
+          }
+          // card-update: edit a card's own text — its title, its description, or
+          // both. Each field is applied only when present, so renaming a card
+          // can't wipe a description written by someone else (and vice versa).
+          // Silent by design: text edits don't wake the assignee the way a move
+          // or a comment does.
+          if (action === "card-update") {
+            const hasTitle = typeof body.title === "string";
+            const hasDescription = typeof body.description === "string";
+            if (!hasTitle && !hasDescription) return json({ ok: false, error: "title or description is required" }, 400);
+            // A blank title would leave the card unidentifiable on the board.
+            if (hasTitle && !body.title!.trim()) return json({ ok: false, error: "title cannot be blank" }, 400);
+            let next = board;
+            if (hasTitle) next = renameCard(next, cardId, body.title!.trim());
+            if (hasDescription) next = setCardDescription(next, cardId, body.description!);
+            writeBoard(dir, next);
+            push();
             return json({ ok: true });
           }
           if (action === "card-comment") {

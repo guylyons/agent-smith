@@ -470,3 +470,35 @@ test("an agent (no sec-fetch-site) may not spawn a scrum-master", async () => {
   expect(((await res.json()) as any).ok).toBe(false);
   server.stop(true);
 });
+
+test("card-update renames a card and sets its description", async () => {
+  const { server, post } = await cardApiServer();
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
+  expect((await (await post("/action/card-update", { cardId, title: "Renamed", description: "why" })).json()).ok).toBe(true);
+  const card = readSnapshot(dir, Date.now()).board.cards[0]!;
+  expect(card.title).toBe("Renamed");
+  expect(card.description).toBe("why");
+  server.stop(true);
+});
+
+test("card-update leaves out-of-scope fields alone", async () => {
+  const { server, post } = await cardApiServer();
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T", description: "keep me" })).json()) as any;
+  await post("/action/card-update", { cardId, title: "Renamed" });
+  const card = readSnapshot(dir, Date.now()).board.cards[0]!;
+  expect(card.description).toBe("keep me");
+  await post("/action/card-update", { cardId, description: "" });
+  expect(readSnapshot(dir, Date.now()).board.cards[0]!.title).toBe("Renamed");
+  expect(readSnapshot(dir, Date.now()).board.cards[0]!.description).toBe("");
+  server.stop(true);
+});
+
+test("card-update rejects a blank title, no fields, and an unknown card", async () => {
+  const { server, post } = await cardApiServer();
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
+  expect((await post("/action/card-update", { cardId, title: "  " })).status).toBe(400);
+  expect((await post("/action/card-update", { cardId })).status).toBe(400);
+  expect((await post("/action/card-update", { cardId: "card_nope", title: "x" })).status).toBe(404);
+  expect(readSnapshot(dir, Date.now()).board.cards[0]!.title).toBe("T");
+  server.stop(true);
+});

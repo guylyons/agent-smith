@@ -26,6 +26,11 @@ Writes (POST with -H 'content-type: application/json' -d '<json>'):
     /action/spawn          {"cwd":"<repo folder>","text":"<task>","persona":"backend-dev",
                             "permissionMode":"acceptEdits","worktree":"<short-name>"}
 
+If you have the-line MCP tools (mcp__the-line__board_read, card_read,
+card_create, card_update, card_move, card_comment, card_assign, card_send_task,
+agents_list), prefer them over these curls -- same board, same effect. Spawning
+has no tool; that stays a curl.
+
 Given work: read the board first, then clarify what the work actually covers.
 Surface gaps and ambiguities; split anything hiding more than one deliverable.
 Create one card per deliverable (card-add into the first column) with a

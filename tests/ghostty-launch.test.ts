@@ -135,14 +135,21 @@ test("workerPermissionSettings allows the board read, card writes, and local git
     "Bash(curl -s http://localhost:4173/agents)",
     "Bash(curl -s -X POST http://localhost:4173/action/card-move:*)",
     "Bash(curl -s -X POST http://localhost:4173/action/card-comment:*)",
+    "mcp__the-line__board_read",
+    "mcp__the-line__card_read",
+    "mcp__the-line__agents_list",
+    "mcp__the-line__card_move",
+    "mcp__the-line__card_comment",
     "Bash(git status:*)",
     "Bash(git diff:*)",
     "Bash(git log:*)",
     "Bash(git add:*)",
     "Bash(git commit:*)",
   ]);
-  // never the spawn/kill/prompt endpoints or git push — those stay behind a
-  // human approval
+  // never the spawn/kill/prompt endpoints, the MCP tools that reach other
+  // sessions, or git push — those stay behind a human approval
+  expect(s.permissions.allow).not.toContain("mcp__the-line__card_send_task");
+  expect(s.permissions.allow).not.toContain("mcp__the-line__card_assign");
   expect(JSON.stringify(s)).not.toContain("/action/spawn");
   expect(JSON.stringify(s)).not.toContain("git push");
 });

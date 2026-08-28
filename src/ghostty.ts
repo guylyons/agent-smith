@@ -200,10 +200,11 @@ export function buildLaunchInput(
 
 /** The `.claude/settings.local.json` contents written into a freshly created
  *  worktree before its agent launches: allow exactly the board read and the
- *  card-scoped writes, so a worker can drive its own ticket without stalling on
- *  a permission prompt. Deliberately NOT the spawn/kill/prompt endpoints —
- *  anything that reaches other sessions or starts new ones stays behind a
- *  human approval. */
+ *  card-scoped writes — as curl calls AND as the board's MCP tools, so a worker
+ *  can drive its own ticket either way without stalling on a permission prompt.
+ *  Deliberately NOT the spawn/kill/prompt endpoints, or the MCP tools that reach
+ *  other sessions: anything that touches another session or starts a new one
+ *  stays behind a human approval. */
 export function workerPermissionSettings(serverUrl: string): { permissions: { allow: string[] } } {
   return {
     permissions: {
@@ -212,6 +213,14 @@ export function workerPermissionSettings(serverUrl: string): { permissions: { al
         `Bash(curl -s ${serverUrl}/agents)`,
         `Bash(curl -s -X POST ${serverUrl}/action/card-move:*)`,
         `Bash(curl -s -X POST ${serverUrl}/action/card-comment:*)`,
+        // The same reads and writes again as MCP tools, for sessions that have
+        // the board's MCP server registered (bun run install-mcp). Same line
+        // drawn in the same place: nothing here reaches another session.
+        "mcp__the-line__board_read",
+        "mcp__the-line__card_read",
+        "mcp__the-line__agents_list",
+        "mcp__the-line__card_move",
+        "mcp__the-line__card_comment",
         // The Done column's usual instruction is "worktree clean and committed",
         // so the local git verbs a worker needs mustn't stall it either. The
         // worktree is isolated, so a commit here can't touch anyone's branch;
