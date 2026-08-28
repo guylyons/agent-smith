@@ -11,6 +11,9 @@ export const TUBE_MODES = [
 export const BACKGROUNDS = [
   { id: "night", label: "NIGHT" },
   { id: "stars", label: "STARS" },
+  { id: "clouds", label: "CLOUDS" },
+  { id: "aurora", label: "AURORA" },
+  { id: "rain", label: "RAIN" },
   { id: "synth", label: "SYNTH" },
   { id: "grid", label: "GRID" },
   { id: "dusk", label: "DUSK" },
