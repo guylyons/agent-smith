@@ -427,16 +427,15 @@
   .col-name:hover{border-color:var(--bevel)}
   .col-name:focus{border-color:var(--gold);background:var(--night)}
   .col-name:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
-  /* Destructive, and previously a 17x15 target. Sized to the 24px minimum and
-     given the same focus ring as every other button, so a keyboard user can see
-     when they are sitting on Delete. */
+  /* Destructive, and previously a 17x15 target: sized to the 24px minimum so it
+     can actually be hit. The focus ring comes from the shared :where(button…)
+     rule in ROLLOVER — no need to repeat it here. */
   .col-del,.card-del{
     flex:0 0 auto;background:transparent;border:none;color:var(--dim);cursor:pointer;
     font-size:13px;line-height:1;
     min-width:24px;min-height:24px;display:inline-flex;align-items:center;justify-content:center;
   }
   .col-del:hover,.card-del:hover{color:var(--clay)}
-  .col-del:focus-visible,.card-del:focus-visible{outline:3px solid var(--gold);outline-offset:-1px;color:var(--clay)}
   .col-instr{
     width:100%;box-sizing:border-box;resize:vertical;min-height:44px;
     font-family:var(--mono);font-size:12px;line-height:1.5;
@@ -458,7 +457,6 @@
   .card.drop-after{box-shadow:inset 0 0 0 2px rgba(110,140,224,.5),0 3px 0 rgba(0,0,0,.5),0 7px 0 -2px var(--gold)}
   .card:hover{border-color:var(--gold)}
   .card:focus{border-color:var(--gold)}
-  .card:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
   .card:active{cursor:grabbing}
   .card-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
   .card-title-text{
