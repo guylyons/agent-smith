@@ -6,7 +6,7 @@ import { ensureStatusDir, statusDir } from "./lib/paths";
 import { scanLiveSessions, readConversation, readSubagents } from "./scan";
 import { readOverrides, applyOverrides, setNameOverride, setSpriteOverride } from "./lib/overrides";
 import { loadPersonas, applyPersonas } from "./lib/personas";
-import { readBoard, writeBoard, sanitizeBoard, boardFile } from "./lib/board";
+import { readBoard, writeBoard, sanitizeBoard, boardFile, addCard, moveCard, addComment, assignCard, setCardDescription } from "./lib/board";
 import { ALLOWED_MODELS, ALLOWED_PERMISSION_MODES, focusSession, interruptSession, killAgent, sendPrompt, spawnAgent } from "./ghostty";
 import { readRepo } from "./repo";
 import { saveUpload } from "./lib/uploads";
@@ -41,7 +41,6 @@ export function readSnapshot(dir: string, now: number): Snapshot {
   // user override > persona > inferRole > hashed codename
   return buildSnapshot(applyOverrides(applyPersonas(agents, loadPersonas()), readOverrides(dir)), now, {
     board: readBoard(dir),
-    boardPath: boardFile(dir),
   });
 }
 
@@ -121,6 +120,22 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
         return json({ subagents: await readSubagents(sid, Date.now()) });
       }
 
+      // the current board + where it lives — the read half of the agent card
+      // API. Always a fresh read, so an agent that just wrote sees its write.
+      if (url.pathname === "/board") {
+        return json({ board: readBoard(dir), boardPath: boardFile(dir) });
+      }
+
+      // the live sessions, with names/roles resolved the way the board shows
+      // them — how an orchestrating agent discovers who it can assign to.
+      if (url.pathname === "/agents") {
+        const { agents } = readSnapshot(dir, Date.now());
+        return json({
+          agents: agents.map(({ sessionId, name, role, state, doing, persona, cwd, branch }) =>
+            ({ sessionId, name, role, state, doing, persona, cwd, branch })),
+        });
+      }
+
       // the persona picker's options
       if (url.pathname === "/personas") {
         // id/name/role/skills only — the prompt body is never sent to the browser
@@ -145,7 +160,7 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
           return json({ ok: false, error: "cross-site blocked" }, 403);
         }
         const action = url.pathname.slice("/action/".length);
-        let body: { sessionId?: string; name?: string; text?: string; cwd?: string; palette?: number; gear?: string; body?: string; model?: string; permissionMode?: string; worktree?: string; persona?: string; board?: unknown; type?: string; dataBase64?: string };
+        let body: { sessionId?: string | null; name?: string; text?: string; cwd?: string; palette?: number; gear?: string; body?: string; model?: string; permissionMode?: string; worktree?: string; persona?: string; board?: unknown; type?: string; dataBase64?: string; cardId?: string; columnId?: string; toColumnId?: string; title?: string; description?: string; author?: string };
         try { body = await req.json(); } catch { return json({ ok: false, error: "bad body" }, 400); }
         // spawn creates a brand-new session — it has a folder + task, not a sessionId
         if (action === "spawn") {
@@ -167,6 +182,59 @@ export function makeServer(port: number, opts: { scan?: boolean; scanIntervalMs?
         // corrupt the file agents read. Not tied to a sessionId.
         if (action === "board") {
           writeBoard(dir, sanitizeBoard(body.board));
+          push();
+          return json({ ok: true });
+        }
+        // card-*: the write half of the agent card API. Each op re-reads the
+        // board and applies one pure, card-scoped mutation before persisting —
+        // so an agent's move/comment can never clobber (or be clobbered by)
+        // another writer the way a whole-board write can. Not tied to a
+        // sessionId: the author is a display name carried on the comment.
+        if (action === "card-add") {
+          const columnId = typeof body.columnId === "string" ? body.columnId : "";
+          const title = typeof body.title === "string" ? body.title.trim() : "";
+          if (!title) return json({ ok: false, error: "title is required" }, 400);
+          const board = readBoard(dir);
+          if (!board.columns.some((c) => c.id === columnId)) return json({ ok: false, error: `unknown column: ${columnId}` }, 400);
+          let next = addCard(board, columnId, title);
+          const card = next.cards[next.cards.length - 1]!; // addCard appends
+          const description = typeof body.description === "string" ? body.description : "";
+          if (description.trim()) next = setCardDescription(next, card.id, description);
+          writeBoard(dir, next);
+          push();
+          return json({ ok: true, cardId: card.id });
+        }
+        if (action === "card-move" || action === "card-comment" || action === "card-assign") {
+          const cardId = typeof body.cardId === "string" ? body.cardId : "";
+          const board = readBoard(dir);
+          const card = board.cards.find((k) => k.id === cardId);
+          if (!card) return json({ ok: false, error: `unknown card: ${cardId}` }, 404);
+          if (action === "card-move") {
+            const to = typeof body.toColumnId === "string" ? body.toColumnId : "";
+            if (!board.columns.some((c) => c.id === to)) return json({ ok: false, error: `unknown column: ${to}` }, 400);
+            writeBoard(dir, moveCard(board, cardId, to));
+            push();
+            return json({ ok: true });
+          }
+          if (action === "card-comment") {
+            const author = typeof body.author === "string" ? body.author.trim() : "";
+            const text = typeof body.text === "string" ? body.text.trim() : "";
+            if (!author || !text) return json({ ok: false, error: "author and text are required" }, 400);
+            writeBoard(dir, addComment(board, cardId, author, text));
+            push();
+            return json({ ok: true });
+          }
+          // card-assign: bind a LIVE session (resolved to its display name so
+          // the label survives the session ending), or clear with null.
+          if (body.sessionId === null) {
+            writeBoard(dir, assignCard(board, cardId, null));
+            push();
+            return json({ ok: true });
+          }
+          if (!validSessionId(body.sessionId)) return json({ ok: false, error: "bad sessionId" }, 400);
+          const agent = readSnapshot(dir, Date.now()).agents.find((a) => a.sessionId === body.sessionId);
+          if (!agent) return json({ ok: false, error: "no live session with that id" }, 404);
+          writeBoard(dir, assignCard(board, cardId, { id: agent.sessionId, name: agent.name }));
           push();
           return json({ ok: true });
         }

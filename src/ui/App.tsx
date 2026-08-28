@@ -53,7 +53,7 @@ export function App() {
       <button className="settings-btn" title="Settings" onClick={() => setSettingsOpen(true)}>⚙</button>
       <Header snap={snap} onNewAgent={() => setSpawnSeed({})} />
       <Crew agents={snap.agents} onOpen={setSelectedId} />
-      <TheLine board={snap.board} boardPath={snap.boardPath} agents={snap.agents} onSpawnForCard={(task) => setSpawnSeed({ task })} />
+      <TheLine board={snap.board} agents={snap.agents} onSpawnForCard={(task) => setSpawnSeed({ task })} />
       {selected && selected.sessionId === selectedId && (
         <ConversationDrawer agent={selected} ended={ended} onClose={() => setSelectedId(null)} />
       )}

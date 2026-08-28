@@ -5,7 +5,7 @@ import type { Snapshot } from "../lib/snapshot";
 // real (seeded) board on connect, so this blank board is only ever shown for the
 // instant before the first /events message arrives.
 export function emptySnapshot(): Snapshot {
-  return { agents: [], board: { columns: [], cards: [] }, boardPath: "" };
+  return { agents: [], board: { columns: [], cards: [] } };
 }
 
 export function parseEvent(data: string): Snapshot | null {

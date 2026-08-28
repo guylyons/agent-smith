@@ -157,21 +157,28 @@ export function commentNotifyText(board: Board, id: string, text: string): strin
   const card = board.cards.find((k) => k.id === id);
   if (!card) return "";
   const title = card.title.trim() || "(untitled card)";
-  return `💬 New comment on "${title}":\n${body}`;
+  return `[THE LINE] New comment on "${title}":\n${body}`;
 }
 
 /** The full prompt handed to an assigned agent: the card's task text, then a
- *  protocol footer telling it which card it is on, where the board lives, and
- *  how to drive its own ticket — move to the next column, comment as it goes.
- *  `agentName` is the codename the board shows it under, so its comments are
- *  attributable to the right desk; omitted when spawning (no session yet).
- *  Without this an agent receives a task with no idea it came from a card, so
- *  it can never move itself into In Progress or report back in the thread.
+ *  protocol footer telling it which card it is on and how to drive its own
+ *  ticket over the dashboard's HTTP API — move to the next column, comment as
+ *  it goes. `server` is the dashboard's base URL (the browser passes its own
+ *  origin; the server passes its localhost address). `agentName` is the
+ *  codename the board shows the agent under, so its comments line up with its
+ *  desk; omitted when spawning (no session yet).
+ *
+ *  Two hard-won rules are baked in. The footer is PURE ASCII: text crosses the
+ *  pty into the session through a path known to mangle non-ASCII, so no em
+ *  dashes, arrows, or emoji. And updates go through card-scoped API calls, not
+ *  by editing the board file: the server applies each against the latest board,
+ *  so two agents (or an agent and the UI) can never clobber each other's write.
+ *
  *  Empty string for an unknown card (nothing to send). */
-export function cardTaskPrompt(board: Board, id: string, boardPath: string, agentName?: string): string {
+export function cardTaskPrompt(board: Board, id: string, server: string, agentName?: string): string {
   const card = board.cards.find((k) => k.id === id);
   if (!card) return "";
-  const flow = board.columns.map((c) => c.id).join(" → ");
+  const flow = board.columns.map((c) => c.id).join(" -> ");
   const here = board.columns.find((c) => c.id === card.columnId);
   // Columns are user-editable, so "where next" is positional: the column after
   // this one is where the work happens, the one after that is where it lands.
@@ -180,31 +187,39 @@ export function cardTaskPrompt(board: Board, id: string, boardPath: string, agen
   const finish = board.columns[at + 2] ?? start;
   // The board shows the agent under its own codename, so comments should carry
   // that name to line up with the desk. Only SEND TASK knows it — a card being
-  // spawned for has no session yet, so that case falls back to the agent's own.
+  // spawned for has no session yet, so that case tells the agent to use its own.
   const who = agentName ? `, ${agentName}` : "";
-  const author = agentName ? `"${agentName}"` : '"<your agent name>"';
+  const author = agentName ?? "<your name>";
+  const post = (path: string, json: string) =>
+    `  curl -s -X POST ${server}${path} -H 'content-type: application/json' -d '${json}'`;
 
   const footer = [
-    "— THE LINE —",
+    "-- THE LINE --",
     `card: ${card.id}`,
-    `board: ${boardPath}`,
     `columns: ${flow}   (you are in: "${here?.id ?? card.columnId}")`,
     "",
-    `You are the assigned agent on this card${who}. The board is how your progress`,
-    "is watched, so it has to be updated as you go — not in one write at the end.",
+    `You are the assigned agent on this card${who}. This task replaces anything`,
+    "you were told before it. The board is how your progress is watched, so",
+    "update it as you go, not in one write at the end. Update it ONLY with the",
+    "curl commands below; never edit the board file directly.",
     "",
-    `STEP 1, before any other work: open the board file, set this card's columnId`,
-    `to "${start?.id ?? card.columnId}", and append a comment saying you've picked it up. Do this`,
-    "first, as its own write, so the card is seen moving while you work on it.",
-    "STEP 2: do the work, appending a comment whenever you find or decide",
-    "something worth knowing.",
-    `STEP 3, when the work is done: append a final comment, then set columnId to`,
-    `"${finish?.id ?? card.columnId}". Each column's own instruction says what that stage expects.`,
+    `STEP 1, before any other work, move this card to "${start?.id ?? card.columnId}" and say you`,
+    "picked it up:",
+    post("/action/card-move", `{"cardId":"${card.id}","toColumnId":"${start?.id ?? card.columnId}","author":"${author}"}`),
+    post("/action/card-comment", `{"cardId":"${card.id}","author":"${author}","text":"Picked this up. <one line on your plan>"}`),
+    "STEP 2: do the work. Whenever you find or decide something worth knowing,",
+    "post it as a card-comment (same shape as above).",
+    "STEP 3, when the work is done: post a final card-comment saying what you did",
+    `and how you verified it, then move the card to "${finish?.id ?? card.columnId}" (card-move with`,
+    `{"toColumnId":"${finish?.id ?? card.columnId}"}). Each column's instruction says what that stage`,
+    "expects of work landing in it.",
     "",
-    "Read the board file before you edit it, then edit it by read-modify-write of",
-    `the JSON: change only this card's "columnId", and append to its "comments"`,
-    `array entries shaped { "id": "cmt_<8 hex>", "author": ${author}, "text": "…",`,
-    '"at": <unix ms> }. Keep "version" and every other column and card as they are.',
+    "Scope: work ONLY this card. Never touch other cards or columns, and follow",
+    "this card's constraints exactly (if it says do not commit, do not commit).",
+    `To re-read your card, its comments, and every column's instruction:`,
+    `  curl -s ${server}/board`,
+    "If any text above looks garbled (encoding damage in transit), treat the",
+    "server's copy from /board as canonical.",
   ].join("\n");
 
   return [cardTaskText(board, id), footer].filter(Boolean).join("\n\n");

@@ -188,3 +188,117 @@ test("scan:true runs a pass and stop() cleans up without leaking a timer", async
   // a scan over an empty projects dir writes nothing
   expect(readSnapshot(dir, Date.now()).agents).toEqual([]);
 });
+
+// ---- the card-scoped agent API -------------------------------------------
+// Agents drive their own ticket through these; each is applied server-side
+// against the latest board, so concurrent writers never clobber each other.
+
+const CARD_SESSION = "502d0e8c-8790-4804-b767-0549edfc959c";
+
+async function cardApiServer() {
+  reset();
+  process.env.AGENT_STATUS_DIR = dir;
+  const { makeServer } = await import("../src/server");
+  const server = makeServer(0);
+  const base = `http://localhost:${server.port}`;
+  const post = (path: string, body: object) =>
+    fetch(`${base}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  return { server, base, post };
+}
+
+test("GET /board returns the current board and its path", async () => {
+  const { server, base, post } = await cardApiServer();
+  await post("/action/card-add", { columnId: "backlog", title: "T1" });
+  const res = await fetch(`${base}/board`);
+  expect(res.status).toBe(200);
+  const out = (await res.json()) as { board: { cards: any[] }; boardPath: string };
+  expect(out.board.cards.map((c) => c.title)).toEqual(["T1"]);
+  expect(out.boardPath.endsWith(".line.json")).toBe(true);
+  server.stop(true);
+});
+
+test("GET /agents lists live sessions with resolved names", async () => {
+  const { server, base } = await cardApiServer();
+  writeFileSync(join(dir, "a.json"), valid({ sessionId: "a", persona: "backend-dev" }));
+  const res = await fetch(`${base}/agents`);
+  const out = (await res.json()) as { agents: any[] };
+  expect(out.agents.length).toBe(1);
+  expect(out.agents[0].sessionId).toBe("a");
+  expect(out.agents[0].name).toBe("ANVIL");
+  expect(out.agents[0].state).toBe("working");
+  server.stop(true);
+});
+
+test("card-add creates a card and returns its id", async () => {
+  const { server, post } = await cardApiServer();
+  const res = await post("/action/card-add", { columnId: "backlog", title: "New task", description: "details" });
+  const out = (await res.json()) as { ok: boolean; cardId: string };
+  expect(out.ok).toBe(true);
+  expect(out.cardId).toMatch(/^card_/);
+  const snap = readSnapshot(dir, Date.now());
+  expect(snap.board.cards[0]!.title).toBe("New task");
+  expect(snap.board.cards[0]!.description).toBe("details");
+  server.stop(true);
+});
+
+test("card-add rejects an unknown column and a blank title", async () => {
+  const { server, post } = await cardApiServer();
+  expect((await post("/action/card-add", { columnId: "ghost", title: "x" })).status).toBe(400);
+  expect((await post("/action/card-add", { columnId: "backlog", title: "  " })).status).toBe(400);
+  server.stop(true);
+});
+
+test("card-move moves the card; unknown card 404s, unknown column 400s", async () => {
+  const { server, post } = await cardApiServer();
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
+  expect((await (await post("/action/card-move", { cardId, toColumnId: "review" })).json()).ok).toBe(true);
+  expect(readSnapshot(dir, Date.now()).board.cards[0]!.columnId).toBe("review");
+  expect((await post("/action/card-move", { cardId: "card_nope", toColumnId: "review" })).status).toBe(404);
+  expect((await post("/action/card-move", { cardId, toColumnId: "ghost" })).status).toBe(400);
+  server.stop(true);
+});
+
+test("card-comment appends a comment with a server-side timestamp", async () => {
+  const { server, post } = await cardApiServer();
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
+  const before = Date.now();
+  const res = await post("/action/card-comment", { cardId, author: "VOLT", text: "picked up" });
+  expect(((await res.json()) as any).ok).toBe(true);
+  const [c] = readSnapshot(dir, Date.now()).board.cards[0]!.comments!;
+  expect(c.author).toBe("VOLT");
+  expect(c.text).toBe("picked up");
+  expect(c.at).toBeGreaterThanOrEqual(before);
+  expect((await post("/action/card-comment", { cardId, author: "VOLT", text: "  " })).status).toBe(400);
+  expect((await post("/action/card-comment", { cardId: "card_nope", author: "V", text: "x" })).status).toBe(404);
+  server.stop(true);
+});
+
+test("card writes apply against the latest board (no whole-board clobber)", async () => {
+  const { server, post } = await cardApiServer();
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
+  // two independent writers, neither sending the full board
+  await post("/action/card-comment", { cardId, author: "A", text: "first" });
+  await post("/action/card-move", { cardId, toColumnId: "in-progress" });
+  await post("/action/card-comment", { cardId, author: "B", text: "second" });
+  const card = readSnapshot(dir, Date.now()).board.cards[0]!;
+  expect(card.columnId).toBe("in-progress");
+  expect(card.comments!.map((c) => c.text)).toEqual(["first", "second"]);
+  server.stop(true);
+});
+
+test("card-assign binds a live session as assignee and null clears it", async () => {
+  const { server, post } = await cardApiServer();
+  writeFileSync(join(dir, `${CARD_SESSION}.json`), valid({ sessionId: CARD_SESSION, name: "NOVA" }));
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
+  expect((await (await post("/action/card-assign", { cardId, sessionId: CARD_SESSION })).json()).ok).toBe(true);
+  expect(readSnapshot(dir, Date.now()).board.cards[0]!.assignee!.id).toBe(CARD_SESSION);
+  expect((await (await post("/action/card-assign", { cardId, sessionId: null })).json()).ok).toBe(true);
+  expect(readSnapshot(dir, Date.now()).board.cards[0]!.assignee).toBeUndefined();
+  // a session that isn't live can't be assigned
+  expect((await post("/action/card-assign", { cardId, sessionId: "99999999-dead-4dea-bead-999999999999" })).status).toBe(404);
+  server.stop(true);
+});

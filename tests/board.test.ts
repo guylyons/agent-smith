@@ -373,7 +373,7 @@ test("commentNotifyText labels the comment with the card title", () => {
   b = addCard(b, b.columns[0]!.id, "Fix login bug");
   const id = b.cards[0]!.id;
   expect(commentNotifyText(b, id, "please cover the SSO case")).toBe(
-    '💬 New comment on "Fix login bug":\nplease cover the SSO case',
+    '[THE LINE] New comment on "Fix login bug":\nplease cover the SSO case',
   );
 });
 
@@ -381,7 +381,7 @@ test("commentNotifyText trims the comment body", () => {
   let b = defaultBoard();
   b = addCard(b, b.columns[0]!.id, "Card A");
   const id = b.cards[0]!.id;
-  expect(commentNotifyText(b, id, "  hi  ")).toBe('💬 New comment on "Card A":\nhi');
+  expect(commentNotifyText(b, id, "  hi  ")).toBe('[THE LINE] New comment on "Card A":\nhi');
 });
 
 test("commentNotifyText returns empty string for a blank comment", () => {
@@ -399,7 +399,7 @@ test("commentNotifyText falls back to a placeholder for an untitled card", () =>
   b = addCard(b, b.columns[0]!.id, "temp");
   const id = b.cards[0]!.id;
   b = renameCard(b, id, "   ");
-  expect(commentNotifyText(b, id, "note")).toBe('💬 New comment on "(untitled card)":\nnote');
+  expect(commentNotifyText(b, id, "note")).toBe('[THE LINE] New comment on "(untitled card)":\nnote');
 });
 
 // ---- assignee must be a live agent session, never a persona ---------------
@@ -438,22 +438,32 @@ test("readBoard heals a board file that still holds a persona assignee", () => {
 
 // ---- cardTaskPrompt: the task PLUS the board protocol --------------------
 
+const SRV = "http://localhost:4173";
+
 test("cardTaskPrompt starts with the plain task text", () => {
   let b = defaultBoard();
   b = addCard(b, "backlog", "Fix login bug");
   const id = b.cards[0]!.id;
-  expect(cardTaskPrompt(b, id, "/tmp/.line.json").startsWith(cardTaskText(b, id))).toBe(true);
+  expect(cardTaskPrompt(b, id, SRV).startsWith(cardTaskText(b, id))).toBe(true);
 });
 
-test("cardTaskPrompt names the card, the board file, and the column flow", () => {
+test("cardTaskPrompt names the card, the server, and the column flow", () => {
   let b = defaultBoard();
   b = addCard(b, "backlog", "Fix login bug");
   const id = b.cards[0]!.id;
-  const p = cardTaskPrompt(b, id, "/Users/me/.agent-status/.line.json");
+  const p = cardTaskPrompt(b, id, SRV);
   expect(p).toContain(id);
-  expect(p).toContain("/Users/me/.agent-status/.line.json");
-  expect(p).toContain("backlog → in-progress → review → done");
+  expect(p).toContain(`${SRV}/board`);
+  expect(p).toContain("backlog -> in-progress -> review -> done");
   expect(p).toContain('you are in: "backlog"');
+});
+
+test("cardTaskPrompt is pure ASCII outside the card's own text", () => {
+  let b = defaultBoard();
+  b = addCard(b, "backlog", "Fix login bug");
+  const p = cardTaskPrompt(b, b.cards[0]!.id, SRV);
+  // the pty path mangles non-ASCII, so the protocol itself must never carry any
+  expect(/^[\x00-\x7f]*$/.test(p)).toBe(true);
 });
 
 test("cardTaskPrompt reflects the card's current column", () => {
@@ -461,63 +471,78 @@ test("cardTaskPrompt reflects the card's current column", () => {
   b = addCard(b, "backlog", "Fix login bug");
   const id = b.cards[0]!.id;
   b = moveCard(b, id, "review");
-  expect(cardTaskPrompt(b, id, "/tmp/.line.json")).toContain('you are in: "review"');
+  expect(cardTaskPrompt(b, id, SRV)).toContain('you are in: "review"');
 });
 
 test("cardTaskPrompt returns empty string for an unknown card", () => {
-  expect(cardTaskPrompt(defaultBoard(), "nope", "/tmp/.line.json")).toBe("");
+  expect(cardTaskPrompt(defaultBoard(), "nope", SRV)).toBe("");
 });
 
 test("cardTaskPrompt names where to start and where to land, positionally", () => {
   let b = defaultBoard();
   b = addCard(b, "backlog", "Fix login bug");
   const id = b.cards[0]!.id;
-  const p = cardTaskPrompt(b, id, "/tmp/.line.json");
-  expect(p).toContain('columnId\nto "in-progress"');
-  expect(p).toContain('set columnId to\n"review"');
+  const p = cardTaskPrompt(b, id, SRV);
+  expect(p).toContain(`move this card to "in-progress"`);
+  expect(p).toContain('{"toColumnId":"review"}');
 });
 
 test("cardTaskPrompt clamps to the last column when there's nowhere further", () => {
   let b = defaultBoard();
   b = addCard(b, "done", "Fix login bug");
   const id = b.cards[0]!.id;
-  const p = cardTaskPrompt(b, id, "/tmp/.line.json");
+  const p = cardTaskPrompt(b, id, SRV);
   // last column: both the start and the finish clamp to where it already is
-  expect(p).toContain('columnId\nto "done"');
-  expect(p).toContain('set columnId to\n"done"');
+  expect(p).toContain(`move this card to "done"`);
+  expect(p).toContain('{"toColumnId":"done"}');
+});
+
+test("cardTaskPrompt gives runnable curl calls for move and comment", () => {
+  let b = defaultBoard();
+  b = addCard(b, "backlog", "Fix login bug");
+  const id = b.cards[0]!.id;
+  const p = cardTaskPrompt(b, id, SRV);
+  expect(p).toContain(`curl -s -X POST ${SRV}/action/card-move`);
+  expect(p).toContain(`curl -s -X POST ${SRV}/action/card-comment`);
+  expect(p).toContain(`"cardId":"${id}"`);
+  expect(p).toContain('"toColumnId":"in-progress"');
+});
+
+test("cardTaskPrompt forbids editing the board file directly", () => {
+  let b = defaultBoard();
+  b = addCard(b, "backlog", "Fix login bug");
+  const p = cardTaskPrompt(b, b.cards[0]!.id, SRV);
+  expect(p).toContain("never edit the board file directly");
 });
 
 test("cardTaskPrompt names the agent so its comments match its desk", () => {
   let b = defaultBoard();
   b = addCard(b, "backlog", "Fix login bug");
-  const p = cardTaskPrompt(b, b.cards[0]!.id, "/tmp/.line.json", "VOLT");
+  const p = cardTaskPrompt(b, b.cards[0]!.id, SRV, "VOLT");
   expect(p).toContain("assigned agent on this card, VOLT");
-  expect(p).toContain('"author": "VOLT"');
+  expect(p).toContain('"author":"VOLT"');
 });
 
 test("cardTaskPrompt falls back to a placeholder author when spawning", () => {
   let b = defaultBoard();
   b = addCard(b, "backlog", "Fix login bug");
-  const p = cardTaskPrompt(b, b.cards[0]!.id, "/tmp/.line.json");
-  expect(p).toContain('"author": "<your agent name>"');
+  const p = cardTaskPrompt(b, b.cards[0]!.id, SRV);
+  expect(p).toContain('"author":"<your name>"');
 });
 
-test("cardTaskPrompt demands the move happen first, as its own write", () => {
+test("cardTaskPrompt demands the move happen first and comments along the way", () => {
   let b = defaultBoard();
   b = addCard(b, "backlog", "Fix login bug");
-  const p = cardTaskPrompt(b, b.cards[0]!.id, "/tmp/.line.json");
+  const p = cardTaskPrompt(b, b.cards[0]!.id, SRV);
   expect(p).toContain("STEP 1, before any other work");
-  expect(p).toContain("as its own write");
   expect(p).toContain("not in one write at the end");
-  // and it must Read before Edit, which is what tripped the first real run
-  expect(p).toContain("Read the board file before you edit it");
 });
 
-test("cardTaskPrompt tells the agent how to write a comment", () => {
+test("cardTaskPrompt scopes the agent to its own card and constraints", () => {
   let b = defaultBoard();
   b = addCard(b, "backlog", "Fix login bug");
-  const p = cardTaskPrompt(b, b.cards[0]!.id, "/tmp/.line.json");
-  expect(p).toContain('"comments"');
-  expect(p).toContain('"author"');
-  expect(p).toContain('"columnId"');
+  const p = cardTaskPrompt(b, b.cards[0]!.id, SRV);
+  expect(p).toContain("work ONLY this card");
+  expect(p).toContain("This task replaces anything");
+  expect(p).toContain("do not commit");
 });
