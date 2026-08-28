@@ -64,7 +64,16 @@ function parseQuestions(input: Record<string, unknown> | undefined): AgentStatus
 }
 
 export function applyEvent(prev: AgentStatus | null, e: HookEvent, now: number, persona?: string): AgentStatus | null {
-  const next = applyEventInner(prev, e, now, persona);
+  let next = applyEventInner(prev, e, now, persona);
+  if (next) {
+    // Track when the current state began: reset on every transition (and on
+    // SessionStart, which is a fresh session even if the state string matches),
+    // carry through otherwise. The scanner mirrors this rule in mergeForWrite.
+    const carried = prev && prev.state === next.state && e.hook_event_name !== "SessionStart"
+      ? prev.stateSince ?? now
+      : now;
+    next = { ...next, stateSince: carried };
+  }
   // Re-stamp the persona on EVERY event, not just the seed: a scanner pass can
   // write this session's file before (or between) hook events, and a prev
   // without the persona would otherwise carry that loss forward for the whole

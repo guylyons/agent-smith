@@ -247,6 +247,11 @@ export function mergeForWrite(existing: AgentStatus | null, derived: AgentStatus
   // it here would strip the agent's name/sprite — and drop it out of the
   // scrum-master notification fan-out — after the first scan pass.
   if (carried.persona === undefined && existing?.persona !== undefined) carried.persona = existing.persona;
+  // stateSince mirrors the hook's rule: carry while the state is unchanged,
+  // reset to now on a transition (or a first sighting).
+  carried.stateSince = existing && existing.state === carried.state
+    ? existing.stateSince ?? now
+    : now;
 
   // A hook-set block on the USER is invisible to the transcript: the session sits
   // on an unresolved tool_use, which derives as "working". Don't let that
