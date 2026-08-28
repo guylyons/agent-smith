@@ -153,15 +153,37 @@ function shq(s: string): string {
  *  what binds the persona to the real session id. */
 export function buildLaunchInput(
   task: string,
-  opts: { model?: string; permissionMode?: string },
+  opts: { model?: string; permissionMode?: string; serverUrl?: string },
   persona: Persona | null,
 ): string {
   let flags = "";
   if (opts.model && ALLOWED_MODELS.has(opts.model)) flags += ` --model ${opts.model}`;
   if (opts.permissionMode && ALLOWED_PERMISSION_MODES.has(opts.permissionMode)) flags += ` --permission-mode ${opts.permissionMode}`;
   if (persona) flags += ` --append-system-prompt ${shq(composePrompt(persona))}`;
-  const env = persona ? `AGENT_PERSONA=${persona.id} ` : "";
+  let env = persona ? `AGENT_PERSONA=${persona.id} ` : "";
+  // Where the dashboard's card API lives — how a launched agent addresses the
+  // board (the persona prompt points it at $AGENT_WORKSHOP_URL).
+  if (opts.serverUrl) env += `AGENT_WORKSHOP_URL=${shq(opts.serverUrl)} `;
   return `${env}claude${flags} ${shq(task)}\n`;
+}
+
+/** The `.claude/settings.local.json` contents written into a freshly created
+ *  worktree before its agent launches: allow exactly the board read and the
+ *  card-scoped writes, so a worker can drive its own ticket without stalling on
+ *  a permission prompt. Deliberately NOT the spawn/kill/prompt endpoints —
+ *  anything that reaches other sessions or starts new ones stays behind a
+ *  human approval. */
+export function workerPermissionSettings(serverUrl: string): { permissions: { allow: string[] } } {
+  return {
+    permissions: {
+      allow: [
+        `Bash(curl -s ${serverUrl}/board)`,
+        `Bash(curl -s ${serverUrl}/agents)`,
+        `Bash(curl -s -X POST ${serverUrl}/action/card-move:*)`,
+        `Bash(curl -s -X POST ${serverUrl}/action/card-comment:*)`,
+      ],
+    },
+  };
 }
 
 /** Launch a NEW Claude session in `cwd` with `task` as its opening prompt — a new
@@ -175,17 +197,34 @@ export function buildLaunchInput(
  *  a working tree; a worktree failure aborts the launch with its error.
  *  `opts.persona`, when it names a known persona, binds that persona to the new
  *  session (see buildLaunchInput); an unknown id resolves to null and is
- *  ignored, same as an unknown model. */
+ *  ignored, same as an unknown model.
+ *  `opts.serverUrl` (the dashboard's own origin) rides into the session's env,
+ *  and — for a fresh worktree only — is written into the worktree's
+ *  `.claude/settings.local.json` as a narrow curl allowlist, so the agent can
+ *  move/comment its own card without stalling on a permission prompt. Only a
+ *  worktree gets this: writing settings into a user's real folder uninvited is
+ *  not this tool's call to make. */
 export async function spawnAgent(
   cwd: string,
   task: string,
-  opts?: { model?: string; permissionMode?: string; worktree?: string; persona?: string },
+  opts?: { model?: string; permissionMode?: string; worktree?: string; persona?: string; serverUrl?: string },
 ): Promise<ActionResult> {
   let launchCwd = cwd;
   if (opts?.worktree) {
     const wt = await createWorktree(cwd, opts.worktree);
     if (!wt.ok) return { ok: false, error: wt.error ?? "could not create worktree" };
     launchCwd = wt.path!;
+    if (opts.serverUrl) {
+      try {
+        const dir = `${launchCwd}/.claude`;
+        const file = `${dir}/settings.local.json`;
+        // A brand-new worktree can't have local settings yet; don't clobber if
+        // something unexpected is there.
+        if (!(await Bun.file(file).exists())) {
+          await Bun.write(file, JSON.stringify(workerPermissionSettings(opts.serverUrl), null, 2) + "\n");
+        }
+      } catch { /* best-effort — the agent just gets permission prompts instead */ }
+    }
   }
   // An unknown persona id resolves to null and is ignored, the same way an
   // unknown model is — never interpolated into the command.

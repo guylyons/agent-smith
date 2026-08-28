@@ -70,15 +70,31 @@ export function getPersona(id: string, dir: string = PERSONAS_DIR): Persona | nu
   return loadPersonas(dir).find((p) => p.id === id) ?? null;
 }
 
-/** The text appended to the session's system prompt: the persona's own body plus
- *  a generated line naming its skills, so `skills:` stays declarative data rather
- *  than prose each author has to remember to write twice.
+/** The text appended to the session's system prompt: an identity line (so the
+ *  agent knows the codename its desk and board comments go by), the persona's
+ *  own body, a generated line naming its skills (so `skills:` stays declarative
+ *  data rather than prose each author has to remember to write twice), and the
+ *  shared board protocol every persona plays by.
  *  Claude Code skills are model-invoked — naming them is the strongest lever a
- *  persona has; it cannot force them to load. */
+ *  persona has; it cannot force them to load.
+ *  The generated lines are pure ASCII: this text rides into the session as an
+ *  argv through a path known to mangle anything else. */
 export function composePrompt(p: Persona): string {
-  if (p.skills.length === 0) return p.prompt;
-  const list = p.skills.map((s) => `\`${s}\``).join(", ");
-  return `${p.prompt}\n\nReach for ${list} via the Skill tool when the work calls for it.`;
+  const skills = p.skills.length === 0
+    ? ""
+    : `\n\nReach for ${p.skills.map((s) => `\`${s}\``).join(", ")} via the Skill tool when the work calls for it.`;
+  const board = [
+    "",
+    "",
+    `Board protocol: your codename on the team board is ${p.name}; sign every`,
+    'board comment with it. If a task carries a "-- THE LINE --" footer, follow',
+    "its protocol exactly: move your card and comment through the curl commands",
+    'it gives, as you work. A message starting with "[THE LINE]" is a board',
+    "notification: read it and respond on that card via card-comment rather than",
+    "ignoring it. The dashboard's base URL is in $AGENT_WORKSHOP_URL (default",
+    "http://localhost:4173).",
+  ].join("\n");
+  return `You are ${p.name}, the team's ${p.role}.\n\n${p.prompt}${skills}${board}`;
 }
 
 /** Fill name/role/sprite from each agent's persona. Mirrors `applyOverrides` in

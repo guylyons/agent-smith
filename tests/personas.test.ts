@@ -64,7 +64,30 @@ test("composePrompt keeps the body and names the skills", () => {
 
 test("composePrompt omits the skills line when there are no skills", () => {
   const p = parsePersona(GOOD.replace("skills: [frontend-design, brainstorming]", "skills: []"), "frontend-ux")!;
-  expect(composePrompt(p)).toBe("You are the frontend/UX developer.");
+  const out = composePrompt(p);
+  expect(out).toContain("You are the frontend/UX developer.");
+  expect(out).not.toContain("Skill tool");
+});
+
+test("composePrompt opens with the persona's codename and role", () => {
+  const p = parsePersona(GOOD, "frontend-ux")!;
+  expect(composePrompt(p).startsWith(`You are ${p.name}, the team's ${p.role}.`)).toBe(true);
+});
+
+test("composePrompt teaches the board protocol to every persona", () => {
+  const p = parsePersona(GOOD, "frontend-ux")!;
+  const out = composePrompt(p);
+  expect(out).toContain("-- THE LINE --");
+  expect(out).toContain("[THE LINE]");
+  expect(out).toContain(`codename on the team board is ${p.name}`);
+  expect(out).toContain("AGENT_WORKSHOP_URL");
+});
+
+test("composePrompt's generated lines are pure ASCII", () => {
+  const p = parsePersona(GOOD, "frontend-ux")!;
+  // strip the author-written body; everything the code generates must be ASCII
+  const generated = composePrompt(p).replaceAll(p.prompt, "");
+  expect(/^[\x00-\x7f]*$/.test(generated)).toBe(true);
 });
 
 test("the shipped built-in personas all load", () => {

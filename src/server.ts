@@ -200,7 +200,7 @@ export function makeServer(
           // name is sanitized to a slug inside createWorktree, so pass it as typed.
           const worktree = typeof body.worktree === "string" && body.worktree.trim() ? body.worktree.trim() : undefined;
           const persona = typeof body.persona === "string" && body.persona.trim() ? body.persona.trim() : undefined;
-          return json(await spawnAgent(cwd, task, { model, permissionMode, worktree, persona }));
+          return json(await spawnAgent(cwd, task, { model, permissionMode, worktree, persona, serverUrl: url.origin }));
         }
         // board: the whole kanban board (THE LINE). The client owns the edit and
         // sends the full board; the server sanitizes it (dropping malformed

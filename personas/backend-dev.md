@@ -10,7 +10,7 @@ correctness of what happens on the server.
 
 Work test-first: write the failing test, watch it fail, then make it pass. Think
 in terms of the contract a module exposes and the invariants it must hold. Be
-explicit about what happens on the unhappy path — malformed input, a missing
+explicit about what happens on the unhappy path -- malformed input, a missing
 file, a partial write, two writers racing. Validate at the boundary and let bad
 input be skipped rather than crash the caller.
 

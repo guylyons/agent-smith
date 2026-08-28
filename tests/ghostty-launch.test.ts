@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { buildLaunchInput, asStr } from "../src/ghostty";
+import { buildLaunchInput, asStr, workerPermissionSettings } from "../src/ghostty";
 import type { Persona } from "../src/lib/personas";
 
 const P: Persona = {
@@ -23,7 +23,9 @@ test("model and permission mode are allowlisted", () => {
 test("a persona adds the env var and the system prompt", () => {
   const out = buildLaunchInput("build the card", {}, P);
   expect(out.startsWith("AGENT_PERSONA=frontend-ux claude ")).toBe(true);
-  expect(out).toContain("--append-system-prompt 'You are the frontend/UX developer.");
+  // composePrompt opens with the identity line, then the persona's own body
+  expect(out).toContain("--append-system-prompt 'You are PIXEL, the team'\\''s Frontend UX.");
+  expect(out).toContain("You are the frontend/UX developer.");
   expect(out).toContain("frontend-design");
   expect(out.endsWith(" 'build the card'\n")).toBe(true);
 });
@@ -31,12 +33,12 @@ test("a persona adds the env var and the system prompt", () => {
 test("single quotes in the task and prompt are escaped", () => {
   const out = buildLaunchInput("don't break", {}, { ...P, prompt: "it's fine" });
   expect(out).toContain(`'don'\\''t break'`);
-  expect(out).toContain(`'it'\\''s fine`);
+  expect(out).toContain(`it'\\''s fine`);
 });
 
 test("a multi-line prompt is passed through intact", () => {
   const out = buildLaunchInput("t", {}, { ...P, prompt: "line one\nline two", skills: [] });
-  expect(out).toContain("--append-system-prompt 'line one\nline two'");
+  expect(out).toContain("line one\nline two");
 });
 
 // ---- asStr: the AppleScript string literal --------------------------------
@@ -78,4 +80,28 @@ test("asStr round-trips a real card prompt's arrows", () => {
   const s = asStr("backlog → in-progress");
   expect(s).toContain("character id 8594");
   expect(s).not.toContain("→");
+});
+
+// ---- the workshop URL env + worker permission settings --------------------
+
+test("serverUrl rides into the launch env so the agent can find the API", () => {
+  const out = buildLaunchInput("t", { serverUrl: "http://localhost:4173" }, P);
+  expect(out.startsWith("AGENT_PERSONA=frontend-ux AGENT_WORKSHOP_URL='http://localhost:4173' claude ")).toBe(true);
+});
+
+test("serverUrl is set even without a persona", () => {
+  const out = buildLaunchInput("t", { serverUrl: "http://localhost:4173" }, null);
+  expect(out.startsWith("AGENT_WORKSHOP_URL='http://localhost:4173' claude ")).toBe(true);
+});
+
+test("workerPermissionSettings allows exactly the board read and card writes", () => {
+  const s = workerPermissionSettings("http://localhost:4173");
+  expect(s.permissions.allow).toEqual([
+    "Bash(curl -s http://localhost:4173/board)",
+    "Bash(curl -s http://localhost:4173/agents)",
+    "Bash(curl -s -X POST http://localhost:4173/action/card-move:*)",
+    "Bash(curl -s -X POST http://localhost:4173/action/card-comment:*)",
+  ]);
+  // never the spawn/kill/prompt endpoints — those stay behind a human approval
+  expect(JSON.stringify(s)).not.toContain("/action/spawn");
 });
