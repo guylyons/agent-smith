@@ -21,9 +21,34 @@ async function osa(script: string): Promise<string> {
   return out.trim();
 }
 
-// AppleScript string literal, escaping backslash and quote.
-function asStr(s: string): string {
-  return '"' + s.replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"';
+/** An AppleScript string EXPRESSION for `s`.
+ *
+ *  osascript decodes its `-e` argument as Latin-1, so UTF-8 bytes for anything
+ *  outside ASCII arrive mangled — an em dash reaches the session as three junk
+ *  characters, which corrupts any prompt or card text that isn't plain ASCII.
+ *  Printable ASCII stays in a quoted literal (escaping backslash and quote);
+ *  everything else — accents, dashes, arrows, emoji, and the newlines and tabs
+ *  a literal can't hold — is emitted as `character id N` per Unicode code point,
+ *  which carries no encoding assumption at all.
+ *
+ *  Always parenthesised, so the result drops into any expression position
+ *  (`(name of term) contains <expr>`) regardless of whether it concatenated. */
+export function asStr(s: string): string {
+  const parts: string[] = [];
+  let run = "";
+  const flush = () => {
+    if (run) { parts.push('"' + run.replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"'); run = ""; }
+  };
+  // Iterate by code POINT: `character id` takes a Unicode scalar and rejects a
+  // lone surrogate ("Can't get character id 55357"), so an emoji must go out as
+  // its full code point, not the two units a JS string stores it in.
+  for (const ch of s) {
+    const code = ch.codePointAt(0)!;
+    if (code >= 0x20 && code <= 0x7e) run += ch;
+    else { flush(); parts.push(`(character id ${code})`); }
+  }
+  flush();
+  return "(" + (parts.length ? parts.join(" & ") : '""') + ")";
 }
 
 async function runWhere(matchExpr: string, body: string): Promise<boolean> {

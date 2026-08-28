@@ -22,9 +22,9 @@ type Mutate = (fn: (b: Board) => Board) => void;
 // edits build on each other instead of clobbering — and posts the result to the
 // server, which persists it and echoes it back over SSE.
 export function TheLine({
-  board: incoming, agents, onSpawnForCard,
+  board: incoming, boardPath, agents, onSpawnForCard,
 }: {
-  board: Board; agents: AgentStatus[]; onSpawnForCard: (task: string) => void;
+  board: Board; boardPath: string; agents: AgentStatus[]; onSpawnForCard: (task: string) => void;
 }) {
   const [board, setBoard] = useState(incoming);
   const [addingCol, setAddingCol] = useState(false);
@@ -71,6 +71,7 @@ export function TheLine({
       {openCard && (
         <CardModal
           board={board}
+          boardPath={boardPath}
           card={openCard}
           columnName={openColumn?.name ?? ""}
           agents={agents}

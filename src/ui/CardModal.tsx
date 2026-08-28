@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentStatus } from "../schema";
 import type { Board, Card } from "../lib/board";
-import { renameCard, setCardDescription, assignCard, addComment, deleteComment, cardTaskText } from "../lib/board";
+import { renameCard, setCardDescription, assignCard, addComment, deleteComment, cardTaskPrompt } from "../lib/board";
 import { sendPromptTo } from "./actions";
 import { toast } from "./toast";
 
@@ -12,12 +12,12 @@ type Mutate = (fn: (b: Board) => Board) => void;
 const ME = "You";
 
 // A Trello-style detail view for one card, over a dimmed backdrop. Gives a
-// single card room to breathe: editable title + description, a persona
+// single card room to breathe: editable title + description, an agent
 // assignee, and a comment thread. Backdrop click or Esc closes it.
 export function CardModal({
-  board, card, columnName, agents, mutate, onSpawnForCard, onClose,
+  board, boardPath, card, columnName, agents, mutate, onSpawnForCard, onClose,
 }: {
-  board: Board; card: Card; columnName: string; agents: AgentStatus[];
+  board: Board; boardPath: string; card: Card; columnName: string; agents: AgentStatus[];
   mutate: Mutate; onSpawnForCard: (task: string) => void; onClose: () => void;
 }) {
   // The assignee is a live agent session: its assignee.id is the sessionId. If
@@ -26,11 +26,13 @@ export function CardModal({
   const assigned = card.assignee;
   const assignedIsLive = !!assigned && agents.some((a) => a.sessionId === assigned.id);
 
-  // Send the card's task (title + description + column instruction) to the
-  // assigned live agent, and drop a note in the thread so there's a trace.
+  // Send the card's task to the assigned live agent: the title + description +
+  // column instruction, then the board protocol (which card, where the board
+  // lives, how to move itself along and comment). Drop a note in the thread so
+  // there's a trace.
   function sendToAssigned() {
     if (!assigned) return;
-    const text = cardTaskText(board, card.id);
+    const text = cardTaskPrompt(board, card.id, boardPath, assigned.name);
     if (!text.trim()) { toast("Card has no task text to send"); return; }
     void sendPromptTo(assigned.id, text);
     mutate((b) => addComment(b, card.id, ME, `Sent task to ${assigned.name}.`));
@@ -40,7 +42,7 @@ export function CardModal({
   // Spawn a fresh agent seeded with this card's task (persona/model/worktree
   // chosen in the New Agent modal). Closes the card so the modal is unobstructed.
   function spawnForCard() {
-    onSpawnForCard(cardTaskText(board, card.id));
+    onSpawnForCard(cardTaskPrompt(board, card.id, boardPath));
     onClose();
   }
 

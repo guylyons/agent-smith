@@ -6,7 +6,7 @@ import { ensureStatusDir, statusDir } from "./lib/paths";
 import { scanLiveSessions, readConversation, readSubagents } from "./scan";
 import { readOverrides, applyOverrides, setNameOverride, setSpriteOverride } from "./lib/overrides";
 import { loadPersonas, applyPersonas } from "./lib/personas";
-import { readBoard, writeBoard, sanitizeBoard } from "./lib/board";
+import { readBoard, writeBoard, sanitizeBoard, boardFile } from "./lib/board";
 import { ALLOWED_MODELS, ALLOWED_PERMISSION_MODES, focusSession, interruptSession, killAgent, sendPrompt, spawnAgent } from "./ghostty";
 import { readRepo } from "./repo";
 import { saveUpload } from "./lib/uploads";
@@ -41,6 +41,7 @@ export function readSnapshot(dir: string, now: number): Snapshot {
   // user override > persona > inferRole > hashed codename
   return buildSnapshot(applyOverrides(applyPersonas(agents, loadPersonas()), readOverrides(dir)), now, {
     board: readBoard(dir),
+    boardPath: boardFile(dir),
   });
 }
 
