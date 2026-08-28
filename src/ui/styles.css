@@ -147,13 +147,25 @@
   .who{flex:1;min-width:0}
   .name{font-size:11px;letter-spacing:.5px}
   .spec{font-size:9px;color:var(--dim);margin-top:7px;text-transform:uppercase}
+  .repo{
+    font-size:9px;color:var(--dim);margin-top:5px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  }
   .ticket{
     display:inline-block;margin-top:11px;font-size:10px;
     background:var(--box-lo);border:2px solid var(--bevel);padding:4px 7px;
   }
+  .oncard{
+    font-size:9px;color:var(--gold);margin-top:9px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  }
   .doing{font-size:11px;color:var(--bone);margin-top:10px;line-height:1.5;min-height:2.4em}
   .doing::before{content:"> ";color:var(--gold)}
   .state{display:flex;align-items:center;gap:7px;margin-top:10px;font-size:9px}
+  .statefor{color:var(--dim)}
+  /* a desk idle past the stale threshold: still present, visibly dormant */
+  .desk.is-stale{opacity:.55}
+  .desk.is-stale:hover,.desk.is-stale:focus-visible{opacity:1}
   .lamp{width:10px;height:10px;flex:0 0 auto}
   .lamp.working{background:var(--gold);animation:blink 1.1s steps(2) infinite}
   .lamp.waiting{background:var(--clay)}

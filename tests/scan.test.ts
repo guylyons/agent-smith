@@ -28,7 +28,14 @@ const NO_GHOSTTY: { terminals: GhosttyTerminal[]; ok: boolean } = { terminals: [
 
 test("mergeForWrite: writes the derived status when nothing exists", () => {
   const derived = S({ state: "idle" });
-  expect(mergeForWrite(null, derived, 1000)).toEqual(derived);
+  // a first sighting stamps stateSince = now
+  expect(mergeForWrite(null, derived, 1000)).toEqual({ ...derived, stateSince: 1000 });
+});
+
+test("mergeForWrite: carries stateSince while the state is unchanged, resets on a transition", () => {
+  const existing = S({ state: "working", stateSince: 500 });
+  expect(mergeForWrite(existing, S({ state: "working" }), 2000).stateSince).toBe(500);
+  expect(mergeForWrite(existing, S({ state: "idle" }), 2000).stateSince).toBe(2000);
 });
 
 test("mergeForWrite: preserves a hook-set permission wait while still mid-tool, only refreshing liveness", () => {

@@ -276,6 +276,11 @@ export function mergeForWrite(existing: AgentStatus | null, derived: AgentStatus
   // And the usage meter's budget: a tail window that momentarily shows no
   // marker must not blank a budget we already know.
   if (carried.usage === undefined && existing?.usage !== undefined) carried.usage = existing.usage;
+  // stateSince mirrors the hook's rule: carry while the state is unchanged,
+  // reset to now on a transition (or a first sighting).
+  carried.stateSince = existing && existing.state === carried.state
+    ? existing.stateSince ?? now
+    : now;
 
   // A hook-set block on the USER is invisible to the transcript: the session sits
   // on an unresolved tool_use, which derives as "working". Don't let that

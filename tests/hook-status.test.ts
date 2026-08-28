@@ -183,3 +183,22 @@ test("re-stamping never overwrites a persona already on prev", () => {
   // env var vanished mid-session (shouldn't happen, but the stored value wins)
   expect(applyEvent(prev, tool as any, 2000, undefined)!.persona).toBe("frontend-ux");
 });
+
+test("stateSince is stamped on seed and carried while the state holds", () => {
+  const start = { hook_event_name: "SessionStart", session_id: "s1", cwd: "/x", branch: null };
+  const tool = { hook_event_name: "PreToolUse", session_id: "s1", cwd: "/x", branch: null, tool_name: "Bash", tool_input: {} };
+  const a = applyEvent(null, start as any, 1000)!;
+  expect(a.stateSince).toBe(1000); // working begins
+  const b = applyEvent(a, tool as any, 5000)!;
+  expect(b.stateSince).toBe(1000); // still working — carried
+  const stop = { hook_event_name: "Stop", session_id: "s1", cwd: "/x", branch: null };
+  const c = applyEvent(b, stop as any, 9000)!;
+  expect(c.stateSince).toBe(9000); // working -> idle resets
+});
+
+test("SessionStart resets stateSince even when the state string matches", () => {
+  const start = { hook_event_name: "SessionStart", session_id: "s1", cwd: "/x", branch: null };
+  const a = applyEvent(null, start as any, 1000)!; // working
+  const b = applyEvent(a, start as any, 8000)!;    // a fresh session, also working
+  expect(b.stateSince).toBe(8000);
+});
