@@ -92,7 +92,9 @@ export function composePrompt(p: Persona): string {
     'it gives, as you work. A message starting with "[THE LINE]" is a board',
     "notification: read it and respond on that card via card-comment rather than",
     "ignoring it. The dashboard's base URL is in $AGENT_WORKSHOP_URL (default",
-    "http://localhost:4173).",
+    "http://localhost:4173) -- but in shell commands always write the URL out",
+    "literally, exactly as your task footer shows it: permission allowlists match",
+    "the literal command text, so an env-var form stalls on an approval prompt.",
   ].join("\n");
   return `You are ${p.name}, the team's ${p.role}.\n\n${p.prompt}${skills}${board}`;
 }
