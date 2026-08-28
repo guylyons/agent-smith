@@ -202,13 +202,22 @@ async function main() {
  *  state as before. */
 async function assignCardOnStart(cardId: string, sessionId: string): Promise<void> {
   const base = process.env.AGENT_WORKSHOP_URL || "http://localhost:4173";
-  try {
-    await fetch(`${base}/action/card-assign`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ cardId, sessionId }),
-    });
-  } catch { /* dashboard down / not reachable — leave the card unassigned */ }
+  // Retry a few times: a brand-new session can beat the dashboard to the punch
+  // (server still starting, or our status file not yet surfaced). One swallowed
+  // failure used to leave the card unassigned for the whole session — the
+  // "spawned via card, no chip" bug. The server also self-heals by reading our
+  // status file directly, so this only needs to cover the moments it's unreachable.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(`${base}/action/card-assign`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ cardId, sessionId }),
+      });
+      if (res.ok) return;
+    } catch { /* not reachable yet — fall through to a short wait and retry */ }
+    await new Promise((r) => setTimeout(r, 400));
+  }
 }
 
 if (import.meta.main) void main();

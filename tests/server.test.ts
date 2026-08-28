@@ -298,8 +298,27 @@ test("card-assign binds a live session as assignee and null clears it", async ()
   expect(readSnapshot(dir, Date.now()).board.cards[0]!.assignee!.id).toBe(CARD_SESSION);
   expect((await (await post("/action/card-assign", { cardId, sessionId: null })).json()).ok).toBe(true);
   expect(readSnapshot(dir, Date.now()).board.cards[0]!.assignee).toBeUndefined();
-  // a session that isn't live can't be assigned
+  // a session with no status file at all can't be assigned
   expect((await post("/action/card-assign", { cardId, sessionId: "99999999-dead-4dea-bead-999999999999" })).status).toBe(404);
+  server.stop(true);
+});
+
+test("card-assign binds a just-spawned session even before it enters the live view", async () => {
+  // A NEW agent spawned for a card self-assigns from its SessionStart hook. If that
+  // POST lands before the session surfaces as "live" (its status file is on disk but
+  // outside the snapshot's freshness window / a scan hasn't run), the assign must
+  // STILL bind by reading the file directly — otherwise the card is silently left
+  // with no assignee for good, which is the "spawned via card, no chip" bug.
+  const { server, post } = await cardApiServer();
+  const STALE = "11111111-2222-4333-8444-555555555555";
+  // updatedAt well past the 5-min freshness window: present on disk, absent from the live view.
+  writeFileSync(join(dir, `${STALE}.json`), valid({ sessionId: STALE, name: "EMBER", updatedAt: Date.now() - 30 * 60_000 }));
+  expect(readSnapshot(dir, Date.now()).agents.some((a) => a.sessionId === STALE)).toBe(false);
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
+  expect((await (await post("/action/card-assign", { cardId, sessionId: STALE })).json()).ok).toBe(true);
+  const a = readSnapshot(dir, Date.now()).board.cards[0]!.assignee!;
+  expect(a.id).toBe(STALE);
+  expect(a.name).toBe("EMBER");
   server.stop(true);
 });
 

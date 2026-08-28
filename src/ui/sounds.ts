@@ -82,9 +82,31 @@ export function playSubmit(): void {
   playSequence([{ freq: 1046, start: 0, dur: 0.07 }]);
 }
 
-// Play the cue named by a SoundCue value (from soundTransitions).
+// A quick two-tick "slide" — a card moving between columns. Deliberately short
+// and light: this fires on every board move, so it must never feel heavy.
+export function playMove(): void {
+  playSequence([
+    { freq: 523, start: 0, dur: 0.05 },
+    { freq: 784, start: 0.05, dur: 0.06 },
+  ]);
+}
+
+// A triumphant four-note fanfare — a task reaching Done. Longer and brighter
+// than the plain completion arpeggio so a finished ticket lands as an event.
+export function playCelebrate(): void {
+  playSequence([
+    { freq: 523, start: 0, dur: 0.1 },
+    { freq: 659, start: 0.1, dur: 0.1 },
+    { freq: 784, start: 0.2, dur: 0.1 },
+    { freq: 1046, start: 0.3, dur: 0.22 },
+  ]);
+}
+
+// Play the cue named by a SoundCue value (from soundTransitions / boardMoves).
 export function playCue(cue: SoundCue): void {
   if (cue === "completion") playCompletion();
   else if (cue === "question") playQuestion();
+  else if (cue === "move") playMove();
+  else if (cue === "celebrate") playCelebrate();
   else playPermission();
 }
