@@ -69,6 +69,12 @@ export function makeServer(
     const targets = agents.filter(
       (a) =>
         a.name !== author &&
+        // NEVER deliver into a session that's waiting on a dialog (permission
+        // prompt, plan approval, question): typed input there presses keys on
+        // the dialog — a live run showed notifications auto-APPROVING pending
+        // permission prompts, which cascaded into runaway agent spawns. A
+        // missed notification is fine; the comment is on the board.
+        a.state !== "waiting" &&
         (a.persona === "scrum-master" || (card.assignee && a.sessionId === card.assignee.id)),
     );
     for (const t of targets) void deliver(t, text).catch(() => { /* best-effort */ });
@@ -200,6 +206,13 @@ export function makeServer(
           // name is sanitized to a slug inside createWorktree, so pass it as typed.
           const worktree = typeof body.worktree === "string" && body.worktree.trim() ? body.worktree.trim() : undefined;
           const persona = typeof body.persona === "string" && body.persona.trim() ? body.persona.trim() : undefined;
+          // Loop-breaker: an agent (curl sends no sec-fetch-site) may spawn
+          // workers but never another orchestrator. A live run showed confused
+          // scrum-masters spawning scrum-masters exponentially; only a human in
+          // the browser may start one.
+          if (persona === "scrum-master" && !req.headers.get("sec-fetch-site")) {
+            return json({ ok: false, error: "agents may not spawn a scrum-master — only a human can (use the + NEW AGENT dialog)" }, 403);
+          }
           return json(await spawnAgent(cwd, task, { model, permissionMode, worktree, persona, serverUrl: url.origin }));
         }
         // board: the whole kanban board (THE LINE). The client owns the edit and
@@ -266,6 +279,11 @@ export function makeServer(
             if (!assignee) return json({ ok: false, error: "card has no assignee" }, 400);
             const agent = readSnapshot(dir, Date.now()).agents.find((a) => a.sessionId === assignee.id);
             if (!agent) return json({ ok: false, error: `assignee "${assignee.name}" is not a live session` }, 404);
+            // A session waiting on a dialog would take the typed task as
+            // keystrokes ON the dialog (Enter approves it) — refuse instead.
+            if (agent.state === "waiting") {
+              return json({ ok: false, error: `${agent.name} is waiting on a prompt in its terminal — answer that first, then resend` }, 409);
+            }
             const prompt = cardTaskPrompt(board, cardId, url.origin, agent.name);
             if (!prompt.trim()) return json({ ok: false, error: "card has no task text to send" }, 400);
             const r = await deliver(agent, prompt);

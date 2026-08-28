@@ -408,3 +408,44 @@ test("card ops without any scrum master or assignee deliver nothing", async () =
   expect(sent).toEqual([]);
   server.stop(true);
 });
+
+// ---- cascade guards -------------------------------------------------------
+// A live run showed two failure modes: notifications typed into a session
+// waiting at a permission dialog pressed Enter ON the dialog (auto-approving
+// pending actions), and confused scrum-masters spawning scrum-masters
+// exponentially. These lock both doors.
+
+test("no notification is delivered to a session that is waiting on a dialog", async () => {
+  const { server, post, sent } = await notifyServer();
+  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", state: "waiting" }));
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
+  sent.length = 0;
+  await post("/action/card-comment", { cardId, author: "VOLT", text: "update" });
+  await post("/action/card-move", { cardId, toColumnId: "review", author: "VOLT" });
+  expect(sent).toEqual([]);
+  server.stop(true);
+});
+
+test("send-task to a waiting assignee is refused, not typed into its dialog", async () => {
+  const { server, post, sent } = await notifyServer();
+  writeFileSync(join(dir, `${WORKER}.json`), valid({ sessionId: WORKER, name: "VOLT", state: "waiting" }));
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
+  await post("/action/card-assign", { cardId, sessionId: WORKER });
+  sent.length = 0;
+  const res = await post("/action/send-task", { cardId });
+  expect(res.status).toBe(409);
+  expect(sent).toEqual([]);
+  server.stop(true);
+});
+
+test("an agent (no sec-fetch-site) may not spawn a scrum-master", async () => {
+  const { server, base } = await cardApiServer();
+  const res = await fetch(`${base}/action/spawn`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ cwd: "/tmp", text: "orchestrate", persona: "scrum-master" }),
+  });
+  expect(res.status).toBe(403);
+  expect(((await res.json()) as any).ok).toBe(false);
+  server.stop(true);
+});

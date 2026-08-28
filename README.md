@@ -110,20 +110,49 @@ read and act on.
   picker lists the live agent sessions; choosing one records it on the card (kept
   visible, marked _(ended)_, even after that session closes).
   - **▸ SEND TASK** sends the assigned agent the card's task — its **title +
-    description + column instruction**, combined — and drops a "Sent task to …"
-    note in the card's comment thread.
+    description + column instruction**, plus a protocol footer naming the card,
+    the column flow, and the exact `curl` commands to move itself and comment —
+    composed and delivered server-side, with a "Sent task to …" note dropped in
+    the thread.
   - **+ NEW AGENT FOR THIS CARD** opens the New Agent modal pre-filled with that
-    same combined task, so you can launch a fresh session (persona, model,
+    same task-plus-footer, so you can launch a fresh session (persona, model,
     worktree) to work it.
 
 A fresh board starts with `Backlog · In Progress · Review · Done`; reshape it
 however you like.
 
-The whole board is stored in `~/.agent-status/.line.json` so it survives
-restarts **and is readable by any agent** — that's how a session becomes aware
-of the stages, what each one expects of it, and which cards it's been assigned.
-The client owns edits and writes the full board; the server sanitizes it before
-saving.
+### The card API (how agents drive their own tickets)
+
+Agents never edit the board file. The server exposes a card-scoped API, and the
+protocol footer every sent task carries teaches the agent to use it:
+
+- `GET /board` — columns (with instructions), cards, comments, and the board's
+  path; `GET /agents` — the live sessions with resolved names/roles.
+- `POST /action/card-add | card-move | card-comment | card-assign | send-task` —
+  each is applied server-side against a fresh read of the board, so an agent's
+  move or comment can never clobber (or be clobbered by) the UI's whole-board
+  write or another agent.
+
+A worker follows the footer: move its card to the working column and comment
+before starting, comment as it learns things, comment and move it on when done.
+Every agent-made move/comment also **wakes the sessions that care** — the card's
+assignee and any live scrum-master session (never the author itself) get a short
+`[THE LINE] …` note typed into their terminal, so supervision is event-driven,
+not polled. Human comments posted in a card's thread are likewise delivered to
+the assigned agent.
+
+**Orchestration**: launch a session with the `scrum-master` persona and hand it
+work — it sizes and splits the work into cards, spawns a fresh worker per card
+(persona-matched, in an isolated worktree, `acceptEdits`), assigns and sends
+tasks, reacts to board notifications, verifies a column's instruction before
+advancing a card, and nudges stalled ones. A fresh worktree is seeded with a
+`.claude/settings.local.json` allowlisting exactly the board `curl`s and local
+git verbs, so a worker updates its ticket without stalling on permission
+prompts (spawn/kill/prompt endpoints and `git push` still require a human).
+
+The board itself is stored in `~/.agent-status/.line.json` so it survives
+restarts. The browser client owns manual edits and writes the full board; the
+server sanitizes every write before saving.
 
 ```jsonc
 // ~/.agent-status/.line.json
