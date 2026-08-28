@@ -181,6 +181,15 @@ export function workerPermissionSettings(serverUrl: string): { permissions: { al
         `Bash(curl -s ${serverUrl}/agents)`,
         `Bash(curl -s -X POST ${serverUrl}/action/card-move:*)`,
         `Bash(curl -s -X POST ${serverUrl}/action/card-comment:*)`,
+        // The Done column's usual instruction is "worktree clean and committed",
+        // so the local git verbs a worker needs mustn't stall it either. The
+        // worktree is isolated, so a commit here can't touch anyone's branch;
+        // push stays behind a human approval.
+        "Bash(git status:*)",
+        "Bash(git diff:*)",
+        "Bash(git log:*)",
+        "Bash(git add:*)",
+        "Bash(git commit:*)",
       ],
     },
   };

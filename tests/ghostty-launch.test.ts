@@ -94,14 +94,21 @@ test("serverUrl is set even without a persona", () => {
   expect(out.startsWith("AGENT_WORKSHOP_URL='http://localhost:4173' claude ")).toBe(true);
 });
 
-test("workerPermissionSettings allows exactly the board read and card writes", () => {
+test("workerPermissionSettings allows the board read, card writes, and local git", () => {
   const s = workerPermissionSettings("http://localhost:4173");
   expect(s.permissions.allow).toEqual([
     "Bash(curl -s http://localhost:4173/board)",
     "Bash(curl -s http://localhost:4173/agents)",
     "Bash(curl -s -X POST http://localhost:4173/action/card-move:*)",
     "Bash(curl -s -X POST http://localhost:4173/action/card-comment:*)",
+    "Bash(git status:*)",
+    "Bash(git diff:*)",
+    "Bash(git log:*)",
+    "Bash(git add:*)",
+    "Bash(git commit:*)",
   ]);
-  // never the spawn/kill/prompt endpoints — those stay behind a human approval
+  // never the spawn/kill/prompt endpoints or git push — those stay behind a
+  // human approval
   expect(JSON.stringify(s)).not.toContain("/action/spawn");
+  expect(JSON.stringify(s)).not.toContain("git push");
 });
