@@ -50,7 +50,7 @@ export function Header({ snap, onNewAgent }: { snap: Snapshot; onNewAgent: () =>
         </div>
         <div className="pix statline">
           <span><b>{idle}</b> IDLE</span>
-          <span><b>{onLine}</b> ON THE LINE</span>
+          <span><b>{onLine}</b> TASKS</span>
           <button className="newagent-btn" onClick={onNewAgent}>+ NEW AGENT</button>
         </div>
       </div>
