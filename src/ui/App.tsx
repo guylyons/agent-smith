@@ -7,6 +7,7 @@ import { Crew } from "./Crew";
 import { TheLine } from "./TheLine";
 import { ConversationDrawer } from "./ConversationDrawer";
 import { NewAgentModal } from "./NewAgentModal";
+import { CommandPalette } from "./CommandPalette";
 import { SettingsPanel } from "./SettingsPanel";
 import { Toaster } from "./Toaster";
 import { Notifier } from "./Notifier";
@@ -22,6 +23,7 @@ export function App() {
   // null = closed; {} = blank; {task, cardId} = seeded from a card's "new agent for this card"
   const [spawnSeed, setSpawnSeed] = useState<{ task?: string; cardId?: string } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const [alertsEnabled, setAlertsEnabled] = useState(false);
   const recentFolders = [...new Set(snap.agents.map((a) => a.cwd).filter(Boolean))];
 
@@ -30,6 +32,19 @@ export function App() {
     applyTube(loadSetting("aw-tube", ""));
     applyBg(loadSetting("aw-bg", "night"));
     setAlertsEnabled(loadBool("aw-alerts"));
+  }, []);
+
+  // Quick find: Cmd+P (mac) / Ctrl+P opens the command palette. Preventing the
+  // default stops the browser's print dialog stealing the chord.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && (e.key === "p" || e.key === "P")) {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   function toggleAlerts() {
@@ -68,6 +83,7 @@ export function App() {
           onClose={() => setSpawnSeed(null)}
         />
       )}
+      {paletteOpen && <CommandPalette snap={snap} onClose={() => setPaletteOpen(false)} />}
       {settingsOpen && <SettingsPanel alertsEnabled={alertsEnabled} onToggleAlerts={toggleAlerts} onClose={() => setSettingsOpen(false)} />}
       <Toaster />
       <Notifier snap={snap} enabled={alertsEnabled} />

@@ -4,6 +4,8 @@ import { parseStatus, type AgentStatus } from "./schema";
 import { buildSnapshot, type Snapshot } from "./lib/snapshot";
 import { ensureStatusDir, statusDir } from "./lib/paths";
 import { scanLiveSessions, readConversation, readSubagents } from "./scan";
+import { matchChat } from "./lib/chatsearch";
+import type { ChatMessage } from "./lib/conversation";
 import { readOverrides, applyOverrides, setNameOverride, setSpriteOverride } from "./lib/overrides";
 import { loadPersonas, applyPersonas } from "./lib/personas";
 import { readBoard, writeBoard, sanitizeBoard, boardFile, addCard, moveCard, addComment, assignCard, setCardDescription, cardTaskPrompt, type Board } from "./lib/board";
@@ -42,6 +44,32 @@ export function readSnapshot(dir: string, now: number): Snapshot {
   return buildSnapshot(applyOverrides(applyPersonas(agents, loadPersonas()), readOverrides(dir)), now, {
     board: readBoard(dir),
   });
+}
+
+export type ChatHitResult = { sessionId: string; name: string; role: string; snippet: string; hitRole: ChatMessage["role"] };
+
+/**
+ * Quick-find's chat half: search the transcripts of the sessions currently on
+ * the board for `query`, returning one snippet per session that mentions it.
+ * Scoped to live sessions so every hit is one the palette can actually open in
+ * the drawer. `readConv` is injectable so it's unit-tested without transcripts.
+ */
+export async function searchChats(
+  dir: string,
+  query: string,
+  now: number,
+  readConv: (sessionId: string) => Promise<{ messages: ChatMessage[] }> = readConversation,
+): Promise<ChatHitResult[]> {
+  if (!query.trim()) return [];
+  const { agents } = readSnapshot(dir, now);
+  const hits = await Promise.all(
+    agents.map(async (a) => {
+      const { messages } = await readConv(a.sessionId);
+      const hit = matchChat(messages, query);
+      return hit ? { sessionId: a.sessionId, name: a.name, role: a.role, snippet: hit.snippet, hitRole: hit.role } : null;
+    }),
+  );
+  return hits.filter((h): h is ChatHitResult => h !== null);
 }
 
 export function makeServer(
@@ -147,6 +175,14 @@ export function makeServer(
         const sid = url.searchParams.get("sessionId") ?? "";
         if (!validSessionId(sid)) return json({ messages: [], question: null, blocked: null }, 400);
         return json(await readConversation(sid));
+      }
+
+      // quick-find's chat search: snippets from live sessions' transcripts that
+      // mention the query. Cards/agents are searched client-side from the
+      // snapshot; only chat content needs the server (it reads transcripts).
+      if (url.pathname === "/search") {
+        const q = url.searchParams.get("q") ?? "";
+        return json({ chats: await searchChats(dir, q, Date.now()) });
       }
 
       // a session's live subagents

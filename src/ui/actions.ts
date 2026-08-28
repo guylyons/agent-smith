@@ -148,3 +148,14 @@ export async function fetchSubagents(sessionId: string): Promise<Subagent[] | nu
 export async function fetchRepo(sessionId: string): Promise<RepoInfo | null> {
   return getJson<RepoInfo>(`/repo?sessionId=${encodeURIComponent(sessionId)}`);
 }
+
+export type ChatHit = { sessionId: string; name: string; role: string; snippet: string; hitRole: ChatMessage["role"] };
+
+/** Quick-find's chat half: transcript snippets from live sessions mentioning the
+ *  query. [] on a blank query or any failure — the palette's card/agent results
+ *  still stand without it. */
+export async function fetchChatSearch(q: string): Promise<ChatHit[]> {
+  if (!q.trim()) return [];
+  const body = await getJson<{ chats?: ChatHit[] }>(`/search?q=${encodeURIComponent(q)}`);
+  return body?.chats ?? [];
+}
