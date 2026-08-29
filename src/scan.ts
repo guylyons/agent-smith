@@ -107,7 +107,8 @@ function terminalMatchesTitle(termName: string, title: string): boolean {
  *        processes but not windows, and counting them would let a phantom
  *        through the per-cwd cap.
  *    NOTE: an npm-shim install invoked via node/bun reports "node"/"bun" and
- *    still matches nothing -> ok:false -> chooseLive falls back to all-fresh.
+ *    matches nothing here, so such a session is discovered by its hooks rather
+ *    than by this scan (see processInfoOk).
  */
 export function parseProcessTable(psout: string): { procs: Map<number, string>; sessionPids: string[] } {
   const procs = new Map<number, string>();
@@ -120,6 +121,25 @@ export function parseProcessTable(psout: string): { procs: Map<number, string>; 
     if (isClaudeComm(comm) && tty !== "??") sessionPids.push(pid);
   }
   return { procs, sessionPids };
+}
+
+/**
+ * Can this pass TRUST what it just learned about running sessions? Three cases,
+ * and only two of them are "we don't know":
+ *  - no process table at all: `ps` failed or gave nothing usable -> unknown.
+ *  - sessions found, but not one cwd resolved: `lsof` is what failed -> unknown.
+ *  - a usable table with no `claude` session in it: that is an ANSWER, not a
+ *    failure — nothing is running. Reporting it as unknown is what used to make
+ *    closing your last session fill the board with every transcript touched in
+ *    the last 15 minutes (chooseLive's never-blank fallback) instead of
+ *    emptying it.
+ * A shim install (node/bun) is invisible to discovery either way; its sessions
+ * reach the board through the hooks, which record the pid directly.
+ */
+export function processInfoOk(procs: Map<number, string>, sessionPids: string[], counts: Map<string, number>): boolean {
+  if (procs.size === 0) return false;        // couldn't read the process table
+  if (sessionPids.length === 0) return true; // read it fine: nothing is running
+  return counts.size > 0;                    // resolved no cwd -> lsof failed
 }
 
 /**
@@ -136,7 +156,7 @@ export async function runningClaudeCounts(): Promise<{ counts: Map<string, numbe
   let psout = "";
   try { psout = await run(["ps", "ax", "-o", "pid=,tty=,comm="]); } catch { return { counts, ok: false, procs: new Map() }; }
   const { procs, sessionPids: pids } = parseProcessTable(psout);
-  if (!pids.length) return { counts, ok: false, procs };
+  if (!pids.length) return { counts, ok: processInfoOk(procs, pids, counts), procs };
   // Resolve every pid's cwd in parallel (serial lsof was ~37ms/pid).
   const cwds = await Promise.all(pids.map(async (pid) => {
     try {
@@ -153,7 +173,7 @@ export async function runningClaudeCounts(): Promise<{ counts: Map<string, numbe
   // report ok:false so callers FALL BACK rather than blanking the dashboard and
   // deleting tracked sessions. `procs` is reported regardless — it comes from
   // `ps` alone, so it stays usable even when lsof is what failed.
-  return { counts, ok: counts.size > 0, procs };
+  return { counts, ok: processInfoOk(procs, pids, counts), procs };
 }
 
 /** Read the last `bytes` of a file and return its lines (bounded, for large transcripts). */
