@@ -564,6 +564,15 @@
   .col-instr:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
   .col-instr::placeholder{color:var(--dim)}
   .cards{display:flex;flex-direction:column;gap:6px;min-height:20px}
+  /* A stack taller than the configured cap (CONFIG > THE LINE) scrolls instead
+     of running the column off the page. useStackCap sets the max-height and this
+     flag; without it the column is untouched, so short stacks never grow a
+     scrollbar or the padding below. That padding is what keeps the gold
+     drop-indicator on the first/last card from being clipped by the scroll box.
+     The scrollbar itself is the themed one from the global rules further down —
+     on macOS it's an overlay bar that hides at rest, which is why the cap leaves
+     a sliver of the next card showing rather than cutting flush. */
+  .cards[data-capped]{overflow-y:auto;overscroll-behavior:contain;padding:5px 0}
   .card{
     display:flex;align-items:flex-start;gap:4px;cursor:pointer;
     background:var(--box);border:3px solid var(--bone);
