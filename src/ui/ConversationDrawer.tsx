@@ -5,6 +5,7 @@ import { ModalBackdrop } from "./Backdrop";
 import { SpritePicker } from "./SpritePicker";
 import { renderMarkdown } from "./markdown";
 import { toast } from "./toast";
+import { dyingMs } from "./dying";
 import {
   fetchConversation, fetchSubagents, fetchRepo, fetchPersonas, sendPromptTo, uploadImage, focusSession, pauseSession, renameSession, killAgent,
   type ChatMessage, type Subagent, type RepoInfo, type PendingQuestion, type PersonaInfo, type BlockingTool,
@@ -38,6 +39,8 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
   const [nameDraft, setNameDraft] = useState(agent.name);
   const [confirmPause, setConfirmPause] = useState(false);
   const [confirmStop, setConfirmStop] = useState(false);
+  // Set once STOP is confirmed: the window plays the tube death, then closes.
+  const [dying, setDying] = useState(false);
   const [pickSprite, setPickSprite] = useState(false);
   const [focusing, setFocusing] = useState(false);
   // Which waiting episode (by its stateSince) the user has manually dismissed.
@@ -208,6 +211,29 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
   const liveQ: PendingQuestion | null = question ?? hookQ;
   const singleQ = !!liveQ && liveQ.questions.length === 1 && !liveQ.questions[0].multiSelect;
 
+  // STOP: kill the session, then let this window die out like a picture tube
+  // before it closes. The wait is the animation, so it comes from one place
+  // (dyingMs) — reduced motion trades the glitch for a quick fade and closes
+  // that much sooner.
+  function stopAgent() {
+    if (dying) return;
+    killAgent(agent.sessionId);
+    setConfirmStop(false);
+    setDying(true);
+  }
+
+  // Close once the tube has finished collapsing. onClose comes in fresh on every
+  // App render (a new snapshot arrives every ~20s), so it goes through a ref —
+  // depending on it directly would restart this timer mid-death and leave the
+  // dead window on screen longer than the animation.
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    if (!dying) return;
+    const t = setTimeout(() => closeRef.current(), dyingMs());
+    return () => clearTimeout(t);
+  }, [dying]);
+
   function commitRename() {
     const n = nameDraft.trim();
     if (n && n !== agent.name) renameSession(agent.sessionId, n);
@@ -217,7 +243,7 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
   return (
     <>
     <ModalBackdrop onClose={onClose}>
-      <aside className={`win drawer${dragOver ? " drag-over" : ""}`}
+      <aside className={`win drawer${dragOver ? " drag-over" : ""}${dying ? " is-dying" : ""}`}
         onDragOver={(e) => { if (e.dataTransfer?.types.includes("Files")) { e.preventDefault(); setDragOver(true); } }}
         onDragLeave={(e) => { if (e.currentTarget === e.target) setDragOver(false); }}
         onDrop={onDrop}>
@@ -257,7 +283,7 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
             )}
             {confirmStop ? (
               <>
-                <button className="deskbtn danger" onClick={() => { killAgent(agent.sessionId); setConfirmStop(false); onClose(); }}>CONFIRM ◼</button>
+                <button className="deskbtn danger" onClick={stopAgent}>CONFIRM ◼</button>
                 <button className="deskbtn" onClick={() => setConfirmStop(false)}>✕</button>
               </>
             ) : (
