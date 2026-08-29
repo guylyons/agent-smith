@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { CrtMode } from "./settings";
+import type { BevelMode, CrtMode } from "./settings";
 
 // The CRT tube stack. Strength comes from <html data-crt> (off/soft/on/max),
 // which the Settings panel sets; this renders the layers, back to front:
@@ -46,6 +46,31 @@ export function Crt({ mode }: { mode: CrtMode }) {
       <div className="crt crt-glare"></div>
       <div className="crt crt-hum"></div>
       {boot > 0 && <div key={boot} className="crt crt-power"></div>}
+    </div>
+  );
+}
+
+// The tube bevel: the moulded glass front of a real TV set, sitting in front of
+// everything the CRT stack draws. Thickness comes from <html data-bevel>
+// (off/slim/thick). Four layers, back to front:
+//
+//   surround  the dark set beyond the glass, filling the four rounded corners
+//   glass     the light direction — lit top-left, falling into shadow bottom-right
+//   inner     the seam where glass meets picture, and the chamfer's own shading
+//   shine     the specular hit a window leaves on curved glass
+//
+// Independent of the CRT setting on purpose: you can have the glass without the
+// scanlines, or the scanlines without the glass. Inert like the CRT stack —
+// pointer-events:none and aria-hidden, so it is decoration and nothing more.
+// Nothing here moves, so there is nothing for reduced-motion to strip.
+export function TubeBevel({ mode }: { mode: BevelMode }) {
+  if (mode === "off") return null;
+  return (
+    <div className="bev-stack" aria-hidden="true">
+      <div className="bev bev-surround"></div>
+      <div className="bev bev-glass"></div>
+      <div className="bev bev-inner"></div>
+      <div className="bev bev-shine"></div>
     </div>
   );
 }

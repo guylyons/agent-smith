@@ -1,10 +1,12 @@
-// Shared display settings — theme, CRT tube, art background — applied to <html>
-// and persisted in localStorage. The alerts toggle lives in App state (Notifier
-// reads it). Centralized here so the Settings panel is the single owner.
+// Shared display settings — theme, CRT tube, glass bevel, art background —
+// applied to <html> and persisted in localStorage. The alerts toggle lives in
+// App state (Notifier reads it). Centralized here so the Settings panel is the
+// single owner.
 //
 // Everything is a data-attribute or a custom property on the root element, never
-// a class, so the three settings compose instead of clobbering each other:
-//   <html data-theme="alien" data-crt="max" data-bg="stars" style="--bg-dim:.3">
+// a class, so the settings compose instead of clobbering each other:
+//   <html data-theme="alien" data-crt="max" data-bevel="thick" data-bg="stars"
+//         style="--bg-dim:.3">
 
 /** The palettes. `default` is the SNES workshop look the app shipped with. */
 export const THEMES = [
@@ -25,6 +27,18 @@ export const CRT_MODES = [
 
 export type CrtMode = (typeof CRT_MODES)[number]["id"];
 
+/** Thickness of the glass bevel round the picture, thinnest first. Its own
+ *  setting rather than another CRT step: the moulded glass edge of a TV set is
+ *  a different thing from the raster inside it, and plenty of people want one
+ *  without the other. `off` renders nothing. */
+export const BEVEL_MODES = [
+  { id: "off", label: "OFF" },
+  { id: "slim", label: "SLIM" },
+  { id: "thick", label: "THICK" },
+] as const;
+
+export type BevelMode = (typeof BEVEL_MODES)[number]["id"];
+
 export const BACKGROUNDS = [
   { id: "night", label: "NIGHT" },
   { id: "stars", label: "STARS" },
@@ -42,6 +56,7 @@ export const CUSTOM_BG = "custom";
 export const KEYS = {
   theme: "aw-theme",
   crt: "aw-crt",
+  bevel: "aw-bevel",
   bg: "aw-bg",
   bgImage: "aw-bg-image",
   bgDim: "aw-bg-dim",
@@ -70,6 +85,7 @@ const root = () => document.documentElement;
 
 export function applyTheme(id: string): void { root().dataset.theme = id; }
 export function applyCrt(mode: string): void { root().dataset.crt = mode; }
+export function applyBevel(mode: string): void { root().dataset.bevel = mode; }
 export function applyBg(id: string): void { root().dataset.bg = id; }
 
 /** The uploaded background image, as a CSS url() (or none). */
@@ -98,6 +114,13 @@ export function loadCrt(): CrtMode {
   return "on";
 }
 
+/** The stored bevel mode. New setting, so it defaults to off — an existing
+ *  user's screen doesn't grow a glass edge on upgrade. */
+export function loadBevel(): BevelMode {
+  const saved = loadSetting(KEYS.bevel, "");
+  return BEVEL_MODES.some((m) => m.id === saved) ? (saved as BevelMode) : "off";
+}
+
 export function loadBgDim(): number {
   const n = Number(loadSetting(KEYS.bgDim, "0"));
   return Number.isFinite(n) ? Math.min(100, Math.max(0, n)) : 0;
@@ -108,6 +131,7 @@ export function loadBgDim(): number {
 export function applyAllSettings(): void {
   applyTheme(loadSetting(KEYS.theme, "default"));
   applyCrt(loadCrt());
+  applyBevel(loadBevel());
   applyBg(loadSetting(KEYS.bg, "night"));
   applyBgImage(loadSetting(KEYS.bgImage, ""));
   applyBgDim(loadBgDim());
@@ -115,12 +139,13 @@ export function applyAllSettings(): void {
 
 /** Everything the display controls own, in one object so App can hold a single
  *  piece of state and the Settings panel can patch it. */
-export type Display = { theme: string; crt: CrtMode; bg: string; bgImage: string; bgDim: number };
+export type Display = { theme: string; crt: CrtMode; bevel: BevelMode; bg: string; bgImage: string; bgDim: number };
 
 export function readDisplay(): Display {
   return {
     theme: loadSetting(KEYS.theme, "default"),
     crt: loadCrt(),
+    bevel: loadBevel(),
     bg: loadSetting(KEYS.bg, "night"),
     bgImage: loadSetting(KEYS.bgImage, ""),
     bgDim: loadBgDim(),
@@ -131,6 +156,7 @@ export function readDisplay(): Display {
 export function writeDisplay(d: Display): void {
   applyTheme(d.theme); saveSetting(KEYS.theme, d.theme);
   applyCrt(d.crt); saveSetting(KEYS.crt, d.crt);
+  applyBevel(d.bevel); saveSetting(KEYS.bevel, d.bevel);
   applyBg(d.bg); saveSetting(KEYS.bg, d.bg);
   applyBgImage(d.bgImage); saveSetting(KEYS.bgImage, d.bgImage);
   applyBgDim(d.bgDim); saveSetting(KEYS.bgDim, String(d.bgDim));
