@@ -13,6 +13,7 @@ import { ALLOWED_MODELS, ALLOWED_PERMISSION_MODES, focusSession, interruptSessio
 import { readRepo } from "./repo";
 import { saveUpload, resolveUploadPath } from "./lib/uploads";
 import { chooseFolder } from "./lib/chooser";
+import { initialIdle, onConnect, onDisconnect, shouldShutDown, type IdleState } from "./lib/idle";
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -100,9 +101,20 @@ export function makeServer(
      *  (see sendFreshPrompt) so each ticket starts clean. Injectable like
      *  deliver. */
     deliverFresh?: (target: AgentStatus, text: string) => Promise<{ ok: boolean; error?: string }>;
+    /** Opt-in, for the stand-alone app window (`bun run app`): called once the
+     *  last dashboard window has been shut for `idleGraceMs`, or never opened
+     *  within `idleStartupGraceMs`. Left unset, the server serves forever with
+     *  no window attached — which is what `bun run dev` wants. */
+    onWindowsClosed?: () => void;
+    idleGraceMs?: number;
+    idleStartupGraceMs?: number;
+    idleCheckMs?: number;
   } = {},
 ) {
-  const { scan = false, scanIntervalMs = 20_000, deliver = sendPrompt, deliverFresh = sendFreshPrompt } = opts;
+  const {
+    scan = false, scanIntervalMs = 20_000, deliver = sendPrompt, deliverFresh = sendFreshPrompt,
+    onWindowsClosed, idleGraceMs = 5_000, idleStartupGraceMs = 30_000, idleCheckMs = 1_000,
+  } = opts;
   const dir = ensureStatusDir();
 
   // Wake the sessions that care about a card event, best-effort and without
@@ -129,6 +141,20 @@ export function makeServer(
   }
   const clients = new Set<(s: Snapshot) => void>();
 
+  // One /events stream per open dashboard window, so the client count doubles
+  // as "is anyone looking at this?". Both paths that leave the Set go through
+  // dropClient, and it only counts a client out if it was actually in — a
+  // window that leaves twice (push() drops it, then cancel() fires) must not
+  // subtract twice.
+  let idle: IdleState = initialIdle(Date.now());
+  const addClient = (send: (s: Snapshot) => void) => {
+    clients.add(send);
+    idle = onConnect(idle, Date.now());
+  };
+  const dropClient = (send: (s: Snapshot) => void) => {
+    if (clients.delete(send)) idle = onDisconnect(idle, Date.now());
+  };
+
   let timer: ReturnType<typeof setTimeout> | null = null;
   const push = () => {
     const snap = readSnapshot(dir, Date.now());
@@ -138,7 +164,7 @@ export function makeServer(
       } catch {
         // Client's controller is closed (cancel() hasn't fired yet) —
         // drop it so it isn't retried on the next push.
-        clients.delete(send);
+        dropClient(send);
       }
     }
   };
@@ -160,6 +186,18 @@ export function makeServer(
     scanTimer = setInterval(() => void runScan(), scanIntervalMs);
   }
 
+  // Watch for the last window closing. Only armed when a caller asked for it,
+  // so a plain `bun run dev` is untouched.
+  let idleTimer: ReturnType<typeof setInterval> | null = null;
+  if (onWindowsClosed) {
+    idleTimer = setInterval(() => {
+      if (!shouldShutDown(idle, Date.now(), { graceMs: idleGraceMs, startupGraceMs: idleStartupGraceMs })) return;
+      if (idleTimer) clearInterval(idleTimer);
+      idleTimer = null;
+      onWindowsClosed();
+    }, idleCheckMs);
+  }
+
   const server = Bun.serve({
     port,
     // Bind to loopback only. Bun defaults to 0.0.0.0 when hostname is omitted,
@@ -176,10 +214,10 @@ export function makeServer(
           start(ctrl) {
             const enc = new TextEncoder();
             send = (s) => ctrl.enqueue(enc.encode(`data: ${JSON.stringify(s)}\n\n`));
-            clients.add(send);
+            addClient(send);
             send(readSnapshot(dir, Date.now())); // initial
           },
-          cancel() { clients.delete(send); },
+          cancel() { dropClient(send); },
         });
         return new Response(stream, { headers: {
           "content-type": "text/event-stream",
@@ -556,6 +594,7 @@ export function makeServer(
   server.stop = ((closeActiveConnections?: boolean) => {
     watcher.close();
     if (scanTimer) clearInterval(scanTimer);
+    if (idleTimer) clearInterval(idleTimer);
     return baseStop(closeActiveConnections);
   }) as typeof server.stop;
 
