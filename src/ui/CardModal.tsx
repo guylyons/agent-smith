@@ -8,6 +8,7 @@ import {
   addCommentAction, deleteCommentAction, moveCardAction,
 } from "./actions";
 import { ModalBackdrop } from "./Backdrop";
+import { MergeKey } from "./MergeKey";
 import { renderMarkdown, imageSrc } from "./markdown";
 import { imagesIn, imageMarkdown, appendImage, removeImage } from "./cardImages";
 import { toast } from "./toast";
@@ -257,6 +258,11 @@ export function CardModal({
               >+ NEW AGENT FOR THIS CARD</button>
             </div>
           </div>
+
+          {/* Once the card's agent has committed work on its branch, a key
+              rises here to land it. It draws itself only when there is
+              something to merge, so an unfinished ticket shows nothing. */}
+          <MergeKey cardId={card.id} hasAssignee={!!assigned} />
 
           <div className="cardmodal-row">
             <label className="pix cardmodal-label">DESCRIPTION</label>

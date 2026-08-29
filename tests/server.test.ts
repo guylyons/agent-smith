@@ -636,3 +636,83 @@ test("a card-scoped UI edit no longer erases a comment posted since the browser'
   expect(board.cards[0].comments).toHaveLength(1); // survived the rename
   server.stop(true);
 });
+
+// --- the MERGE key's two endpoints ------------------------------------------
+// A card only knows where its work lives through its assignee's status file, so
+// these check the whole resolution: card -> assignee -> working dir -> git.
+
+const MERGE_SESSION = "7c1e2f30-aaaa-4bbb-8ccc-ddddeeeeffff";
+const mergeRepo = "/tmp/aw-server-merge-repo";
+
+async function git(cwd: string, ...args: string[]): Promise<void> {
+  const p = Bun.spawn(["git", "-C", cwd, ...args], { stdout: "ignore", stderr: "ignore" });
+  await p.exited;
+}
+
+/** A throwaway repo with a linked worktree holding one committed change, plus a
+ *  status file pointing a session at that worktree. Returns the card id of a
+ *  card assigned to it. */
+async function mergeFixture(post: (p: string, b: object) => Promise<Response>): Promise<string> {
+  rmSync(mergeRepo, { recursive: true, force: true });
+  mkdirSync(mergeRepo, { recursive: true });
+  await git(mergeRepo, "init", "-q", "-b", "main");
+  await git(mergeRepo, "config", "user.email", "t@t");
+  await git(mergeRepo, "config", "user.name", "t");
+  writeFileSync(join(mergeRepo, "README"), "root\n");
+  await git(mergeRepo, "add", "-A");
+  await git(mergeRepo, "commit", "-q", "-m", "root");
+  const wt = join(mergeRepo, "wt");
+  await git(mergeRepo, "worktree", "add", "-q", "-b", "feature", wt, "HEAD");
+  writeFileSync(join(wt, "feature.txt"), "done\n");
+  await git(wt, "add", "-A");
+  await git(wt, "commit", "-q", "-m", "the work");
+
+  writeFileSync(join(dir, `${MERGE_SESSION}.json`), valid({ sessionId: MERGE_SESSION, name: "VOLT", cwd: wt, branch: "feature" }));
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "Land it" })).json()) as any;
+  await post("/action/card-assign", { cardId, sessionId: MERGE_SESSION });
+  return cardId;
+}
+
+test("GET /merge-state reports the assignee's committed work", async () => {
+  const { server, base, post } = await cardApiServer();
+  const cardId = await mergeFixture(post);
+  const state = (await (await fetch(`${base}/merge-state?cardId=${cardId}`)).json()) as any;
+  expect(state).toMatchObject({ branch: "feature", base: "main", ahead: 1, committed: true, ready: true });
+  server.stop(true);
+});
+
+test("GET /merge-state explains a card with nowhere to merge from", async () => {
+  const { server, base, post } = await cardApiServer();
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "Unassigned" })).json()) as any;
+  expect((await fetch(`${base}/merge-state?cardId=${cardId}`)).status).toBe(400); // no assignee
+  expect((await fetch(`${base}/merge-state?cardId=card_nope`)).status).toBe(404);
+  server.stop(true);
+});
+
+test("POST /action/card-merge lands the branch and records it on the card", async () => {
+  const { server, base, post } = await cardApiServer();
+  const cardId = await mergeFixture(post);
+  const res = await fetch(`${base}/action/card-merge`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "sec-fetch-site": "same-origin" },
+    body: JSON.stringify({ cardId, author: "You" }),
+  });
+  expect(await res.json()).toMatchObject({ ok: true, branch: "feature", base: "main" });
+
+  const log = Bun.spawnSync(["git", "-C", mergeRepo, "log", "-1", "--pretty=%s"]).stdout.toString();
+  expect(log).toContain("Merge branch 'feature'");
+
+  const { board } = (await (await fetch(`${base}/board`)).json()) as any;
+  expect(board.cards[0].comments.some((c: any) => c.text === "Merged feature into main.")).toBe(true);
+  server.stop(true);
+});
+
+test("card-merge is browser-only — an agent cannot land its own work", async () => {
+  const { server, base, post } = await cardApiServer();
+  const cardId = await mergeFixture(post);
+  const res = await post("/action/card-merge", { cardId }); // no sec-fetch-site: a scripted client
+  expect(res.status).toBe(403);
+  const log = Bun.spawnSync(["git", "-C", mergeRepo, "log", "-1", "--pretty=%s"]).stdout.toString();
+  expect(log).not.toContain("Merge branch");
+  server.stop(true);
+});
