@@ -4,7 +4,7 @@ import type { AgentStatus } from "../schema";
 import type { Board } from "../lib/board";
 import { Sprite } from "./Sprite";
 import { paletteFor } from "./sprite-data";
-import { focusSession } from "./actions";
+import { focusSession, killAgent } from "./actions";
 import { subscribeFlash } from "./flash";
 
 // The specific thing a waiting session needs, instead of a generic WAITING —
@@ -61,6 +61,10 @@ function useSendFlash(sessionId: string): boolean {
 const AgentCard = memo(function AgentCard({ a, onCard, unread, onOpen }: { a: AgentStatus; onCard: string; unread: boolean; onOpen: (id: string) => void }) {
   const { palette } = paletteFor(a.sessionId, a.role);
   const flashing = useSendFlash(a.sessionId);
+  // Killing closes the agent's terminal — irreversible, so the ✕ arms a confirm
+  // rather than firing on the first click. The toolbar only shows on hover, so
+  // disarm on leave: a half-confirmed desk must not still be armed next hover.
+  const [confirmKill, setConfirmKill] = useState(false);
   const now = Date.now();
   const dur = inStateFor(a.stateSince, now);
   const stale = a.state === "idle" && !!a.stateSince && now - a.stateSince > STALE_IDLE_MS;
@@ -82,6 +86,7 @@ const AgentCard = memo(function AgentCard({ a, onCard, unread, onOpen }: { a: Ag
         else if (e.key === " " || e.key === "Spacebar") e.preventDefault();
       }}
       onKeyUp={(e) => { if (e.key === " " || e.key === "Spacebar") onOpen(a.sessionId); }}
+      onMouseLeave={() => setConfirmKill(false)}
     >
       {/* Something to READ: this agent finished, or stopped to ask. The alert
           centre says so once and scrolls away; this stays on the desk until the
@@ -94,6 +99,18 @@ const AgentCard = memo(function AgentCard({ a, onCard, unread, onOpen }: { a: Ag
       <div className="desk-actions" onClick={stop}>
         <button className="deskbtn" title="Jump to this terminal in Ghostty"
           onClick={() => focusSession(a.sessionId)}>↗ TERMINAL</button>
+        {confirmKill ? (
+          <>
+            <button className="deskbtn danger" title={`End ${a.name} — closes its terminal`}
+              onClick={() => { killAgent(a.sessionId); setConfirmKill(false); }}>CONFIRM ✕</button>
+            <button className="deskbtn" title="Cancel"
+              onClick={() => setConfirmKill(false)}>↩</button>
+          </>
+        ) : (
+          <button className="deskbtn danger" title={`Kill ${a.name} (end this session)`}
+            aria-label={`Kill ${a.name}`}
+            onClick={() => setConfirmKill(true)}>✕</button>
+        )}
       </div>
       <div className="sprite-wrap">
         <Sprite sessionId={a.sessionId} role={a.role} state={a.state} override={a.sprite} />
