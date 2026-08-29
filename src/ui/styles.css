@@ -841,30 +841,34 @@ body{background:transparent}
 .msg.is-pending{opacity:.55}
 .msg.is-pending .msg-text::after{content:" ⏳"}
 
-/* markdown rendering inside chat messages */
-/* Markdown element styles, shared by the conversation drawer (.msg-text) and
-   card comments (.comment-text) — both render through renderMarkdown. */
-.msg-text p,.comment-text p{margin:0 0 8px}
-.msg-text p:last-child,.comment-text p:last-child{margin-bottom:0}
-.msg-text strong,.comment-text strong{color:var(--gold);font-weight:700}
-.msg-text em,.comment-text em{font-style:italic}
-.msg-text code,.comment-text code{font-family:var(--code);font-size:.92em;background:var(--box-lo);border:1px solid var(--bevel);padding:1px 4px;border-radius:2px;word-break:break-word}
-.msg-text pre.md-code,.comment-text pre.md-code{
+/* Markdown element styles, shared by every surface that renders through
+   renderMarkdown: the conversation drawer (.msg-text), card comments
+   (.comment-text) and the card description at rest (.cardmodal-descview). */
+:is(.msg-text,.comment-text,.cardmodal-descview) p{margin:0 0 8px}
+:is(.msg-text,.comment-text,.cardmodal-descview) p:last-child{margin-bottom:0}
+:is(.msg-text,.comment-text,.cardmodal-descview) strong{color:var(--gold);font-weight:700}
+:is(.msg-text,.comment-text,.cardmodal-descview) em{font-style:italic}
+:is(.msg-text,.comment-text,.cardmodal-descview) code{font-family:var(--code);font-size:.92em;background:var(--box-lo);border:1px solid var(--bevel);padding:1px 4px;border-radius:2px;word-break:break-word}
+:is(.msg-text,.comment-text,.cardmodal-descview) pre.md-code{
   background:var(--box-lo);border:2px solid var(--bevel);
   padding:8px 10px;margin:6px 0;overflow-x:auto;
   font-family:var(--code);font-size:13px;line-height:1.45;
   white-space:pre;
 }
-.msg-text pre.md-code:last-child,.comment-text pre.md-code:last-child{margin-bottom:0}
-.msg-text pre.md-code code,.comment-text pre.md-code code{background:none;border:none;padding:0;font-size:1em}
-.msg-text .md-list,.comment-text .md-list{margin:0 0 8px;padding-left:18px}
-.msg-text .md-list:last-child,.comment-text .md-list:last-child{margin-bottom:0}
-.msg-text .md-list li,.comment-text .md-list li{margin:2px 0}
-.msg-text .md-table-wrap,.comment-text .md-table-wrap{display:block;overflow-x:auto;margin:6px 0;max-width:100%}
-.msg-text .md-table-wrap:last-child,.comment-text .md-table-wrap:last-child{margin-bottom:0}
-.msg-text table,.comment-text table{border-collapse:collapse;font-size:13px}
-.msg-text th,.msg-text td,.comment-text th,.comment-text td{border:1px solid var(--bevel);padding:4px 8px;text-align:left}
-.msg-text th,.comment-text th{background:var(--box-lo);color:var(--gold)}
+:is(.msg-text,.comment-text,.cardmodal-descview) pre.md-code:last-child{margin-bottom:0}
+:is(.msg-text,.comment-text,.cardmodal-descview) pre.md-code code{background:none;border:none;padding:0;font-size:1em}
+/* The global reset zeroes list padding, so a list has to put it back or its
+   markers draw outside the box. Numbers need more room than bullets: a two-digit
+   "10." is wider than 18px and would sit on the border. */
+:is(.msg-text,.comment-text,.cardmodal-descview) .md-list{margin:0 0 8px;padding-left:18px}
+:is(.msg-text,.comment-text,.cardmodal-descview) ol.md-list{padding-left:2.4em}
+:is(.msg-text,.comment-text,.cardmodal-descview) .md-list:last-child{margin-bottom:0}
+:is(.msg-text,.comment-text,.cardmodal-descview) .md-list li{margin:2px 0}
+:is(.msg-text,.comment-text,.cardmodal-descview) .md-table-wrap{display:block;overflow-x:auto;margin:6px 0;max-width:100%}
+:is(.msg-text,.comment-text,.cardmodal-descview) .md-table-wrap:last-child{margin-bottom:0}
+:is(.msg-text,.comment-text,.cardmodal-descview) table{border-collapse:collapse;font-size:13px}
+:is(.msg-text,.comment-text,.cardmodal-descview) :is(th,td){border:1px solid var(--bevel);padding:4px 8px;text-align:left}
+:is(.msg-text,.comment-text,.cardmodal-descview) th{background:var(--box-lo);color:var(--gold)}
 
 /* toasts */
 .toaster{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:120;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}
@@ -1330,7 +1334,7 @@ body{background:transparent}
 .cardmodal-descview{
   width:100%;min-height:88px;cursor:text;
   font-family:var(--mono);font-size:13px;line-height:1.6;
-  color:var(--bone);background:var(--night);
+  color:var(--bone);background:var(--night);word-break:break-word;
   border:2px solid var(--bevel);border-radius:var(--radius-sm);padding:8px 9px;
 }
 .cardmodal-descview:hover{border-color:var(--gold)}
