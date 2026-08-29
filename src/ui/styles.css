@@ -1045,6 +1045,154 @@ body{background:transparent}
 .cardmodal-send:disabled{opacity:.4;cursor:not-allowed}
 .cardmodal-spawn{color:var(--dim);border-style:dashed}
 .cardmodal-spawn:not(:disabled):hover{color:var(--gold);border-color:var(--gold)}
+
+/* ---- the MERGE key -------------------------------------------------------
+   A physical key bolted onto the ticket, and the one control in the app that
+   writes to the user's git history — so it is built to feel like hardware
+   rather than a link, and to be pressed deliberately.
+
+   Three planes, because that is what makes a key look like a key: a DECK it is
+   mounted on (darkest), the cap's SKIRT standing on a visible side wall, and
+   the moulded FACE inset on top of it (lightest). Every one of them is the
+   theme's own panel colour under a white or black wash, so the key is the same
+   piece of hardware in all six themes instead of one blue key in a beige app.
+
+     .mergekey        the module: bezel, corner screws, LED, caption
+     .mergekey-cap    the switch — its ::before is the well the cap sinks into
+     .mergekey-top    the skirt: side wall, drop shadow, the cap's body
+     .mergekey-face   the top face: the dish, the legend
+   The cap moves; nothing else does. */
+.mergekey{
+  --travel:8px;                 /* the key's throw — how far the cap sinks */
+  align-self:flex-start;max-width:100%;
+  display:flex;align-items:center;
+  padding:14px 18px;
+  border:2px solid var(--bevel);
+  background:
+    /* four screws, one per corner: this thing is bolted down */
+    radial-gradient(2.5px 2.5px at 10px 10px, var(--dim), transparent 70%),
+    radial-gradient(2.5px 2.5px at calc(100% - 10px) 10px, var(--dim), transparent 70%),
+    radial-gradient(2.5px 2.5px at 10px calc(100% - 10px), var(--dim), transparent 70%),
+    radial-gradient(2.5px 2.5px at calc(100% - 10px) calc(100% - 10px), var(--dim), transparent 70%),
+    linear-gradient(180deg,var(--box),var(--box-lo));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.12);
+}
+/* Wraps on the CONTAINER, not the viewport: this module lives in a modal that
+   is narrow long before the window is, and a squeezed caption breaks words
+   mid-syllable. Below ~170px of caption room the plate drops under the key. */
+.mergekey-deck{display:flex;align-items:center;gap:15px;flex-wrap:wrap;row-gap:10px;min-width:0}
+
+/* the indicator: dark when the circuit is dead, green when the key will do
+   something, amber and blinking once it is armed */
+.mergekey-led{
+  flex:0 0 auto;width:10px;height:10px;border-radius:50%;
+  background:var(--night);box-shadow:inset 0 0 0 2px rgba(0,0,0,.6);
+}
+.mergekey-led.on{background:var(--leaf);box-shadow:inset 0 0 0 2px rgba(0,0,0,.45),0 0 10px 1px var(--leaf)}
+.mergekey.phase-armed .mergekey-led.on,
+.mergekey.phase-working .mergekey-led.on{
+  background:var(--gold);box-shadow:inset 0 0 0 2px rgba(0,0,0,.45),0 0 10px 1px var(--gold);
+}
+.mergekey.phase-armed .mergekey-led.on{animation:led-blink .55s steps(1,end) infinite}
+.mergekey.phase-working .mergekey-led.on{animation:led-blink .22s steps(1,end) infinite}
+@keyframes led-blink{50%{opacity:.2}}
+
+/* the switch. The button box is TALLER than the cap standing in it — that gap
+   is where the cap goes when you press it. */
+.mergekey-cap{
+  position:relative;flex:0 0 auto;
+  width:158px;height:calc(58px + var(--travel));
+  padding:0;border:0;background:transparent;cursor:pointer;
+  font-family:var(--mono);
+}
+.mergekey-cap:disabled{cursor:default}
+/* the well: a dark slot cut in the deck, so the cap has somewhere to sink to */
+.mergekey-cap::before{
+  content:"";position:absolute;left:-4px;right:-4px;top:10px;bottom:-3px;
+  background:var(--night);
+  border-radius:calc(var(--radius-sm) + 5px);
+  box-shadow:inset 0 3px 5px rgba(0,0,0,.85);
+}
+.mergekey-top{
+  position:absolute;left:0;right:0;top:0;height:58px;
+  border-radius:calc(var(--radius-sm) + 4px);
+  /* the skirt is the DARK part of the cap: the face has to sit proud of it */
+  background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(0,0,0,.40)),var(--box-lo);
+  box-shadow:
+    inset 2px 2px 0 rgba(255,255,255,.14),            /* moulded top-left edge */
+    inset -2px -2px 0 rgba(0,0,0,.45),                /* and the shaded one */
+    0 var(--travel) 0 0 var(--box-lo),                /* THE SIDE WALL — its height */
+    0 calc(var(--travel) + 2px) 0 0 rgba(0,0,0,.8),   /* where the wall meets the deck */
+    0 calc(var(--travel) + 6px) 9px rgba(0,0,0,.55);  /* ambient */
+  transition:transform 70ms cubic-bezier(.2,.9,.3,1),box-shadow 70ms ease-out;
+}
+/* The moulded top face, sitting proud inside the skirt. Hard 2px bevels rather
+   than soft gloss: this app is drawn in whole pixels, and under the CRT filter
+   a blurred highlight just reads as smudge. */
+.mergekey-face{
+  position:absolute;left:8px;right:8px;top:6px;bottom:10px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+  border-radius:calc(var(--radius-sm) + 2px);
+  background:linear-gradient(180deg,rgba(255,255,255,.21),rgba(255,255,255,.05) 55%,rgba(0,0,0,.16)),var(--box);
+  box-shadow:
+    inset 0 2px 0 rgba(255,255,255,.34),   /* the lit top lip */
+    inset 2px 0 0 rgba(255,255,255,.12),
+    inset -2px 0 0 rgba(0,0,0,.30),
+    inset 0 -2px 0 rgba(0,0,0,.42);        /* the shaded bottom lip */
+}
+.mergekey-cap.is-down .mergekey-top{
+  transform:translateY(var(--travel));
+  box-shadow:
+    inset 0 0 0 1px rgba(0,0,0,.5),
+    0 0 0 2px rgba(0,0,0,.7),
+    0 2px 4px rgba(0,0,0,.55);
+}
+/* the face flattens as it bottoms out — less light reaches a sunk key */
+.mergekey-cap.is-down .mergekey-face{
+  background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(0,0,0,.16)),var(--box);
+  box-shadow:inset 0 2px 0 rgba(255,255,255,.14),inset 0 -2px 0 rgba(0,0,0,.35);
+}
+.mergekey-cap:focus-visible{outline:none}
+.mergekey-cap:focus-visible .mergekey-top{outline:3px solid var(--gold);outline-offset:4px}
+/* a live key catches more light under the finger */
+.mergekey:not(.is-held) .mergekey-cap:hover:not(.is-down) .mergekey-face{
+  background:linear-gradient(180deg,rgba(255,255,255,.26),rgba(255,255,255,.06) 55%,rgba(0,0,0,.12)),var(--box);
+}
+
+.mergekey-legend{
+  font-size:16px;letter-spacing:2px;line-height:1;color:var(--leaf);
+  text-shadow:0 1px 0 rgba(0,0,0,.8);
+}
+.mergekey-sub{font-size:10px;letter-spacing:1px;line-height:1;color:var(--dim)}
+
+/* a dead key: nothing to merge yet, or something in the way */
+.mergekey.is-held .mergekey-legend{color:var(--dim);text-shadow:none}
+.mergekey.is-held .mergekey-face{filter:saturate(.4) brightness(.85)}
+
+/* armed: the cap latches down and goes amber — the next press writes history */
+.mergekey.phase-armed .mergekey-face,
+.mergekey.phase-working .mergekey-face{
+  background:linear-gradient(180deg,rgba(255,255,255,.28),rgba(0,0,0,.10) 60%,rgba(0,0,0,.22)),var(--gold);
+  box-shadow:inset 0 2px 0 rgba(255,255,255,.45),inset 0 -2px 0 rgba(0,0,0,.30);
+}
+.mergekey.phase-armed .mergekey-legend,
+.mergekey.phase-working .mergekey-legend{color:var(--on-accent);text-shadow:none}
+.mergekey.phase-armed .mergekey-sub,
+.mergekey.phase-working .mergekey-sub{color:var(--on-accent);opacity:.8}
+.mergekey.phase-merged .mergekey-legend{color:var(--leaf)}
+
+.mergekey-plate{flex:1 1 170px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.mergekey-caption{font-size:12px;letter-spacing:.5px;color:var(--bone);overflow-wrap:anywhere}
+.mergekey-why{font-size:13px;color:var(--dim);line-height:1.4;overflow-wrap:anywhere}
+.mergekey-why.armed{color:var(--gold)}
+
+@media (prefers-reduced-motion:reduce){
+  .mergekey-top{transition:none}
+  .mergekey-led.on{animation:none}
+}
+@media (max-width:560px){
+  .mergekey{align-self:stretch}
+}
 .cardmodal-desc{
   width:100%;box-sizing:border-box;resize:vertical;min-height:94px;
   font-family:var(--mono);font-size:14px;line-height:1.6;

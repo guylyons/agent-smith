@@ -9,8 +9,9 @@ import type { Board, Card, Column } from "../lib/board";
 import type { ChatMessage, QuestionOption, Question, PendingQuestion, BlockingTool } from "../lib/conversation";
 import type { Subagent } from "../lib/subagents";
 import type { RepoInfo } from "../repo";
+import type { MergeState, MergeResult } from "../lib/merge";
 
-type Result = { ok: boolean; error?: string; path?: string; url?: string; cancelled?: boolean };
+type Result = { ok: boolean; error?: string; path?: string; url?: string; cancelled?: boolean; branch?: string; base?: string };
 
 async function post(action: string, body: object): Promise<Result> {
   try {
@@ -158,7 +159,7 @@ export async function pickFolder(startIn?: string): Promise<string | null> {
 export type PersonaInfo = { id: string; name: string; role: string; skills: string[] };
 
 // Re-exported (imported at the top) so components keep importing them from "./actions".
-export type { ChatMessage, QuestionOption, Question, PendingQuestion, BlockingTool, Subagent, RepoInfo };
+export type { ChatMessage, QuestionOption, Question, PendingQuestion, BlockingTool, Subagent, RepoInfo, MergeState, MergeResult };
 export type Conversation = { messages: ChatMessage[]; question: PendingQuestion | null; blocked: BlockingTool | null };
 
 // GET a JSON endpoint, returning null on any failure (network error, non-2xx, or
@@ -204,4 +205,20 @@ export async function fetchChatSearch(q: string): Promise<ChatHit[]> {
   if (!q.trim()) return [];
   const body = await getJson<{ chats?: ChatHit[] }>(`/search?q=${encodeURIComponent(q)}`);
   return body?.chats ?? [];
+}
+
+/** Whether a card's work is committed and can be landed on the trunk. null on
+ *  any failure (no assignee, no status file, a blip) — the key simply doesn't
+ *  appear, which is the same as "nothing to merge yet". */
+export async function fetchMergeState(cardId: string): Promise<MergeState | null> {
+  return getJson<MergeState>(`/merge-state?cardId=${encodeURIComponent(cardId)}`);
+}
+
+/** Land this card's branch on the trunk. Real `git merge --no-ff`, run in the
+ *  main checkout; the server refuses (and reports) anything it can't do
+ *  cleanly, so a failure here is a toast, never a half-finished merge. */
+export async function mergeCard(cardId: string): Promise<MergeResult> {
+  const r = await post("card-merge", { cardId, author: ME });
+  if (!r.ok) toast(r.error ?? "could not merge");
+  return r as MergeResult;
 }

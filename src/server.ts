@@ -11,6 +11,7 @@ import { loadPersonas, applyPersonas } from "./lib/personas";
 import { readBoard, writeBoard, sanitizeBoard, boardFile, addCard, moveCard, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, addColumn, renameColumn, setInstruction, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, sanitizeCard, sanitizeColumn, type Board, type Card, type Column } from "./lib/board";
 import { ALLOWED_MODELS, ALLOWED_PERMISSION_MODES, focusSession, interruptSession, killAgent, sendPrompt, sendFreshPrompt, spawnAgent } from "./ghostty";
 import { readRepo } from "./repo";
+import { readMergeState, mergeWork } from "./lib/merge";
 import { saveUpload, resolveUploadPath } from "./lib/uploads";
 import { chooseFolder } from "./lib/chooser";
 import { initialIdle, onConnect, onDisconnect, shouldShutDown, type IdleState } from "./lib/idle";
@@ -268,6 +269,27 @@ export function makeServer(
         return json(loadPersonas().map(({ id, name, role, skills }) => ({ id, name, role, skills })));
       }
 
+      // Where a card's work actually lives: its assignee's working directory.
+      // Read from the session's own status FILE rather than the live snapshot,
+      // so a card whose agent has finished and gone still knows which branch
+      // holds its work — which is exactly when you want to merge it.
+      const cardWorkDir = (cardId: string): { cwd: string } | { error: string; status: number } => {
+        const card = readBoard(dir).cards.find((k) => k.id === cardId);
+        if (!card) return { error: `unknown card: ${cardId}`, status: 404 };
+        if (!card.assignee) return { error: "card has no assignee, so there's no branch to merge", status: 400 };
+        const st = loadStatus(dir, card.assignee.id);
+        if (!st?.cwd) return { error: `no working directory known for ${card.assignee.name}`, status: 404 };
+        return { cwd: st.cwd };
+      };
+
+      // whether a card's work is committed and can be landed on the trunk —
+      // what puts the MERGE key on the card (and what greys it out)
+      if (url.pathname === "/merge-state") {
+        const where = cardWorkDir(url.searchParams.get("cardId") ?? "");
+        if ("error" in where) return json({ error: where.error }, where.status);
+        return json(await readMergeState(where.cwd));
+      }
+
       // a session's git context (branch, commits, working-tree status)
       if (url.pathname === "/repo") {
         const sid = url.searchParams.get("sessionId") ?? "";
@@ -423,7 +445,7 @@ export function makeServer(
           push();
           return json({ ok: true, cardId: card.id });
         }
-        if (action === "card-move" || action === "card-comment" || action === "card-update" || action === "card-assign" || action === "send-task" || action === "card-delete" || action === "comment-delete") {
+        if (action === "card-move" || action === "card-comment" || action === "card-update" || action === "card-assign" || action === "send-task" || action === "card-merge" || action === "card-delete" || action === "comment-delete") {
           const cardId = typeof body.cardId === "string" ? body.cardId : "";
           const board = readBoard(dir);
           const card = board.cards.find((k) => k.id === cardId);
@@ -471,6 +493,32 @@ export function makeServer(
             writeBoard(dir, next);
             push();
             return json({ ok: true });
+          }
+          // card-merge: land this card's branch on the trunk, for real. The
+          // guard rails live in lib/merge (nothing to merge, dirty tree, busy
+          // main checkout, conflicts) — this only resolves the card to a
+          // directory and records what happened on the card itself, so the
+          // ticket carries the trail rather than just a toast that scrolls away.
+          //
+          // Browser-only, like the folder picker: this writes to the human's
+          // own checkout and their history, and the board protocol has agents
+          // hand work to Review for a person to accept. An agent (curl, no
+          // sec-fetch-site) is refused rather than allowed to land its own work.
+          if (action === "card-merge") {
+            if (req.headers.get("sec-fetch-site") !== "same-origin") {
+              return json({ ok: false, error: "merging is a human's call — press MERGE on the card in the dashboard" }, 403);
+            }
+            const where = cardWorkDir(cardId);
+            if ("error" in where) return json({ ok: false, error: where.error }, where.status);
+            const r = await mergeWork(where.cwd);
+            if (!r.ok) return json(r, 409);
+            const by = typeof body.author === "string" && body.author.trim() ? body.author.trim() : "You";
+            const note = `Merged ${r.branch} into ${r.base}.`;
+            const next = addComment(readBoard(dir), cardId, by, note);
+            writeBoard(dir, next);
+            push();
+            notifyCardEvent(next, cardId, by, `[THE LINE] ${by} merged "${title}" — ${note}`);
+            return json(r);
           }
           if (action === "card-comment") {
             const author = typeof body.author === "string" ? body.author.trim() : "";
