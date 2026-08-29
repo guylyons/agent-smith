@@ -46,6 +46,7 @@ export const KEYS = {
   bgImage: "aw-bg-image",
   bgDim: "aw-bg-dim",
   alerts: "aw-alerts",
+  face: "aw-face",
 } as const;
 
 export function loadSetting(key: string, fallback: string): string {
@@ -56,6 +57,11 @@ export function saveSetting(key: string, val: string): void {
 }
 export function loadBool(key: string): boolean {
   try { return localStorage.getItem(key) === "1"; } catch { return false; }
+}
+/** Like loadBool, but unset means ON — for toggles that ship enabled and are
+ *  opted OUT of, where an absent key must not read as "off". */
+export function loadBoolDefaultOn(key: string): boolean {
+  try { return (localStorage.getItem(key) ?? "1") === "1"; } catch { return true; }
 }
 
 const root = () => document.documentElement;

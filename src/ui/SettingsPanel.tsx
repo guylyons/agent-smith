@@ -11,11 +11,13 @@ const DEFAULT_CUSTOM_DIM = 35;
 // One place for the display/alert controls. The values live in App (the CRT
 // overlay needs the mode too), so this panel only renders them and reports a
 // patch back — every change applies live, nothing to save.
-export function SettingsPanel({ display, onChange, alertsEnabled, onToggleAlerts, onClose }: {
+export function SettingsPanel({ display, onChange, alertsEnabled, onToggleAlerts, face, onToggleFace, onClose }: {
   display: Display;
   onChange: (patch: Partial<Display>) => void;
   alertsEnabled: boolean;
   onToggleAlerts: () => void;
+  face: boolean;
+  onToggleFace: () => void;
   onClose: () => void;
 }) {
   const [uploading, setUploading] = useState(false);
@@ -133,6 +135,12 @@ export function SettingsPanel({ display, onChange, alertsEnabled, onToggleAlerts
             onChange={(e) => onChange({ bgDim: Number(e.target.value) })}
           />
           <div className="pix settings-hint">Darkens whatever is behind the panels. Useful for a busy photo.</div>
+
+          <div className="pix settings-label">STATUS FACE</div>
+          <div className="settings-row">
+            <button className={`deskbtn ${face ? "on" : ""}`} aria-pressed={face} onClick={onToggleFace}>🕶 {face ? "ON" : "OFF"}</button>
+          </div>
+          <div className="pix settings-hint">Agent Smith, bottom of the screen. He sours as the fleet burns its token budget, and glares when an agent needs you.</div>
 
           <div className="pix settings-label">ALERTS</div>
           <div className="settings-row">

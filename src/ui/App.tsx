@@ -9,10 +9,11 @@ import { ConversationDrawer } from "./ConversationDrawer";
 import { NewAgentModal } from "./NewAgentModal";
 import { CommandPalette } from "./CommandPalette";
 import { SettingsPanel } from "./SettingsPanel";
+import { FaceHud } from "./FaceHud";
 import { Toaster } from "./Toaster";
 import { Notifier } from "./Notifier";
 import { onOpenAgent } from "./nav";
-import { applyAllSettings, readDisplay, writeDisplay, loadBool, saveSetting, KEYS, type Display } from "./settings";
+import { applyAllSettings, readDisplay, writeDisplay, loadBool, loadBoolDefaultOn, saveSetting, KEYS, type Display } from "./settings";
 import { diffUnread, loadUnread, saveUnread, type PrevStates } from "./unread";
 import type { AgentStatus } from "../schema";
 
@@ -28,6 +29,9 @@ export function App() {
   // CRT overlay needs the mode to play its power-on sweep, and the panel is
   // unmounted most of the time.
   const [display, setDisplay] = useState<Display>(() => ({ theme: "default", crt: "on", bg: "night", bgImage: "", bgDim: 0 }));
+  // The status face ships on; the toggle is an opt-OUT, so it can't default to
+  // false the way an unset alerts key does.
+  const [faceEnabled, setFaceEnabled] = useState(true);
   const recentFolders = [...new Set(snap.agents.map((a) => a.cwd).filter(Boolean))];
 
   // Apply saved display settings once on load.
@@ -35,7 +39,14 @@ export function App() {
     applyAllSettings();
     setDisplay(readDisplay());
     setAlertsEnabled(loadBool(KEYS.alerts));
+    setFaceEnabled(loadBoolDefaultOn(KEYS.face));
   }, []);
+
+  function toggleFace() {
+    const next = !faceEnabled;
+    setFaceEnabled(next);
+    saveSetting(KEYS.face, next ? "1" : "0");
+  }
 
   const changeDisplay = useCallback((patch: Partial<Display>) => {
     setDisplay((d) => { const next = { ...d, ...patch }; writeDisplay(next); return next; });
@@ -140,9 +151,12 @@ export function App() {
           onChange={changeDisplay}
           alertsEnabled={alertsEnabled}
           onToggleAlerts={toggleAlerts}
+          face={faceEnabled}
+          onToggleFace={toggleFace}
           onClose={() => setSettingsOpen(false)}
         />
       )}
+      {faceEnabled && <FaceHud agents={snap.agents} board={snap.board} />}
       <Toaster />
       <Notifier snap={snap} enabled={alertsEnabled} />
     </>
