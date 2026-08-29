@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { mergeForWrite, scanLiveSessions, freshTranscripts, chooseLive, isEphemeralCwd, readConversation, budgetTotalOf, type GhosttyTerminal } from "../src/scan";
+import { mergeForWrite, scanLiveSessions, freshTranscripts, chooseLive, isEphemeralCwd, readConversation, budgetTotalOf, isClaudeComm, isSessionHostComm, parseProcessTable, type GhosttyTerminal } from "../src/scan";
 import type { AgentStatus } from "../src/schema";
 import { mkdirSync, writeFileSync, rmSync, readFileSync, utimesSync, existsSync } from "node:fs";
 import { join } from "node:path";
@@ -389,4 +389,96 @@ test("budgetTotalOf: null for a transcript without markers or a missing file", a
   writeFileSync(file, JSON.stringify({ type: "user", sessionId: "s9", cwd: "/r", message: { content: [{ type: "text", text: "hi" }] } }));
   expect(await budgetTotalOf(file)).toBe(null);
   expect(await budgetTotalOf(join(projects, "p", "missing.jsonl"))).toBe(null);
+});
+
+// --- liveness: a session that dies without a SessionEnd hook (crash, force
+// quit, tab close) leaves its status file behind forever, because the cleanup
+// pass only ever removed scanner-written (pid-less) files. ------------------
+
+test("isClaudeComm: matches a full-path claude, not an unrelated process", () => {
+  expect(isClaudeComm("claude")).toBe(true);
+  expect(isClaudeComm("/Users/guy/.local/bin/claude")).toBe(true); // seen in the wild
+  expect(isClaudeComm("node")).toBe(false);
+  expect(isClaudeComm("/Applications/Claude.app/Contents/MacOS/Claude")).toBe(false);
+});
+
+test("isSessionHostComm: a known session's pid may be hosted by a shim", () => {
+  expect(isSessionHostComm("claude")).toBe(true);
+  expect(isSessionHostComm("/Users/guy/.local/bin/claude")).toBe(true);
+  expect(isSessionHostComm("node")).toBe(true); // npm-shim install
+  expect(isSessionHostComm("bun")).toBe(true);
+  expect(isSessionHostComm("Google Chrome")).toBe(false); // recycled pid
+});
+
+test("scanLiveSessions removes a hook-owned status file whose process is gone", async () => {
+  reset();
+  const now = 40_000_000;
+  writeFileSync(join(status, "dead.json"), JSON.stringify(S({ sessionId: "dead", cwd: "/repo", pid: 4242 })));
+  await scanLiveSessions(now, 15 * 60_000,
+    { counts: new Map([["/repo", 1]]), ok: true, procs: new Map([[99, "claude"]]) }, NO_GHOSTTY);
+  expect(existsSync(join(status, "dead.json"))).toBe(false);
+});
+
+test("scanLiveSessions keeps a hook-owned status file whose process is still running", async () => {
+  reset();
+  const now = 40_000_000;
+  writeFileSync(join(status, "alive.json"), JSON.stringify(S({ sessionId: "alive", cwd: "/elsewhere", pid: 4242 })));
+  await scanLiveSessions(now, 15 * 60_000,
+    { counts: new Map([["/repo", 1]]), ok: true, procs: new Map([[4242, "/opt/homebrew/bin/claude"]]) }, NO_GHOSTTY);
+  expect(existsSync(join(status, "alive.json"))).toBe(true);
+});
+
+test("scanLiveSessions keeps a hook-owned file hosted by a shim (node/bun), not just bare claude", async () => {
+  reset();
+  const now = 40_000_000;
+  writeFileSync(join(status, "shim.json"), JSON.stringify(S({ sessionId: "shim", cwd: "/elsewhere", pid: 4242 })));
+  await scanLiveSessions(now, 15 * 60_000,
+    { counts: new Map([["/repo", 1]]), ok: true, procs: new Map([[4242, "node"]]) }, NO_GHOSTTY);
+  expect(existsSync(join(status, "shim.json"))).toBe(true);
+});
+
+test("scanLiveSessions removes a hook-owned file whose pid was recycled by something else", async () => {
+  reset();
+  const now = 40_000_000;
+  writeFileSync(join(status, "recycled.json"), JSON.stringify(S({ sessionId: "recycled", cwd: "/repo", pid: 4242 })));
+  await scanLiveSessions(now, 15 * 60_000,
+    { counts: new Map([["/repo", 1]]), ok: true, procs: new Map([[4242, "Google Chrome"]]) }, NO_GHOSTTY);
+  expect(existsSync(join(status, "recycled.json"))).toBe(false);
+});
+
+test("scanLiveSessions keeps hook-owned files when process info is unavailable", async () => {
+  reset();
+  const now = 40_000_000;
+  writeFileSync(join(status, "hooked.json"), JSON.stringify(S({ sessionId: "hooked", cwd: "/elsewhere", pid: 4242 })));
+  // no `procs` at all -> ps unreadable -> never delete on a guess
+  await scanLiveSessions(now, 15 * 60_000, { counts: new Map([["/repo", 1]]), ok: true }, NO_GHOSTTY);
+  expect(existsSync(join(status, "hooked.json"))).toBe(true);
+  // an empty (but present) table is equally untrustworthy
+  await scanLiveSessions(now, 15 * 60_000,
+    { counts: new Map([["/repo", 1]]), ok: true, procs: new Map() }, NO_GHOSTTY);
+  expect(existsSync(join(status, "hooked.json"))).toBe(true);
+});
+
+test("parseProcessTable: finds claude sessions by basename, ignoring headless helpers", () => {
+  const psout = [
+    "  90025 ttys004  claude",
+    "  47726 ??       /Users/guy/.local/bin/claude --chrome-native-host",
+    "  95426 ttys003  /Users/guy/.local/bin/claude",
+    "  12345 ??       /Applications/Claude.app/Contents/MacOS/Claude",
+    "  54321 ttys009  node",
+  ].join("\n");
+  const { procs, sessionPids } = parseProcessTable(psout);
+  // full-path claude in a terminal counts; the detached --chrome-native-host
+  // helper and the desktop app do not
+  expect(sessionPids).toEqual(["90025", "95426"]);
+  // every process lands in the liveness table, session or not
+  expect(procs.get(47726)).toBe("/Users/guy/.local/bin/claude --chrome-native-host");
+  expect(procs.get(54321)).toBe("node");
+  expect(procs.size).toBe(5);
+});
+
+test("parseProcessTable: unusable ps output yields an empty table (callers keep everything)", () => {
+  const { procs, sessionPids } = parseProcessTable("");
+  expect(procs.size).toBe(0);
+  expect(sessionPids).toEqual([]);
 });

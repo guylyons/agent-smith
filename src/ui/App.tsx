@@ -11,6 +11,7 @@ import { CommandPalette } from "./CommandPalette";
 import { SettingsPanel } from "./SettingsPanel";
 import { FaceHud } from "./FaceHud";
 import { Toaster } from "./Toaster";
+import { Dictation } from "./Dictation";
 import { Notifier } from "./Notifier";
 import { onOpenAgent } from "./nav";
 import { applyAllSettings, readDisplay, writeDisplay, loadBool, loadBoolDefaultOn, saveSetting, KEYS, type Display } from "./settings";
@@ -160,6 +161,7 @@ export function App() {
       )}
       {faceEnabled && <FaceHud agents={snap.agents} board={snap.board} />}
       <Toaster />
+      <Dictation />
       <Notifier snap={snap} enabled={alertsEnabled} />
     </>
   );

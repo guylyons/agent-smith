@@ -6,6 +6,7 @@ import { writeFile } from "node:fs/promises";
 import type { AgentStatus } from "./schema";
 import { prepareLaunch } from "./lib/worktree";
 import { composePrompt, getPersona, type Persona } from "./lib/personas";
+import { isSessionHostComm } from "./lib/proc";
 
 export type ActionResult = { ok: boolean; error?: string };
 type Target = Pick<AgentStatus, "tty" | "cwd" | "title">;
@@ -306,10 +307,8 @@ export async function interruptSession(status: Pick<AgentStatus, "pid">): Promis
     if (!comm) return { ok: false, error: "that session isn't running any more" };
     // Accept the CLI (claude) and shim hosts (npm/node, bun) so pausing works
     // regardless of install method, while still refusing an obviously-unrelated
-    // recycled pid (e.g. a browser).
-    const base = comm.split("/").pop() ?? comm;
-    const hosts = new Set(["claude", "node", "bun", "deno"]);
-    if (!hosts.has(comm) && !hosts.has(base)) {
+    // recycled pid (e.g. a browser). Same rule the scanner's liveness check uses.
+    if (!isSessionHostComm(comm)) {
       return { ok: false, error: "that session isn't running any more" };
     }
   } catch {

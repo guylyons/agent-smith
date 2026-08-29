@@ -15,6 +15,9 @@ import { ensureStatusDir } from "./lib/paths";
 import { deriveStatusFromTranscript } from "./lib/transcript";
 import { parseConversation, findPendingQuestion, findBlockingTool, type ChatMessage, type PendingQuestion, type BlockingTool } from "./lib/conversation";
 import { deriveSubagent, type Subagent } from "./lib/subagents";
+import { isClaudeComm, pidIsLiveSession } from "./lib/proc";
+
+export { isClaudeComm, isSessionHostComm } from "./lib/proc";
 
 const FRESH_MS = Number(process.env.AGENT_SCAN_FRESH_MS ?? 15 * 60_000);
 const TAIL_BYTES = 64 * 1024;
@@ -92,24 +95,48 @@ function terminalMatchesTitle(termName: string, title: string): boolean {
 }
 
 /**
- * Count running top-level `claude` CLI processes per working directory.
- * Returns { counts, ok }: ok=false means we couldn't read process info at all
- * (ps failed / no claude found), in which case callers fall back rather than
- * blank the dashboard. Ephemeral cwds are dropped.
+ * Parse `ps ax -o pid=,tty=,comm=` into the two things we need from one pass:
+ *  - `procs`: EVERY pid -> comm, so a recorded session pid can be checked for
+ *    liveness without spawning a `ps` per status file.
+ *  - `sessionPids`: the `claude` processes that own a terminal. Two filters, both
+ *    load-bearing:
+ *      · basename, not exact match — `claude` and `/Users/you/.local/bin/claude`
+ *        are the same program, and requiring the bare name missed the latter.
+ *      · a controlling tty — `claude --chrome-native-host` (the browser
+ *        extension's helper) and other headless invocations are real `claude`
+ *        processes but not windows, and counting them would let a phantom
+ *        through the per-cwd cap.
+ *    NOTE: an npm-shim install invoked via node/bun reports "node"/"bun" and
+ *    still matches nothing -> ok:false -> chooseLive falls back to all-fresh.
  */
-export async function runningClaudeCounts(): Promise<{ counts: Map<string, number>; ok: boolean }> {
+export function parseProcessTable(psout: string): { procs: Map<number, string>; sessionPids: string[] } {
+  const procs = new Map<number, string>();
+  const sessionPids: string[] = [];
+  for (const line of psout.split("\n")) {
+    const m = line.trim().match(/^(\d+)\s+(\S+)\s+(.*)$/);
+    if (!m) continue;
+    const [, pid, tty, comm] = m;
+    procs.set(Number(pid), comm.trim());
+    if (isClaudeComm(comm) && tty !== "??") sessionPids.push(pid);
+  }
+  return { procs, sessionPids };
+}
+
+/**
+ * Count running top-level `claude` CLI processes per working directory.
+ * Returns { counts, ok, procs }: ok=false means we couldn't read process info at
+ * all (ps failed / no claude found), in which case callers fall back rather than
+ * blank the dashboard. Ephemeral cwds are dropped from `counts`.
+ * `procs` is the full pid -> comm table from the same `ps` pass — unfiltered, so
+ * the cleanup pass can ask whether a specific recorded pid is still alive
+ * without spawning a `ps` per status file.
+ */
+export async function runningClaudeCounts(): Promise<{ counts: Map<string, number>; ok: boolean; procs: Map<number, string> }> {
   const counts = new Map<string, number>();
   let psout = "";
-  try { psout = await run(["ps", "ax", "-o", "pid=,comm="]); } catch { return { counts, ok: false }; }
-  const pids: string[] = [];
-  for (const line of psout.split("\n")) {
-    const m = line.trim().match(/^(\d+)\s+(.*)$/);
-    // exact comm "claude" = the CLI (not the desktop app). NOTE: an npm-shim
-    // install invoked via node/bun would report "node"/"bun" here and match
-    // nothing -> ok:false -> chooseLive falls back to all-fresh (pre-fix behavior).
-    if (m && m[2].trim() === "claude") pids.push(m[1]);
-  }
-  if (!pids.length) return { counts, ok: false };
+  try { psout = await run(["ps", "ax", "-o", "pid=,tty=,comm="]); } catch { return { counts, ok: false, procs: new Map() }; }
+  const { procs, sessionPids: pids } = parseProcessTable(psout);
+  if (!pids.length) return { counts, ok: false, procs };
   // Resolve every pid's cwd in parallel (serial lsof was ~37ms/pid).
   const cwds = await Promise.all(pids.map(async (pid) => {
     try {
@@ -124,8 +151,9 @@ export async function runningClaudeCounts(): Promise<{ counts: Map<string, numbe
   }
   // If we resolved no cwds at all (e.g. lsof unavailable/failed for every pid),
   // report ok:false so callers FALL BACK rather than blanking the dashboard and
-  // deleting tracked sessions.
-  return { counts, ok: counts.size > 0 };
+  // deleting tracked sessions. `procs` is reported regardless — it comes from
+  // `ps` alone, so it stays usable even when lsof is what failed.
+  return { counts, ok: counts.size > 0, procs };
 }
 
 /** Read the last `bytes` of a file and return its lines (bounded, for large transcripts). */
@@ -375,11 +403,11 @@ export function chooseLive(
 export async function scanLiveSessions(
   now: number,
   freshMs = FRESH_MS,
-  countsOverride?: { counts: Map<string, number>; ok: boolean },
+  countsOverride?: { counts: Map<string, number>; ok: boolean; procs?: Map<number, string> },
   ghosttyOverride?: { terminals: GhosttyTerminal[]; ok: boolean },
 ): Promise<number> {
   const dir = ensureStatusDir();
-  const [{ counts, ok }, ghostty] = await Promise.all([
+  const [{ counts, ok, procs }, ghostty] = await Promise.all([
     countsOverride ? Promise.resolve(countsOverride) : runningClaudeCounts(),
     ghosttyOverride ? Promise.resolve(ghosttyOverride) : ghosttyTerminals(),
   ]);
@@ -434,7 +462,14 @@ export async function scanLiveSessions(
     await rename(tmp, target); // atomic
   }
 
-  // Remove scanner-written status files (no pid — hooks set pid) that are no longer live.
+  // Remove status files that are no longer live. Two kinds:
+  //  - scanner-written (no pid — hooks set pid): not chosen this pass = gone.
+  //  - hook-written, but the process the hook recorded has since exited. A
+  //    session that dies WITHOUT its SessionEnd hook running (crash, force
+  //    quit, closing the terminal tab) never deletes its own file, so without
+  //    this it sat on the board as a ghost desk. Only ever deleted on proof:
+  //    pidIsLiveSession returns null when the process table is unusable, and
+  //    an unreadable table must not evict a live agent.
   let names: string[] = [];
   try { names = await readdir(dir); } catch { /* none */ }
   for (const name of names) {
@@ -443,7 +478,11 @@ export async function scanLiveSessions(
     if (chosenIds.has(sid)) continue;
     try {
       const st = parseStatus(JSON.parse(await readFile(join(dir, name), "utf8")));
-      if (st && st.pid === undefined) await unlink(join(dir, name)); // scanner-origin phantom
+      if (!st) continue;
+      const dead = st.pid === undefined
+        ? true // scanner-origin phantom
+        : pidIsLiveSession(st.pid, procs ?? new Map()) === false;
+      if (dead) await unlink(join(dir, name));
     } catch { /* leave unreadable files for the reader to skip */ }
   }
 
