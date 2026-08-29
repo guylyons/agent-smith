@@ -1,6 +1,10 @@
 import { useRef, useState } from "react";
 import { ModalBackdrop } from "./Backdrop";
-import { THEMES, CRT_MODES, BEVEL_MODES, BACKGROUNDS, CUSTOM_BG, type BevelMode, type CrtMode, type Display } from "./settings";
+import {
+  THEMES, CRT_MODES, BEVEL_MODES, BACKGROUNDS, CUSTOM_BG,
+  LINE_ROWS_MIN, LINE_ROWS_MAX, LINE_ROWS_OFF,
+  type BevelMode, type CrtMode, type Display,
+} from "./settings";
 import { uploadImage } from "./actions";
 import { toast } from "./toast";
 
@@ -150,6 +154,28 @@ export function SettingsPanel({ display, onChange, alertsEnabled, onToggleAlerts
             onChange={(e) => onChange({ bgDim: Number(e.target.value) })}
           />
           <div className="pix settings-hint">Darkens whatever is behind the panels. Useful for a busy photo.</div>
+
+          <label className="pix settings-label" htmlFor="line-rows">
+            THE LINE · STACK · {display.lineRows === LINE_ROWS_OFF ? "NO LIMIT" : `${display.lineRows} CARDS`}
+          </label>
+          <input
+            id="line-rows"
+            className="settings-slider"
+            type="range"
+            /* One step below the minimum is OFF, so "no cap at all" is the far
+               left of the same control rather than a separate button. */
+            min={LINE_ROWS_MIN - 1}
+            max={LINE_ROWS_MAX}
+            step={1}
+            value={display.lineRows === LINE_ROWS_OFF ? LINE_ROWS_MIN - 1 : display.lineRows}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              onChange({ lineRows: n < LINE_ROWS_MIN ? LINE_ROWS_OFF : n });
+            }}
+          />
+          <div className="pix settings-hint">
+            How many cards a column shows before it scrolls. NO LIMIT lets the column grow with its stack.
+          </div>
 
           <div className="pix settings-label">STATUS BAR</div>
           <div className="settings-row">

@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import type { DragEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { DragEvent, RefObject } from "react";
 import type { AgentStatus } from "../schema";
 import type { Board, Column, Card } from "../lib/board";
 import {
@@ -15,6 +15,7 @@ import { toast } from "./toast";
 import { onOpenCard } from "./nav";
 import { CardModal } from "./CardModal";
 import { Sprite } from "./Sprite";
+import { stackMaxHeight } from "./stackCap";
 
 const CARD_MIME = "application/x-line-card";
 const COL_MIME = "application/x-line-column";
@@ -33,9 +34,10 @@ type Mutate = (fn: ((b: Board) => Board) | null, send: () => void) => void;
 // it against a fresh read and echoes the result back over SSE, so a rename here
 // and an agent's comment there compose instead of overwriting each other.
 export function TheLine({
-  board: incoming, agents, onSpawnForCard,
+  board: incoming, agents, lineRows, onSpawnForCard,
 }: {
-  board: Board; agents: AgentStatus[]; onSpawnForCard: (task: string, cardId: string) => void;
+  board: Board; agents: AgentStatus[]; lineRows: number;
+  onSpawnForCard: (task: string, cardId: string) => void;
 }) {
   const [board, setBoard] = useState(incoming);
   const [addingCol, setAddingCol] = useState(false);
@@ -77,6 +79,7 @@ export function TheLine({
             mutate={mutate}
             column={col}
             index={i}
+            rows={lineRows}
             autoFocusName={addingCol && i === board.columns.length - 1}
             onNamed={() => setAddingCol(false)}
             onOpenCard={setOpenCardId}
@@ -101,9 +104,10 @@ export function TheLine({
 }
 
 function ColumnView({
-  board, agents, mutate, column, index, autoFocusName, onNamed, onOpenCard,
+  board, agents, mutate, column, index, rows, autoFocusName, onNamed, onOpenCard,
 }: {
-  board: Board; agents: AgentStatus[]; mutate: Mutate; column: Column; index: number; autoFocusName: boolean;
+  board: Board; agents: AgentStatus[]; mutate: Mutate; column: Column; index: number;
+  rows: number; autoFocusName: boolean;
   onNamed: () => void; onOpenCard: (id: string) => void;
 }) {
   const [dragOver, setDragOver] = useState(false);
@@ -112,6 +116,8 @@ function ColumnView({
   // also means "append" for a drop on the column's empty space.
   const [dropAt, setDropAt] = useState<number | null>(null);
   const cards = board.cards.filter((c) => c.columnId === column.id);
+  const listRef = useRef<HTMLDivElement>(null);
+  useStackCap(listRef, rows, cards.length);
 
   function clearDrag() { setDragOver(false); setDropAt(null); }
 
@@ -206,7 +212,7 @@ function ColumnView({
         onCommit={(v) => mutate((b) => setInstruction(b, column.id, v), () => setInstructionAction(column.id, v))}
       />
 
-      <div className="cards">
+      <div className="cards" ref={listRef} onDragOver={edgeScroll}>
         {cards.map((card, i) => (
           <CardView
             key={card.id}
@@ -228,6 +234,55 @@ function ColumnView({
       <AddCard mutate={mutate} columnId={column.id} />
     </div>
   );
+}
+
+const PEEK = 10; // px of the next card left showing, so the cut reads as scrollable
+
+// Cap a column's card stack at `rows` cards and let the rest scroll. The cut is
+// measured from the real card faces (they vary in height) and re-measured when
+// one of them changes size — a title rewrapping, the column narrowing, a meta
+// row appearing. `max-height` is set on the element rather than through React so
+// nothing re-renders on a resize; `data-capped` is what the stylesheet hangs the
+// scrolling off, so an uncapped column looks exactly as it did before.
+function useStackCap(ref: RefObject<HTMLDivElement | null>, rows: number, count: number) {
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
+    const apply = () => {
+      const kids = Array.from(el.children) as HTMLElement[];
+      const cs = getComputedStyle(el);
+      const gap = parseFloat(cs.rowGap) || 0;
+      const pad = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+      const max = stackMaxHeight(
+        kids.map((k) => k.getBoundingClientRect().height), rows, gap, pad, PEEK,
+      );
+      el.style.maxHeight = max == null ? "" : `${max}px`;
+      if (max == null) delete el.dataset.capped;
+      else el.dataset.capped = "1";
+    };
+
+    apply();
+    if (typeof ResizeObserver === "undefined") return;
+    // Observing the cards, not the list: the list's own height is what we're
+    // setting, so watching it would be a loop.
+    const ro = new ResizeObserver(apply);
+    for (const k of Array.from(el.children)) ro.observe(k);
+    return () => ro.disconnect();
+  }, [ref, rows, count]);
+}
+
+// A capped stack scrolls, and HTML drag-and-drop won't scroll it for you: a card
+// dragged to the bottom edge would have nowhere to go. Nudge the list while the
+// pointer sits in the last/first few pixels of it.
+const EDGE = 26;
+const NUDGE = 14;
+function edgeScroll(e: DragEvent<HTMLDivElement>) {
+  const el = e.currentTarget;
+  if (el.scrollHeight <= el.clientHeight) return;
+  const r = el.getBoundingClientRect();
+  if (e.clientY > r.bottom - EDGE) el.scrollTop += NUDGE;
+  else if (e.clientY < r.top + EDGE) el.scrollTop -= NUDGE;
 }
 
 // A card face: click anywhere to open the detail modal. Kept deliberately
@@ -285,8 +340,11 @@ function CardView({
         onMoveByKey(dir);
         // The board re-renders around the move, so hold focus on this card to
         // keep a run of moves going instead of dumping focus back to the body.
+        // In a capped column the card can land past the fold, and refocusing an
+        // element that never lost focus scrolls nothing — so bring it back into
+        // view by hand, or the card you're moving disappears under you.
         const el = e.currentTarget;
-        requestAnimationFrame(() => el.focus());
+        requestAnimationFrame(() => { el.focus(); el.scrollIntoView({ block: "nearest" }); });
       }}
       onDragOver={(e) => {
         e.preventDefault();

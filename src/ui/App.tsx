@@ -14,7 +14,7 @@ import { Toaster } from "./Toaster";
 import { Dictation } from "./Dictation";
 import { Notifier } from "./Notifier";
 import { onOpenAgent } from "./nav";
-import { applyAllSettings, readDisplay, writeDisplay, loadBool, loadBoolDefaultOn, saveSetting, KEYS, type Display } from "./settings";
+import { applyAllSettings, readDisplay, writeDisplay, loadBool, loadBoolDefaultOn, saveSetting, KEYS, LINE_ROWS_DEFAULT, type Display } from "./settings";
 import { diffUnread, loadUnread, saveUnread, type PrevStates } from "./unread";
 import type { AgentStatus } from "../schema";
 
@@ -29,7 +29,7 @@ export function App() {
   // Theme / CRT / background live here rather than in the Settings panel: the
   // CRT overlay needs the mode to play its power-on sweep, and the panel is
   // unmounted most of the time.
-  const [display, setDisplay] = useState<Display>(() => ({ theme: "default", crt: "on", bevel: "off", bg: "night", bgImage: "", bgDim: 0 }));
+  const [display, setDisplay] = useState<Display>(() => ({ theme: "default", crt: "on", bevel: "off", bg: "night", bgImage: "", bgDim: 0, lineRows: LINE_ROWS_DEFAULT }));
   // The status face ships on; the toggle is an opt-OUT, so it can't default to
   // false the way an unset alerts key does.
   const [faceEnabled, setFaceEnabled] = useState(true);
@@ -135,7 +135,7 @@ export function App() {
       <TubeBevel mode={display.bevel} />
       <Header snap={snap} live={live} onNewAgent={() => setSpawnSeed({})} onFind={() => setPaletteOpen(true)} onSettings={() => setSettingsOpen(true)} />
       <Crew agents={snap.agents} board={snap.board} unread={unread} onOpen={openAgent} />
-      <TheLine board={snap.board} agents={snap.agents} onSpawnForCard={(task, cardId) => setSpawnSeed({ task, cardId })} />
+      <TheLine board={snap.board} agents={snap.agents} lineRows={display.lineRows} onSpawnForCard={(task, cardId) => setSpawnSeed({ task, cardId })} />
       {selected && selected.sessionId === selectedId && (
         <ConversationDrawer agent={selected} ended={ended} onClose={() => setSelectedId(null)} />
       )}

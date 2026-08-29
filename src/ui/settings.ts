@@ -53,6 +53,13 @@ export const BACKGROUNDS = [
 /** The id used when the background is the user's own uploaded image. */
 export const CUSTOM_BG = "custom";
 
+/** How many cards a column on THE LINE shows before it scrolls. `LINE_ROWS_OFF`
+ *  means no cap — the column grows with its stack, the way it used to. */
+export const LINE_ROWS_MIN = 3;
+export const LINE_ROWS_MAX = 12;
+export const LINE_ROWS_OFF = 0;
+export const LINE_ROWS_DEFAULT = 6;
+
 export const KEYS = {
   theme: "aw-theme",
   crt: "aw-crt",
@@ -61,6 +68,7 @@ export const KEYS = {
   bgImage: "aw-bg-image",
   bgDim: "aw-bg-dim",
   alerts: "aw-alerts",
+  lineRows: "aw-line-rows",
   face: "aw-face",
   // JSON array of repo folders, most recent first — see recentFolders.ts.
   recentFolders: "aw-recent-folders",
@@ -114,6 +122,15 @@ export function loadCrt(): CrtMode {
   return "on";
 }
 
+/** The stored card cap for a LINE column, clamped to the offered range (0 = off).
+ *  It round-trips through localStorage, so anything could be sitting there. */
+export function loadLineRows(): number {
+  const n = Math.round(Number(loadSetting(KEYS.lineRows, String(LINE_ROWS_DEFAULT))));
+  if (!Number.isFinite(n)) return LINE_ROWS_DEFAULT;  // junk in storage: ship's default
+  if (n <= LINE_ROWS_OFF) return LINE_ROWS_OFF;       // 0 or less means "no cap"
+  return Math.min(LINE_ROWS_MAX, Math.max(LINE_ROWS_MIN, n));
+}
+
 /** The stored bevel mode. New setting, so it defaults to off — an existing
  *  user's screen doesn't grow a glass edge on upgrade. */
 export function loadBevel(): BevelMode {
@@ -139,7 +156,11 @@ export function applyAllSettings(): void {
 
 /** Everything the display controls own, in one object so App can hold a single
  *  piece of state and the Settings panel can patch it. */
-export type Display = { theme: string; crt: CrtMode; bevel: BevelMode; bg: string; bgImage: string; bgDim: number };
+export type Display = {
+  theme: string; crt: CrtMode; bevel: BevelMode; bg: string; bgImage: string; bgDim: number;
+  /** Cards shown per LINE column before it scrolls; 0 = no cap. */
+  lineRows: number;
+};
 
 export function readDisplay(): Display {
   return {
@@ -149,6 +170,7 @@ export function readDisplay(): Display {
     bg: loadSetting(KEYS.bg, "night"),
     bgImage: loadSetting(KEYS.bgImage, ""),
     bgDim: loadBgDim(),
+    lineRows: loadLineRows(),
   };
 }
 
@@ -160,4 +182,5 @@ export function writeDisplay(d: Display): void {
   applyBg(d.bg); saveSetting(KEYS.bg, d.bg);
   applyBgImage(d.bgImage); saveSetting(KEYS.bgImage, d.bgImage);
   applyBgDim(d.bgDim); saveSetting(KEYS.bgDim, String(d.bgDim));
+  saveSetting(KEYS.lineRows, String(d.lineRows));
 }
