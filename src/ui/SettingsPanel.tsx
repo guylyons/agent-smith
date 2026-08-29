@@ -3,8 +3,10 @@ import { ModalBackdrop } from "./Backdrop";
 import { TUBE_MODES, BACKGROUNDS, applyTube, applyBg, loadSetting, saveSetting } from "./settings";
 
 // One place for the display/alert toggles that used to float over the board.
-export function SettingsPanel({ alertsEnabled, onToggleAlerts, onClose }: {
-  alertsEnabled: boolean; onToggleAlerts: () => void; onClose: () => void;
+export function SettingsPanel({ alertsEnabled, onToggleAlerts, face, onToggleFace, onClose }: {
+  alertsEnabled: boolean; onToggleAlerts: () => void;
+  face: boolean; onToggleFace: () => void;
+  onClose: () => void;
 }) {
   const [tube, setTube] = useState(() => loadSetting("aw-tube", ""));
   const [bg, setBg] = useState(() => loadSetting("aw-bg", "night"));
@@ -33,6 +35,12 @@ export function SettingsPanel({ alertsEnabled, onToggleAlerts, onClose }: {
               <button key={b.id} className={`deskbtn ${bg === b.id ? "on" : ""}`} onClick={() => pickBg(b.id)}>{b.label}</button>
             ))}
           </div>
+
+          <div className="pix settings-label">STATUS FACE</div>
+          <div className="settings-row">
+            <button className={`deskbtn ${face ? "on" : ""}`} onClick={onToggleFace}>🕶 {face ? "ON" : "OFF"}</button>
+          </div>
+          <div className="pix settings-hint">Agent Smith, bottom of the screen. He sours as the fleet burns its token budget, and glares when an agent needs you.</div>
 
           <div className="pix settings-label">ALERTS</div>
           <div className="settings-row">

@@ -28,6 +28,11 @@ export function saveSetting(key: string, val: string): void {
 export function loadBool(key: string): boolean {
   try { return localStorage.getItem(key) === "1"; } catch { return false; }
 }
+/** Like loadBool, but unset means ON — for toggles that ship enabled and are
+ *  opted OUT of, where an absent key must not read as "off". */
+export function loadBoolDefaultOn(key: string): boolean {
+  try { return (localStorage.getItem(key) ?? "1") === "1"; } catch { return true; }
+}
 
 // CRT mode is applied via the <html> class; background via a data-attribute — kept
 // separate so they never clobber each other.

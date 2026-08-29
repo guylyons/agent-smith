@@ -9,10 +9,11 @@ import { ConversationDrawer } from "./ConversationDrawer";
 import { NewAgentModal } from "./NewAgentModal";
 import { CommandPalette } from "./CommandPalette";
 import { SettingsPanel } from "./SettingsPanel";
+import { FaceHud } from "./FaceHud";
 import { Toaster } from "./Toaster";
 import { Notifier } from "./Notifier";
 import { onOpenAgent } from "./nav";
-import { applyTube, applyBg, loadSetting, loadBool, saveSetting } from "./settings";
+import { applyTube, applyBg, loadSetting, loadBool, loadBoolDefaultOn, saveSetting } from "./settings";
 import type { AgentStatus } from "../schema";
 
 export function App() {
@@ -25,6 +26,9 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [alertsEnabled, setAlertsEnabled] = useState(false);
+  // The status face ships on; the toggle is an opt-OUT, so it can't default to
+  // false the way an unset alerts key does.
+  const [faceEnabled, setFaceEnabled] = useState(true);
   const recentFolders = [...new Set(snap.agents.map((a) => a.cwd).filter(Boolean))];
 
   // Apply saved display settings once on load.
@@ -32,7 +36,14 @@ export function App() {
     applyTube(loadSetting("aw-tube", ""));
     applyBg(loadSetting("aw-bg", "night"));
     setAlertsEnabled(loadBool("aw-alerts"));
+    setFaceEnabled(loadBoolDefaultOn("aw-face"));
   }, []);
+
+  function toggleFace() {
+    const next = !faceEnabled;
+    setFaceEnabled(next);
+    saveSetting("aw-face", next ? "1" : "0");
+  }
 
   // Quick find: Cmd+P (mac) / Ctrl+P opens the command palette. Preventing the
   // default stops the browser's print dialog stealing the chord.
@@ -84,7 +95,16 @@ export function App() {
         />
       )}
       {paletteOpen && <CommandPalette snap={snap} onClose={() => setPaletteOpen(false)} />}
-      {settingsOpen && <SettingsPanel alertsEnabled={alertsEnabled} onToggleAlerts={toggleAlerts} onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && (
+        <SettingsPanel
+          alertsEnabled={alertsEnabled}
+          onToggleAlerts={toggleAlerts}
+          face={faceEnabled}
+          onToggleFace={toggleFace}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
+      {faceEnabled && <FaceHud agents={snap.agents} board={snap.board} />}
       <Toaster />
       <Notifier snap={snap} enabled={alertsEnabled} />
     </>
