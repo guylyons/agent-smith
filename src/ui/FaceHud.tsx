@@ -1,115 +1,83 @@
-import { useEffect, useMemo, useRef, useState } from "react";
 import type { AgentStatus } from "../schema";
 import type { Board } from "../lib/board";
 import {
   pickFace, faceTitle,
   FACE_COLS, FACE_ROWS, FACE_CELL_W, FACE_CELL_H,
-  type Face, type FaceState,
+  type FaceState,
 } from "../lib/face";
-import { fleetUsage } from "./UsageMeter";
-import { boardMoves, isCompletion, type PrevCols } from "./soundEvents";
+import { hudStats } from "../lib/hud";
+import { fleetUsage, fmtTokens } from "../lib/usage";
 import facesUrl from "./faces.png";
 
 // Displayed at exactly 2x the native cell, so every source pixel maps to a whole
 // 2x2 block and the sprite stays crisp under image-rendering: pixelated.
 const SCALE = 2;
 
-// How often the idle rotation re-rolls. Slow enough to read as glances rather
-// than a strobe; DOOM's own face turns on roughly this cadence.
-const FLICKER_MS = 2200;
+/** The reading for a panel with no data behind it. DOOM never shows a blank
+ *  slot, and a dash is honestly "unknown" where a 0 would claim empty. */
+const NO_DATA = "--";
 
-// How long the shout holds after a card lands in DONE.
-const CELEBRATE_MS = 1600;
-
-/** Track `prefers-reduced-motion`, live. Under it the face is picked once from
- *  the fleet's state and then held — still informative, never flickering. */
-function useReducedMotion(): boolean {
-  const [reduced, setReduced] = useState(() => {
-    try { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch { return false; }
-  });
-  useEffect(() => {
-    let mq: MediaQueryList;
-    try { mq = window.matchMedia("(prefers-reduced-motion: reduce)"); } catch { return; }
-    const onChange = () => setReduced(mq.matches);
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
-  }, []);
-  return reduced;
-}
-
-/** True for a beat after any card lands in DONE. Diffs the board itself rather
- *  than listening for the toast, so the HUD owns its own timing and can't be
- *  thrown off by whether notifications happen to be enabled. */
-function useCelebration(board: Board): boolean {
-  const [celebrating, setCelebrating] = useState(false);
-  const prevRef = useRef<PrevCols>(new Map());
-  const primedRef = useRef(false);
-
-  useEffect(() => {
-    const { moves, next } = boardMoves(prevRef.current, board, primedRef.current);
-    prevRef.current = next;
-    // The first populated board is a baseline: cards already sitting in DONE on
-    // load are not fresh wins.
-    if (!primedRef.current) { primedRef.current = board.cards.length > 0; return; }
-    if (!moves.some(isCompletion)) return;
-
-    setCelebrating(true);
-    const id = setTimeout(() => setCelebrating(false), CELEBRATE_MS);
-    return () => clearTimeout(id);
-  }, [board]);
-
-  return celebrating;
+/** One big-number panel: the reading over its caption, DOOM's own hierarchy. */
+function Panel({ value, caption, tone }: { value: string; caption: string; tone?: string }) {
+  return (
+    <div className={`facehud-panel${tone ? ` ${tone}` : ""}`}>
+      <div className="facehud-num">{value}</div>
+      <div className="pix facehud-cap">{caption}</div>
+    </div>
+  );
 }
 
 /**
- * The status-bar face: Agent Smith reacting to the fleet, pinned bottom-centre
- * the way DOOM's is. The row he's wearing tracks the same token budget the usage
- * meter reports, so the two never disagree.
+ * The DOOM status bar, read off the live fleet: AMMO, HEALTH, ARMS, Smith,
+ * ARMOR and the ammo table, in the order the original puts them.
+ *
+ * Every number comes from lib/hud.ts and the face from lib/face.ts, both pure —
+ * so this component holds no state and runs no timers. It re-renders only when
+ * a snapshot actually changes something, and the face is a function of the
+ * fleet rather than of the clock.
  */
 export function FaceHud({ agents, board }: { agents: AgentStatus[]; board: Board }) {
-  const reduced = useReducedMotion();
-  const celebrating = useCelebration(board);
-
+  const { ammo, health, arms, armor, table } = hudStats(agents, board);
   const usage = fleetUsage(agents);
-  const pct = usage ? usage.pct : null;
-  const waiting = agents.filter((a) => a.state === "waiting").length;
-  const working = agents.filter((a) => a.state === "working").length;
 
-  // Memoised on primitives so the effects below re-run when the fleet actually
-  // changes, not on every snapshot poll that returns identical numbers.
-  const state: FaceState = useMemo(
-    () => ({ pct, waiting, working, agents: agents.length, celebrating }),
-    [pct, waiting, working, agents.length, celebrating],
-  );
-
-  const stateRef = useRef(state);
-  stateRef.current = state;
-
-  const [face, setFace] = useState<Face>(() => pickFace(state));
-
-  // React at once when the fleet changes — waiting on you should show now, not
-  // at the next flicker.
-  useEffect(() => { setFace(pickFace(state)); }, [state]);
-
-  // The idle rotation. Skipped entirely under reduced motion, and held while the
-  // tab is hidden so a backgrounded dashboard isn't re-rendering for nobody.
-  useEffect(() => {
-    if (reduced) return;
-    const id = setInterval(() => {
-      if (document.hidden) return;
-      setFace(pickFace(stateRef.current));
-    }, FLICKER_MS);
-    return () => clearInterval(id);
-  }, [reduced]);
-
+  const state: FaceState = {
+    pct: usage ? usage.pct : null,
+    waiting: agents.filter((a) => a.state === "waiting").length,
+    working: agents.filter((a) => a.state === "working").length,
+    procs: agents.reduce((n, a) => n + (a.subagents ?? 0), 0),
+    agents: agents.length,
+  };
+  const face = pickFace(state);
   const label = faceTitle(state);
 
+  // The same thresholds the header's usage meter uses, so a fleet that reads
+  // "amber" in one place can never read "fine" in the other.
+  const hpTone = health === null ? "" : health <= 25 ? "hp-low" : health <= 50 ? "hp-warn" : "";
+
   return (
-    <div className="facehud" title={label}>
+    <div className="facehud" role="group" aria-label="Fleet status">
+     <div className="facehud-inner">
+      <Panel value={ammo === null ? NO_DATA : fmtTokens(ammo)} caption="AMMO" />
+      <Panel
+        value={health === null ? NO_DATA : `${health}%`}
+        caption="HEALTH"
+        tone={hpTone}
+      />
+
+      <div className="facehud-panel facehud-arms">
+        <div className="facehud-armsgrid" aria-hidden="true">
+          {arms.map((slot, i) => (
+            <span key={i} className={`facehud-slot is-${slot}`}>{i + 1}</span>
+          ))}
+        </div>
+        <div className="pix facehud-cap">ARMS</div>
+      </div>
+
       <div
         className="facehud-face"
         role="img"
         aria-label={label}
+        title={label}
         style={{
           backgroundImage: `url(${facesUrl})`,
           width: FACE_CELL_W * SCALE,
@@ -118,6 +86,20 @@ export function FaceHud({ agents, board }: { agents: AgentStatus[]; board: Board
           backgroundPosition: `-${face.col * FACE_CELL_W * SCALE}px -${face.row * FACE_CELL_H * SCALE}px`,
         }}
       />
+
+      <Panel value={`${armor}%`} caption="ARMOR" />
+
+      <div className="facehud-table">
+        {table.map((row) => (
+          <div className="facehud-row" key={row.label}>
+            <span className="pix facehud-rowlabel">{row.label}</span>
+            <span className="facehud-rowcount">{row.count}</span>
+            <span className="facehud-rowslash">/</span>
+            <span className="facehud-rowtotal">{row.total}</span>
+          </div>
+        ))}
+      </div>
+     </div>
     </div>
   );
 }

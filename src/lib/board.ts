@@ -32,6 +32,10 @@ export type Card = {
 export type Column = { id: string; name: string; instruction: string };
 export type Board = { columns: Column[]; cards: Card[] };
 
+// The column a completed card lands in — a move INTO it finishes a task. Lives
+// here beside defaultBoard, which is what makes the id "done" true.
+export const DONE_COLUMN_ID = "done";
+
 const VERSION = 3;
 
 function genId(prefix: string): string {
@@ -47,7 +51,7 @@ export function defaultBoard(): Board {
       { id: "in-progress", name: "In Progress", instruction: "" },
       { id: "review", name: "Review", instruction: "" },
       {
-        id: "done",
+        id: DONE_COLUMN_ID,
         name: "Done",
         instruction:
           "Once done, ensure the worktree is clean and committed, then share a report in the ticket.",

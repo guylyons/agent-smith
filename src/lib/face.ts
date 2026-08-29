@@ -11,6 +11,10 @@
 // This mirrors DOOM's status face, which is why it fits: the app already frames
 // the token budget as an HP bar, so a face that sours as the fleet burns budget
 // is reading a gauge that already exists rather than inventing one.
+//
+// pickFace is a PURE FUNCTION OF FLEET STATE — no clock, no randomness. The
+// face holds still while nothing is happening and moves only when the numbers
+// behind it move, so a glance at it is worth something.
 
 /** Sheet geometry. The HUD and the slicer must agree on these. */
 export const FACE_COLS = 7;
@@ -38,18 +42,20 @@ const PAIN_ROWS = 5;
 /** Usage at which Smith stops pretending he's fine. */
 const CRITICAL_PCT = 0.95;
 
-/** Odds that a fully idle fleet blinks the green-eye frame on a given tick.
- *  Rare on purpose — a special frame you see constantly stops being special. */
-const GREEN_EYE_ODDS = 1 / 8;
-
-/** The idle rotation. Weighted by repetition rather than a parallel weight
- *  table: three of six slots look straight ahead, so Smith mostly stares at you
- *  and only occasionally glances aside. */
-export const IDLE_COLS: readonly number[] = [
-  COL_FORWARD, COL_FORWARD, COL_FORWARD,
-  COL_FORWARD_ALT,
-  COL_LOOK_R,
-  COL_LOOK_L,
+/**
+ * The concurrency ladder: how strained Smith looks for a given amount of work
+ * running at once. Read as "at `from` units of load or more, wear this face",
+ * steepest first — the first match wins.
+ *
+ * A unit of load is one working agent or one live subagent process, counted
+ * alike: six subagents under a single agent is a busy machine, and the agent
+ * count on its own would read as barely awake.
+ */
+export const LOAD_LADDER: readonly { from: number; col: number }[] = [
+  { from: 8, col: COL_SCREAM },
+  { from: 5, col: COL_GRIT_ALT },
+  { from: 3, col: COL_GRIT },
+  { from: 1, col: COL_FORWARD_ALT },
 ];
 
 /** Everything the face reacts to. Deliberately primitives, not a Snapshot: this
@@ -61,10 +67,10 @@ export type FaceState = {
   waiting: number;
   /** Agents actively working. */
   working: number;
-  /** Agents known at all — an empty fleet is not an idle one. */
+  /** Live subagent processes across the fleet. */
+  procs: number;
+  /** Agents known at all — an empty fleet is not a parked one. */
   agents: number;
-  /** A card just landed in DONE. */
-  celebrating: boolean;
 };
 
 export type Face = { row: number; col: number };
@@ -80,42 +86,51 @@ export function painRow(pct: number | null): number {
   return Math.min(PAIN_ROWS - 1, Math.floor(clamped * PAIN_ROWS));
 }
 
+/** Working agents plus live subagent processes — everything running at once. */
+export function fleetLoad(state: FaceState): number {
+  return Math.max(0, state.working) + Math.max(0, state.procs);
+}
+
 /**
- * The face to show. `rand` is injected so the idle flicker is testable.
+ * The face to show, as a pure function of fleet state.
  *
- * Precedence, loudest first: critical usage (red eyes) beats a celebration,
- * which beats a grimace for agents blocked on you, which beats the idle
- * rotation. A celebration changes only the column — finishing a ticket is a
- * mood, not a refund on the tokens already burned.
+ * Precedence, loudest first: critical usage (red eyes) beats an agent blocked
+ * on you (a glance aside), which beats an empty fleet, which beats a parked one
+ * (green eyes), which beats the concurrency ladder. The row is always the pain
+ * row, so how much budget is gone shows through whatever mood sits on top.
  */
-export function pickFace(state: FaceState, rand: () => number = Math.random): Face {
-  const { pct, waiting, working, agents, celebrating } = state;
+export function pickFace(state: FaceState): Face {
+  const { pct, waiting, agents } = state;
 
   if (pct !== null && pct >= CRITICAL_PCT) return { row: SPECIAL_ROW, col: COL_RED_EYE };
 
   const row = painRow(pct);
 
-  if (celebrating) return { row, col: COL_SCREAM };
-  if (waiting > 0) return { row, col: rand() < 0.5 ? COL_GRIT : COL_GRIT_ALT };
+  // Being blocked on the human is the one thing the HUD exists to shout about.
+  // Which way he turns reports how many: one, or a room full.
+  if (waiting > 0) return { row, col: waiting === 1 ? COL_LOOK_R : COL_LOOK_L };
 
-  // Nothing running but agents on the board: the fleet is idle, and just
-  // occasionally that boredom shows as the green-eye frame.
-  if (working === 0 && agents > 0 && rand() < GREEN_EYE_ODDS) {
-    return { row: SPECIAL_ROW, col: COL_GREEN_EYE };
-  }
+  // No crew at all is not the same as a crew standing idle: there is nobody to
+  // watch, so the stare is blank rather than knowing.
+  if (agents <= 0) return { row: 0, col: COL_FORWARD };
 
-  return { row, col: IDLE_COLS[Math.min(IDLE_COLS.length - 1, Math.floor(rand() * IDLE_COLS.length))]! };
+  const load = fleetLoad(state);
+  if (load === 0) return { row: SPECIAL_ROW, col: COL_GREEN_EYE };
+
+  const rung = LOAD_LADDER.find((r) => load >= r.from);
+  return { row, col: rung ? rung.col : COL_FORWARD };
 }
 
 /** Plain-language reading of the same state, for the HUD's tooltip and its
  *  screen-reader label — the face is decorative unless it can be explained. */
 export function faceTitle(state: FaceState): string {
-  const { pct, waiting, working, agents } = state;
+  const { pct, waiting, working, procs, agents } = state;
   const usage = pct === null ? "no usage data" : `${Math.round(pct * 100)}% of the fleet's token budget spent`;
 
   const bits: string[] = [];
   if (waiting > 0) bits.push(`${waiting} agent${waiting === 1 ? " needs" : "s need"} you`);
   if (working > 0) bits.push(`${working} working`);
+  if (procs > 0) bits.push(`${procs} process${procs === 1 ? "" : "es"}`);
   if (!bits.length) bits.push(agents > 0 ? "all quiet" : "no agents");
 
   return `Agent Smith — ${bits.join(", ")} · ${usage}`;

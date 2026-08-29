@@ -136,11 +136,11 @@ export function SettingsPanel({ display, onChange, alertsEnabled, onToggleAlerts
           />
           <div className="pix settings-hint">Darkens whatever is behind the panels. Useful for a busy photo.</div>
 
-          <div className="pix settings-label">STATUS FACE</div>
+          <div className="pix settings-label">STATUS BAR</div>
           <div className="settings-row">
             <button className={`deskbtn ${face ? "on" : ""}`} aria-pressed={face} onClick={onToggleFace}>🕶 {face ? "ON" : "OFF"}</button>
           </div>
-          <div className="pix settings-hint">Agent Smith, bottom of the screen. He sours as the fleet burns its token budget, and glares when an agent needs you.</div>
+          <div className="pix settings-hint">A DOOM status bar across the foot of the screen: tokens left, budget health, a slot per agent, board progress, and Agent Smith — who sours as the fleet burns budget and turns to look when an agent needs you.</div>
 
           <div className="pix settings-label">ALERTS</div>
           <div className="settings-row">

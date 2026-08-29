@@ -7,3 +7,6 @@ agent-workshop-live*.png
 
 # subagent worktrees (scratch)
 .claude/worktrees/
+
+# macOS
+.DS_Store
