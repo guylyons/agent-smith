@@ -31,10 +31,11 @@ keyed by the real session id so they never double-count a session.
 ```bash
 bun install
 bun run install-hooks   # recommended — required to see permission prompts (see above)
-bun run dev             # builds if needed, starts the dashboard, prints the URL
+bun run app             # opens the workshop as a stand-alone window
 ```
 
-Open the printed URL. Your currently-open sessions appear right away (via the
+Or `bun run dev` to start the server and open the printed URL in a browser tab
+yourself. Either way, your currently-open sessions appear right away (via the
 scanner). New sessions report automatically via the hooks; sessions you already
 have open won't fire hooks until you restart them, but the scanner keeps
 showing them in the meantime.
@@ -42,10 +43,30 @@ showing them in the meantime.
 > `bun run dev` serves the pre-built `dist/`. After changing anything under
 > `src/ui`, run `bun run build` to rebuild it (`dist/` is not tracked).
 
+### Running it as a stand-alone app
+
+`bun run app` opens the board in its own window with no browser decorations —
+no URL bar, no tabs, no bookmarks — using the `--app` mode every Chromium
+browser has. It tries Google Chrome, then Brave, Edge and Chromium, and it
+builds `dist/` first if you haven't. Set `AGENT_WORKSHOP_BROWSER` to pick a
+different one (`brave`, `edge`, or a full path to a Chromium binary).
+
+The window is the app: close it and the server stops with it. If a dashboard is
+already running on the port, `bun run app` opens a window onto *that* one and
+leaves it running when the window closes, so it never kills a `bun run dev` you
+had going in another terminal.
+
+The window gets its own browser profile — `~/.agent-workshop/browser-profile-<port>`,
+one per port, kept apart from your everyday browsing. That's what makes it a
+separate window with its own dock icon instead of one more tab, and it remembers
+its size and position between runs. If no Chromium browser is installed, it says
+so and falls back to your default browser, decorations and all.
+
 ### Scripts
 
 | Command | What it does |
 | --- | --- |
+| `bun run app` | Opens the workshop as a stand-alone window — builds and starts the server if needed |
 | `bun run dev` | Starts the dashboard server (with the scanner running) and prints its URL |
 | `bun run build` | Builds `src/ui` into `dist/` (minified) — run after any UI change |
 | `bun test` | Runs the unit test suite |
