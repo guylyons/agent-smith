@@ -1,0 +1,52 @@
+// The repo folders offered as one-click buttons in the New Agent dialog.
+//
+// These used to be derived purely from the folders live agents happened to be
+// running in, so the list emptied the moment your agents did — the folder you
+// used yesterday was gone and had to be typed out again. Now a launch is
+// remembered, and the live folders are merged on top so a session someone else
+// started still shows up.
+//
+// The list ops are pure (and unit-tested); only the two thin wrappers touch
+// localStorage, which can throw or hold anything at all, so both are defensive.
+import { KEYS, loadSetting, saveSetting } from "./settings";
+
+/** How many buttons the dialog will show. Enough to cover the repos you move
+ *  between, few enough that the row doesn't wrap into a wall. */
+export const MAX_RECENT = 8;
+
+/** Most-recent-first, `folder` moved (not duplicated) to the front, capped. */
+export function pushRecent(list: string[], folder: string, max = MAX_RECENT): string[] {
+  const f = folder.trim();
+  if (!f) return list.slice(0, max);
+  return [f, ...list.filter((p) => p !== f)].slice(0, max);
+}
+
+/** Remembered folders first (that's the history the user built), then whatever
+ *  live agents are running in, de-duped and capped. */
+export function mergeRecent(stored: string[], live: string[], max = MAX_RECENT): string[] {
+  return [...new Set([...stored, ...live])].filter(Boolean).slice(0, max);
+}
+
+/** Coerce whatever came back out of storage into a clean string list — a hand
+ *  edit, a half-written value or an older shape must degrade to "no history",
+ *  never to a crash on open. */
+export function parseRecent(raw: string): string[] {
+  try {
+    const v: unknown = JSON.parse(raw);
+    if (!Array.isArray(v)) return [];
+    return v.filter((p): p is string => typeof p === "string" && !!p.trim()).slice(0, MAX_RECENT);
+  } catch {
+    return [];
+  }
+}
+
+export function loadRecentFolders(): string[] {
+  return parseRecent(loadSetting(KEYS.recentFolders, "[]"));
+}
+
+/** Persist and return the new list. Callers use the return value rather than
+ *  re-reading, so the UI updates even if the write itself failed. */
+export function saveRecentFolders(list: string[]): string[] {
+  saveSetting(KEYS.recentFolders, JSON.stringify(list));
+  return list;
+}

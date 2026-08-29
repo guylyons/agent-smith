@@ -12,6 +12,7 @@ import { readBoard, writeBoard, sanitizeBoard, boardFile, addCard, moveCard, add
 import { ALLOWED_MODELS, ALLOWED_PERMISSION_MODES, focusSession, interruptSession, killAgent, sendPrompt, sendFreshPrompt, spawnAgent } from "./ghostty";
 import { readRepo } from "./repo";
 import { saveUpload, resolveUploadPath } from "./lib/uploads";
+import { chooseFolder } from "./lib/chooser";
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -247,8 +248,20 @@ export function makeServer(
           return json({ ok: false, error: "cross-site blocked" }, 403);
         }
         const action = url.pathname.slice("/action/".length);
-        let body: { sessionId?: string | null; name?: string; text?: string; cwd?: string; palette?: number; gear?: string; body?: string; model?: string; permissionMode?: string; worktree?: string; persona?: string; board?: unknown; type?: string; dataBase64?: string; cardId?: string; columnId?: string; toColumnId?: string; title?: string; description?: string; author?: string; instruction?: string; toIndex?: number; index?: number; column?: unknown; card?: unknown; cards?: unknown; commentId?: string };
+        let body: { sessionId?: string | null; name?: string; text?: string; cwd?: string; palette?: number; gear?: string; body?: string; model?: string; permissionMode?: string; worktree?: string; branch?: string; persona?: string; board?: unknown; type?: string; dataBase64?: string; cardId?: string; columnId?: string; toColumnId?: string; title?: string; description?: string; author?: string; instruction?: string; toIndex?: number; index?: number; column?: unknown; card?: unknown; cards?: unknown; commentId?: string };
         try { body = await req.json(); } catch { return json({ ok: false, error: "bad body" }, 400); }
+        // pick-folder opens the real macOS folder chooser on the user's screen and
+        // hands back the path they picked. Browser-only on purpose: it puts a
+        // modal window on someone's desktop, so it takes a same-origin POST from
+        // our own page — a scripted client (curl, an agent) sends no
+        // sec-fetch-site and is refused rather than allowed through the way the
+        // read endpoints are.
+        if (action === "pick-folder") {
+          if (req.headers.get("sec-fetch-site") !== "same-origin") {
+            return json({ ok: false, error: "the folder picker is a browser-only action" }, 403);
+          }
+          return json(await chooseFolder(typeof body.cwd === "string" ? body.cwd : undefined));
+        }
         // spawn creates a brand-new session — it has a folder + task, not a sessionId
         if (action === "spawn") {
           const cwd = typeof body.cwd === "string" ? body.cwd : "";
@@ -260,6 +273,10 @@ export function makeServer(
           // A blank/whitespace field means "no worktree" (launch in the folder). The
           // name is sanitized to a slug inside createWorktree, so pass it as typed.
           const worktree = typeof body.worktree === "string" && body.worktree.trim() ? body.worktree.trim() : undefined;
+          // Same rule for the branch, and the two are independent: a branch on
+          // its own switches the folder itself, a branch alongside a worktree
+          // names that worktree's branch (see prepareLaunch).
+          const branch = typeof body.branch === "string" && body.branch.trim() ? body.branch.trim() : undefined;
           const persona = typeof body.persona === "string" && body.persona.trim() ? body.persona.trim() : undefined;
           // The card this agent is being spawned for, if any: rides into the
           // session env so its SessionStart hook self-assigns the card once the
@@ -272,7 +289,7 @@ export function makeServer(
           if (persona === "scrum-master" && !req.headers.get("sec-fetch-site")) {
             return json({ ok: false, error: "agents may not spawn a scrum-master — only a human can (use the + NEW AGENT dialog)" }, 403);
           }
-          return json(await spawnAgent(cwd, task, { model, permissionMode, worktree, persona, serverUrl: url.origin, cardId }));
+          return json(await spawnAgent(cwd, task, { model, permissionMode, worktree, branch, persona, serverUrl: url.origin, cardId }));
         }
         // board: a whole-board write. Kept for external/scripted callers, but
         // NOTHING in the UI uses it any more: it overwrites the file wholesale,

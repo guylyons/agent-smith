@@ -47,6 +47,8 @@ export const KEYS = {
   bgDim: "aw-bg-dim",
   alerts: "aw-alerts",
   face: "aw-face",
+  // JSON array of repo folders, most recent first — see recentFolders.ts.
+  recentFolders: "aw-recent-folders",
 } as const;
 
 export function loadSetting(key: string, fallback: string): string {

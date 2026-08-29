@@ -560,6 +560,17 @@
 .newagent .reply-input{flex:0 0 auto}
 .newagent-task{resize:vertical;line-height:1.5;min-height:110px}
 .newagent-recent{display:flex;flex-wrap:wrap;gap:6px;margin-top:2px}
+/* folder path + native picker button on one line */
+.newagent-folder{display:flex;gap:6px;align-items:stretch}
+.newagent-folder .reply-input{flex:1;min-width:0}
+.newagent-browse{display:flex;align-items:center;justify-content:center;padding:0 9px;flex:0 0 auto}
+/* a recent repo: the name, and (for remembered ones) a way to drop it */
+.newagent-chip{display:inline-flex}
+.newagent-chip .deskbtn{max-width:22ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.newagent-chip .newagent-forget{border-left-width:0;padding:2px 5px;color:var(--dim);max-width:none}
+.newagent-chip .newagent-forget:not(:disabled):hover{color:var(--clay);border-color:var(--clay)}
+/* plain-language read-out of where the agent will actually run */
+.newagent-where{font-size:11px;color:var(--dim);line-height:1.6;margin-top:6px}
 .deskbtn.on{background:var(--bevel);color:var(--on-bevel)}
 .deskbtn.primary{background:var(--gold);color:var(--on-accent);border-color:var(--bone);font-family:var(--mono);font-size:12px;padding:9px 12px}
 .deskbtn.primary:hover:not(:disabled){background:var(--leaf)}
@@ -948,8 +959,8 @@ body{background:transparent}
 .comment-post:disabled{opacity:.4;cursor:default}
 
 /* new-agent modal: model/permission-mode option row (added for STOP/options work) */
-.newagent-opts{display:flex;gap:14px;margin-top:2px}
-.newagent-opt{flex:1;display:flex;flex-direction:column;gap:2px}
+.newagent-opts{display:flex;flex-wrap:wrap;gap:14px;margin-top:2px}
+.newagent-opt{flex:1 1 180px;min-width:0;display:flex;flex-direction:column;gap:2px}
 .newagent-select{cursor:pointer}
 
 /* ---- quick-find command palette (Cmd+P) ---- */

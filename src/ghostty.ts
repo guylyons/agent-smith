@@ -4,7 +4,7 @@
 // Best-effort: every call resolves to a {ok, error?} result and never throws.
 import { writeFile } from "node:fs/promises";
 import type { AgentStatus } from "./schema";
-import { createWorktree } from "./lib/worktree";
+import { prepareLaunch } from "./lib/worktree";
 import { composePrompt, getPersona, type Persona } from "./lib/personas";
 
 export type ActionResult = { ok: boolean; error?: string };
@@ -241,9 +241,11 @@ export function workerPermissionSettings(serverUrl: string): { permissions: { al
  *  `opts.model` and `opts.permissionMode` are checked against a fixed allowlist
  *  before being interpolated into the shell command — unknown values are
  *  silently ignored rather than passed through.
- *  `opts.worktree`, when set, creates an isolated git worktree off the folder's
- *  HEAD and launches the session there instead of in `cwd`, so agents never share
- *  a working tree; a worktree failure aborts the launch with its error.
+ *  `opts.worktree` and `opts.branch` choose the working area (see prepareLaunch):
+ *  a worktree name creates an isolated worktree off the folder's HEAD and
+ *  launches there so agents never share a working tree; a branch name alone puts
+ *  the folder itself on that feature branch; both gives a worktree checked out
+ *  on the branch you named. A failure to prepare aborts the launch with its error.
  *  `opts.persona`, when it names a known persona, binds that persona to the new
  *  session (see buildLaunchInput); an unknown id resolves to null and is
  *  ignored, same as an unknown model.
@@ -256,24 +258,20 @@ export function workerPermissionSettings(serverUrl: string): { permissions: { al
 export async function spawnAgent(
   cwd: string,
   task: string,
-  opts?: { model?: string; permissionMode?: string; worktree?: string; persona?: string; serverUrl?: string; cardId?: string },
+  opts?: { model?: string; permissionMode?: string; worktree?: string; branch?: string; persona?: string; serverUrl?: string; cardId?: string },
 ): Promise<ActionResult> {
-  let launchCwd = cwd;
-  if (opts?.worktree) {
-    const wt = await createWorktree(cwd, opts.worktree);
-    if (!wt.ok) return { ok: false, error: wt.error ?? "could not create worktree" };
-    launchCwd = wt.path!;
-    if (opts.serverUrl) {
-      try {
-        const dir = `${launchCwd}/.claude`;
-        const file = `${dir}/settings.local.json`;
-        // A brand-new worktree can't have local settings yet; don't clobber if
-        // something unexpected is there.
-        if (!(await Bun.file(file).exists())) {
-          await Bun.write(file, JSON.stringify(workerPermissionSettings(opts.serverUrl), null, 2) + "\n");
-        }
-      } catch { /* best-effort — the agent just gets permission prompts instead */ }
-    }
+  const prepared = await prepareLaunch(cwd, { worktree: opts?.worktree, branch: opts?.branch });
+  if (!prepared.ok) return { ok: false, error: prepared.error ?? "could not prepare the working area" };
+  const launchCwd = prepared.path!;
+  if (prepared.worktreeCreated && opts?.serverUrl) {
+    try {
+      const file = `${launchCwd}/.claude/settings.local.json`;
+      // A brand-new worktree can't have local settings yet; don't clobber if
+      // something unexpected is there.
+      if (!(await Bun.file(file).exists())) {
+        await Bun.write(file, JSON.stringify(workerPermissionSettings(opts.serverUrl), null, 2) + "\n");
+      }
+    } catch { /* best-effort — the agent just gets permission prompts instead */ }
   }
   // An unknown persona id resolves to null and is ignored, the same way an
   // unknown model is — never interpolated into the command.

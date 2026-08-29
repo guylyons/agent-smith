@@ -9,7 +9,7 @@ import type { ChatMessage, QuestionOption, Question, PendingQuestion, BlockingTo
 import type { Subagent } from "../lib/subagents";
 import type { RepoInfo } from "../repo";
 
-type Result = { ok: boolean; error?: string; path?: string; url?: string };
+type Result = { ok: boolean; error?: string; path?: string; url?: string; cancelled?: boolean };
 
 async function post(action: string, body: object): Promise<Result> {
   try {
@@ -133,11 +133,22 @@ export async function uploadImage(file: File): Promise<Upload | null> {
 /** Launch a new Claude agent in `cwd` with `task` as its opening prompt.
  *  `opts.model` and `opts.permissionMode` are forwarded to the server, which
  *  allowlist-checks them again before building the launch command. */
-export async function spawnAgent(cwd: string, task: string, opts?: { model?: string; permissionMode?: string; worktree?: string; persona?: string; cardId?: string }): Promise<boolean> {
+export async function spawnAgent(cwd: string, task: string, opts?: { model?: string; permissionMode?: string; worktree?: string; branch?: string; persona?: string; cardId?: string }): Promise<boolean> {
   playSubmit();
-  const r = await post("spawn", { cwd, text: task, model: opts?.model, permissionMode: opts?.permissionMode, worktree: opts?.worktree, persona: opts?.persona, cardId: opts?.cardId });
+  const r = await post("spawn", { cwd, text: task, model: opts?.model, permissionMode: opts?.permissionMode, worktree: opts?.worktree, branch: opts?.branch, persona: opts?.persona, cardId: opts?.cardId });
   if (!r.ok) toast(r.error ?? "could not launch");
   return r.ok;
+}
+
+/** Ask the server to open the real macOS folder chooser, starting in `startIn`.
+ *  Returns the chosen absolute path, or null when the user cancelled (silent —
+ *  backing out of a dialog is not an error) or the picker couldn't open (which
+ *  does toast, so a broken picker doesn't look like a dead button). */
+export async function pickFolder(startIn?: string): Promise<string | null> {
+  const r = await post("pick-folder", { cwd: startIn });
+  if (r.ok && r.path) return r.path;
+  if (!r.cancelled) toast(r.error ?? "could not open the folder picker");
+  return null;
 }
 
 export type PersonaInfo = { id: string; name: string; role: string; skills: string[] };

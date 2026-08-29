@@ -32,7 +32,9 @@ export function App() {
   // The status face ships on; the toggle is an opt-OUT, so it can't default to
   // false the way an unset alerts key does.
   const [faceEnabled, setFaceEnabled] = useState(true);
-  const recentFolders = [...new Set(snap.agents.map((a) => a.cwd).filter(Boolean))];
+  // Just the folders live agents are running in; the New Agent dialog merges
+  // these with its own remembered history (see recentFolders.ts).
+  const liveFolders = [...new Set(snap.agents.map((a) => a.cwd).filter(Boolean))];
 
   // Apply saved display settings once on load.
   useEffect(() => {
@@ -138,7 +140,7 @@ export function App() {
       )}
       {spawnSeed && (
         <NewAgentModal
-          recentFolders={recentFolders}
+          liveFolders={liveFolders}
           initialTask={spawnSeed.task}
           cardId={spawnSeed.cardId}
           onClose={() => setSpawnSeed(null)}
