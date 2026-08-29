@@ -132,8 +132,7 @@ export function App() {
     <>
       <Backdrop />
       <Crt mode={display.crt} />
-      <button className="settings-btn" title="Settings" onClick={() => setSettingsOpen(true)}>⚙</button>
-      <Header snap={snap} live={live} onNewAgent={() => setSpawnSeed({})} onFind={() => setPaletteOpen(true)} />
+      <Header snap={snap} live={live} onNewAgent={() => setSpawnSeed({})} onFind={() => setPaletteOpen(true)} onSettings={() => setSettingsOpen(true)} />
       <Crew agents={snap.agents} board={snap.board} unread={unread} onOpen={openAgent} />
       <TheLine board={snap.board} agents={snap.agents} onSpawnForCard={(task, cardId) => setSpawnSeed({ task, cardId })} />
       {selected && selected.sessionId === selectedId && (

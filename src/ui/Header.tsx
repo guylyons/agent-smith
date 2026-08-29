@@ -24,7 +24,7 @@ export function headerSummary(agents: AgentStatus[]): { working: number; waiting
   return { working, waiting, repos };
 }
 
-export function Header({ snap, live, onNewAgent, onFind }: { snap: Snapshot; live: boolean; onNewAgent: () => void; onFind: () => void }) {
+export function Header({ snap, live, onNewAgent, onFind, onSettings }: { snap: Snapshot; live: boolean; onNewAgent: () => void; onFind: () => void; onSettings: () => void }) {
   const { agents, board } = snap;
   const idle = agents.filter((a) => a.state === "idle").length;
   const onLine = board.cards.length;
@@ -54,7 +54,11 @@ export function Header({ snap, live, onNewAgent, onFind }: { snap: Snapshot; liv
         <div className="pix statline">
           <span><b>{idle}</b> IDLE</span>
           <span><b>{onLine}</b> TASKS</span>
-          <button className="newagent-btn find-btn" onClick={onFind} title="Find a ticket, desk, or chat (Alt+P)">FIND</button>
+          {/* CONFIG used to be a cog pinned to the top-right corner, floating over
+              whatever it happened to land on. It belongs with the other things you
+              can do to the workshop, in the row the eye already scans. */}
+          <button className="newagent-btn quiet-btn" onClick={onSettings} title="Theme, display, background, alerts">CONFIG</button>
+          <button className="newagent-btn quiet-btn" onClick={onFind} title="Find a ticket, desk, or chat (Alt+P)">FIND</button>
           <button className="newagent-btn" onClick={onNewAgent}>+ NEW AGENT</button>
         </div>
       </div>

@@ -541,7 +541,10 @@
 .desk-actions{position:absolute;top:6px;right:6px;display:flex;gap:5px;opacity:0;transition:opacity .1s;z-index:2}
 .desk:hover .desk-actions,.desk:focus-within .desk-actions{opacity:1}
 .deskbtn{font-family:var(--mono);font-size:13px;background:var(--box-lo);color:var(--bone);border:2px solid var(--bevel);cursor:pointer;padding:2px 6px;line-height:1.2}
-.deskbtn:not(:disabled):hover{color:var(--gold);border-color:var(--gold)}
+/* The generic rollover is for outline buttons. A filled one (.primary, .on)
+   would get a gold label dropped onto its own coloured ground — see the
+   filled-button rule below for what those do instead. */
+.deskbtn:not(:disabled):not(.primary):not(.on):hover{color:var(--gold);border-color:var(--gold)}
 .deskbtn:disabled{opacity:.5;cursor:default}
 .reply{display:flex;gap:6px;margin-top:10px}
 .reply-input{flex:1;min-width:0;font-family:var(--mono);font-size:13px;background:var(--night);color:var(--bone);border:2px solid var(--bevel);padding:5px 7px}
@@ -551,9 +554,9 @@
 /* new agent */
 .newagent-btn{font-family:var(--mono);font-size:11px;letter-spacing:.5px;
   background:var(--leaf);color:var(--on-ok);border:2px solid var(--bone);padding:6px 9px;cursor:pointer}
-.newagent-btn:hover{background:var(--gold)}
-.find-btn{background:var(--box);color:var(--bone)}
-.find-btn:hover{background:var(--gold);color:#1a1204}
+/* CONFIG and FIND sit beside + NEW AGENT but are not the primary action, so
+   they keep the panel ground and let the green button carry the weight. */
+.quiet-btn{background:var(--box);color:var(--bone)}
 .newagent{width:min(520px,92vw);max-height:90vh;overflow-y:auto;margin:8vh auto;padding:20px;display:flex;flex-direction:column;gap:9px}
 .newagent-title{font-size:14px;letter-spacing:1px;margin-bottom:6px}
 .newagent-label{font-size:11px;color:var(--dim);margin-top:8px}
@@ -573,18 +576,10 @@
 .newagent-where{font-size:11px;color:var(--dim);line-height:1.6;margin-top:6px}
 .deskbtn.on{background:var(--bevel);color:var(--on-bevel)}
 .deskbtn.primary{background:var(--gold);color:var(--on-accent);border-color:var(--bone);font-family:var(--mono);font-size:12px;padding:9px 12px}
-.deskbtn.primary:hover:not(:disabled){background:var(--leaf)}
 .newagent-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
 .newagent-hint{font-size:11px;color:var(--dim);line-height:1.8;margin-top:10px}
 
 /* ---- settings ---- */
-.settings-btn{position:fixed;top:16px;right:16px;z-index:100;
-  font-family:var(--mono);font-size:13px;
-  background:var(--box);color:var(--bone);border:3px solid var(--bone);
-  box-shadow:inset 0 0 0 2px var(--bevel),0 3px 0 rgba(0,0,0,.55);
-  padding:7px 10px;cursor:pointer;line-height:1}
-.settings-btn:hover{color:var(--gold)}
-.settings-btn:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
 .settings{width:min(420px,92vw);max-height:90vh;overflow-y:auto;margin:8vh auto;padding:0;display:flex;flex-direction:column}
 .settings-head{display:flex;align-items:center;justify-content:space-between;padding:14px;border-bottom:var(--rule)}
 .settings-title{font-size:14px;letter-spacing:1px}
@@ -924,7 +919,6 @@ body{background:transparent}
   border:2px solid var(--bevel);background:var(--box-lo);color:var(--bone);
 }
 .cardmodal-send{background:var(--gold);color:var(--on-accent);border-color:var(--bone)}
-.cardmodal-send:hover:not(:disabled){background:var(--leaf)}
 .cardmodal-send:disabled{opacity:.4;cursor:not-allowed}
 .cardmodal-spawn{color:var(--dim);border-style:dashed}
 .cardmodal-spawn:not(:disabled):hover{color:var(--gold);border-color:var(--gold)}
@@ -955,7 +949,6 @@ body{background:transparent}
   align-self:flex-end;cursor:pointer;font-size:11px;letter-spacing:.5px;
   color:var(--on-accent);background:var(--gold);border:2px solid var(--gold);padding:7px 12px;
 }
-.comment-post:hover:not(:disabled){filter:brightness(1.08)}
 .comment-post:disabled{opacity:.4;cursor:default}
 
 /* new-agent modal: model/permission-mode option row (added for STOP/options work) */
@@ -1221,15 +1214,13 @@ body{background:transparent}
 :root[data-theme="alien"] .card,
 :root[data-theme="alien"] .usage,
 :root[data-theme="alien"] .tube,
-:root[data-theme="alien"] .settings-btn,
 :root[data-theme="alien"] .newagent-btn,
 :root[data-theme="alien"] .desk-unread,
 :root[data-theme="alien"] .card-img-x,
 :root[data-theme="alien"] .facehud,
 :root[data-theme="alien"] .bubble{border-width:1px;border-color:var(--bevel)}
 :root[data-theme="alien"] .card{box-shadow:none}
-:root[data-theme="alien"] .usage,
-:root[data-theme="alien"] .settings-btn{box-shadow:var(--win-shadow)}
+:root[data-theme="alien"] .usage{box-shadow:var(--win-shadow)}
 :root[data-theme="alien"] .drawer-tabs .tab{box-shadow:none}
 :root[data-theme="alien"] .drawer-tabs .tab.on{box-shadow:inset 0 0 14px rgba(255,176,0,.16)}
 /* the ship talks in capitals */
@@ -1279,7 +1270,6 @@ body{background:transparent}
 :root[data-theme="material"] .card,
 :root[data-theme="material"] .facehud,
 :root[data-theme="material"] .usage,
-:root[data-theme="material"] .settings-btn,
 :root[data-theme="material"] .tube{
   border:1px solid rgba(0,0,0,.05);border-radius:var(--radius-sm);box-shadow:var(--win-shadow);
 }
@@ -1287,11 +1277,15 @@ body{background:transparent}
 /* A selected chip and the primary action are the KEY colour in Material, not a
    grey outline fill — the token default (--bevel) is nearly invisible here. */
 :root[data-theme="material"] .deskbtn.on{background:var(--gold);color:var(--on-accent);border-color:var(--gold)}
-:root[data-theme="material"] .newagent-btn{background:var(--gold);color:var(--on-accent)}
-:root[data-theme="material"] .newagent-btn:hover{background:#7b64b8}
-:root[data-theme="material"] .newagent-btn,
+:root[data-theme="material"] .newagent-btn:not(.quiet-btn){background:var(--gold);color:var(--on-accent)}
+:root[data-theme="material"] .newagent-btn:not(.quiet-btn),
 :root[data-theme="material"] .cardmodal-send,
 :root[data-theme="material"] .deskbtn.primary{border-color:transparent}
+/* CONFIG and FIND are Material's outlined button: the surface, a hairline
+   edge, no fill — so the one filled button in the row still reads as THE
+   action. Without the exclusions above they inherited the key colour and
+   the header became three purple buttons in a row. */
+:root[data-theme="material"] .quiet-btn{border-color:var(--bevel)}
 :root[data-theme="material"] .drawer-tabs .tab{box-shadow:none;border-radius:var(--radius-sm) var(--radius-sm) 0 0}
 :root[data-theme="material"] .drawer-tabs .tab.on{box-shadow:inset 0 -3px 0 var(--gold);transform:none}
 :root[data-theme="material"] .drawer-tabs .tab:active{transform:none}
@@ -1408,12 +1402,12 @@ body{background:transparent}
 .card:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
 
 /* ---- press ----
-   Every button dips a pixel. The two that float over the page on a hard drop
-   shadow lose most of that shadow at the same time, so they read as pushed
+   Every button dips a pixel. The one that floats over the page on a hard drop
+   shadow loses most of that shadow at the same time, so it reads as pushed
    INTO the page rather than merely nudged. The drawer tabs keep their own,
    deeper press (they look like physical keys), which outranks this. */
 button:not(:disabled):active{transform:translateY(1px)}
-.tube:active,.settings-btn:active{
+.tube:active{
   box-shadow:inset 0 0 0 2px var(--bevel),0 1px 0 rgba(0,0,0,.55);
   transition:none;   /* down is instant; the release keeps the fade */
 }
@@ -1445,12 +1439,35 @@ button:not(:disabled):active{transform:translateY(1px)}
   .col-del:hover,.card-del:hover,.cardmodal-x:hover,
   .comment-del:hover,.attach-x:hover{background:var(--wash-roll)}
 
-  /* The two fixed chrome buttons changed text colour only, which is a weak
-     signal for a control floating over the page — bring the edge with it.
-     The :root prefix is needed to outrank the per-theme rules that restyle
-     these two borders; without it the rollover would be dead in NOSTROMO and
-     Material. */
-  :root .tube:hover,:root .settings-btn:hover{border-color:var(--gold)}
+  /* The fixed chrome button changes text colour only, which is a weak signal
+     for a control floating over the page — bring the edge with it. The :root
+     prefix is needed to outrank the per-theme rules that restyle its border;
+     without it the rollover would be dead in NOSTROMO and Material. */
+  :root .tube:hover{border-color:var(--gold)}
+
+  /* ---- filled buttons ----
+     A filled button already wears the accent; hovering it must not repaint it
+     in a different one. LAUNCH and SEND used to swap their gold fill for leaf
+     while .deskbtn's generic hover turned the label gold — gold on green is
+     about 1.2:1, so the label vanished the moment the pointer touched it.
+     Now the fill brightens and the label stays put; only the edge moves.
+     brightness() rather than a second colour, so each theme brightens its own
+     accent for free — and so Material's filled buttons get the state-layer
+     lift its own spec asks for.
+
+     Same :root trick, and the same reason, as the rule above: NOSTROMO and
+     Material both pin border-color on these buttons from blocks further down
+     the file, so an unprefixed rule here would lose on source order and the
+     edge would never warm outside the default theme. Living in this section
+     rather than beside the components is what puts them after those blocks. */
+  :root .deskbtn.primary:not(:disabled):hover,
+  :root .deskbtn.on:not(:disabled):hover,
+  :root .cardmodal-send:not(:disabled):hover,
+  :root .comment-post:not(:disabled):hover,
+  :root .newagent-btn:not(.quiet-btn):hover{filter:brightness(1.12);border-color:var(--gold)}
+
+  /* The quiet pair are outline buttons: lift the ground, warm the edge. */
+  :root .quiet-btn:hover{background:var(--box-lo);border-color:var(--gold)}
 }
 
 /* ---- no pointer ----

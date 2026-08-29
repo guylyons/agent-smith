@@ -44,7 +44,7 @@ export function SettingsPanel({ display, onChange, alertsEnabled, onToggleAlerts
     <ModalBackdrop onClose={onClose}>
       <aside className="win settings">
         <div className="settings-head">
-          <span className="pix settings-title">SETTINGS</span>
+          <span className="pix settings-title">CONFIG</span>
           <button className="deskbtn" title="Close" onClick={onClose}>✕</button>
         </div>
         <div className="settings-body">
