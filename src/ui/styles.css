@@ -1075,26 +1075,23 @@ body{background:transparent}
    active instead of being a screenshot pasted over the app.
 
    Nothing here animates: the face is a pure function of fleet state (see
-   lib/face.ts), so there is no timer to smooth and no flicker to suppress. */
-:root{--hud-h:112px}
+   lib/face.ts), so there is no timer to smooth and no flicker to suppress.
 
+   It sits in normal flow at the foot of the page, on the same 1080px column
+   as the header, the crew grid and THE LINE. A fixed bar would hang over the
+   board and swallow clicks along the whole bottom edge of the window, which
+   is a real cost for a readout nobody needs pinned. */
 .facehud{
-  position:fixed;left:0;right:0;bottom:0;z-index:80;
-  background:var(--box);border-top:3px solid var(--bone);
-  box-shadow:inset 0 2px 0 var(--bevel),0 -3px 0 rgba(0,0,0,.55);
-  padding:6px 10px;
+  max-width:1080px;margin:26px auto 0;
+  background:var(--box);border:3px solid var(--bone);
+  box-shadow:inset 0 0 0 2px var(--bevel),0 3px 0 rgba(0,0,0,.55);
+  padding:10px 12px;
 }
-/* Full-bleed frame, bounded contents: the panels span the bar the way DOOM's
-   do instead of huddling mid-screen, but stop before they drift apart on an
-   ultrawide display. */
+/* The panels spread across the full width of that column, the way DOOM's do,
+   rather than huddling in the middle of it. */
 .facehud-inner{
-  display:flex;align-items:stretch;justify-content:space-between;
-  width:100%;max-width:1180px;margin:0 auto;
+  display:flex;align-items:stretch;justify-content:space-between;width:100%;
 }
-/* The bar floats over a scrolling page, so the page needs to end above it.
-   :has() keeps this tied to the bar actually being mounted — switch the HUD
-   off in settings and the clearance goes with it, no App state involved. */
-body:has(.facehud){padding-bottom:var(--hud-h)}
 
 .facehud-panel{
   display:flex;flex-direction:column;align-items:center;justify-content:center;
@@ -1151,11 +1148,7 @@ body:has(.facehud){padding-bottom:var(--hud-h)}
   .facehud-panel{min-width:0;padding:0 10px}
   .facehud-num{font-size:26px}
 }
-/* Too short to spend 112px on instrumentation — give the board the room. */
-@media (max-height:620px){
-  .facehud{display:none}
-  body:has(.facehud){padding-bottom:0}
-}
+
 
 /* ============================================================================
    THEMES
@@ -1273,6 +1266,7 @@ body:has(.facehud){padding-bottom:var(--hud-h)}
 }
 /* elevation instead of bevels */
 :root[data-theme="material"] .card,
+:root[data-theme="material"] .facehud,
 :root[data-theme="material"] .usage,
 :root[data-theme="material"] .settings-btn,
 :root[data-theme="material"] .tube{
@@ -1294,12 +1288,6 @@ body:has(.facehud){padding-bottom:var(--hud-h)}
 :root[data-theme="material"] .desk-unread,
 :root[data-theme="material"] .card-img-x,
 :root[data-theme="material"] .bubble{border-color:var(--box);border-width:2px;border-radius:999px}
-/* The HUD is a framed panel, not a pill — elevation and a soft edge, like the
-   other surfaces, rather than the rounded badge treatment above. */
-:root[data-theme="material"] .facehud{
-  border:none;border-top:1px solid rgba(0,0,0,.05);border-radius:0;
-  box-shadow:0 -1px 2px rgba(28,27,31,.10),0 -4px 14px rgba(28,27,31,.08);
-}
 /* Material's status dots are dots. */
 :root[data-theme="material"] .lamp{border-radius:50%}
 :root[data-theme="material"] .msg-user .msg-text{border-radius:var(--radius-sm)}
