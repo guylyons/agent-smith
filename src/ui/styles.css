@@ -1066,6 +1066,72 @@ body{background:transparent}
 .desk.has-unread:hover{box-shadow:var(--win-shadow-hover),0 0 0 2px var(--clay)}
 @media (prefers-reduced-motion:reduce){.desk-unread{animation:none}}
 
+/* ---- tube death: STOP takes the agent's window out like a CRT ---------------
+   Ending a session used to blink its window out between one frame and the next
+   — the most destructive button on screen with the least to show for it. Now it
+   dies the way a picture tube does: the signal breaks up (jitter, chroma
+   fringing, brightness guttering), the phosphor flares, then the image collapses
+   to a horizontal line and the line shrinks to a dot.
+
+   It runs on any .win, so both places you can stop an agent get the same death:
+   the drawer you clicked STOP in, and that agent's desk on the floor. 1.5s here
+   is 1.5s in dying.ts — the JS holds the window on screen for exactly this long
+   before pulling it. */
+.win.is-dying{
+  pointer-events:none;
+  transform-origin:50% 50%;
+  animation:tube-die 1.5s linear forwards;
+}
+/* The phosphor: nothing until the flare, then the white that the collapsing line
+   is actually made of. Above the desk's own badges (z-index 3) — a dying tube
+   doesn't leave the unread dot floating over the dark. */
+.win.is-dying::after{
+  content:"";
+  position:absolute;inset:0;z-index:4;
+  background:var(--bone);
+  box-shadow:0 0 26px 6px var(--bone);
+  opacity:0;
+  animation:tube-flare 1.5s linear forwards;
+}
+@keyframes tube-die{
+  /* the signal breaking up: every frame lands hard (steps) instead of sliding,
+     which is what makes it read as a glitch rather than a wobble */
+  0%  {animation-timing-function:steps(1,end);transform:translate3d(0,0,0);filter:brightness(1);text-shadow:none}
+  5%  {animation-timing-function:steps(1,end);transform:translate3d(-4px,1px,0) skewX(.6deg);filter:brightness(1.25) saturate(1.5);text-shadow:2px 0 rgba(255,60,90,.5),-2px 0 rgba(60,150,255,.5)}
+  9%  {animation-timing-function:steps(1,end);transform:translate3d(3px,-2px,0) scaleX(.99);filter:brightness(.78) saturate(.8);text-shadow:none}
+  14% {animation-timing-function:steps(1,end);transform:translate3d(0,0,0);filter:brightness(1.05);text-shadow:none}
+  21% {animation-timing-function:steps(1,end);transform:translate3d(5px,0,0) skewX(-1.2deg) scaleX(1.015);filter:brightness(1.35) saturate(1.7);text-shadow:3px 0 rgba(255,60,90,.55),-3px 0 rgba(60,150,255,.55)}
+  25% {animation-timing-function:steps(1,end);transform:translate3d(-2px,2px,0);filter:brightness(.7);text-shadow:none}
+  31% {animation-timing-function:steps(1,end);transform:translate3d(0,0,0);filter:brightness(.95);text-shadow:none}
+  38% {animation-timing-function:steps(1,end);transform:translate3d(-5px,-1px,0) skewX(1.4deg);filter:brightness(1.4) saturate(1.8);text-shadow:4px 0 rgba(255,60,90,.6),-4px 0 rgba(60,150,255,.6)}
+  43% {animation-timing-function:steps(1,end);transform:translate3d(4px,2px,0) scaleY(1.02);filter:brightness(.6);text-shadow:none}
+  49% {animation-timing-function:steps(1,end);transform:translate3d(0,0,0);filter:brightness(.9);text-shadow:none}
+  55% {animation-timing-function:steps(1,end);transform:translate3d(-3px,1px,0) skewX(-.9deg) scaleX(1.02);filter:brightness(1.5) saturate(1.9);text-shadow:5px 0 rgba(255,60,90,.6),-5px 0 rgba(60,150,255,.6)}
+  60% {animation-timing-function:steps(1,end);transform:translate3d(2px,-1px,0);filter:brightness(.45);text-shadow:none}
+  /* the picture gutters out */
+  66% {animation-timing-function:linear;transform:translate3d(0,0,0);filter:brightness(.4) saturate(.6);text-shadow:none}
+  73% {animation-timing-function:ease-out;transform:scale(1,.97);filter:brightness(.26) saturate(.3)}
+  /* the phosphor flares, then the whole image collapses onto one line */
+  79% {animation-timing-function:ease-in;transform:scale(1.02,.9);filter:brightness(2.6) saturate(0)}
+  87% {transform:scale(1.05,.02);filter:brightness(3) saturate(0)}
+  /* ...and the line shrinks to a dot and goes */
+  93% {transform:scale(.45,.014);opacity:1}
+  100%{transform:scale(.03,.01);opacity:0}
+}
+@keyframes tube-flare{
+  0%,66%{opacity:0}
+  73%{opacity:.1}
+  79%{opacity:.6}
+  87%,100%{opacity:.95}
+}
+/* Reduced motion strips every animation globally, so the glitch and the collapse
+   are both gone here. Fade the window out instead — same beat, no jitter — and
+   dying.ts shortens its wait to match. */
+@media (prefers-reduced-motion:reduce){
+  .win.is-dying{opacity:0;transition:opacity .28s linear}
+  .win.is-dying::after{display:none}
+}
+
 /* ---- settings: background upload + dim -------------------------------------- */
 .settings-bgfile{margin-top:8px}
 .settings-bgpreview{

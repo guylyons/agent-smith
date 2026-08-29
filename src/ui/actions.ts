@@ -2,6 +2,7 @@
 // never blocking dialogs. Confirmation/rename UX lives in the components.
 import { toast } from "./toast";
 import { flashSend } from "./flash";
+import { signalDying } from "./dying";
 import { playSubmit } from "./sounds";
 import type { Board, Card, Column } from "../lib/board";
 // Shared with the UI as types only — nothing server-side is bundled into the browser.
@@ -42,6 +43,9 @@ export function pauseSession(sessionId: string): void {
 }
 
 export function killAgent(sessionId: string): void {
+  // Announce it before the POST, not after: the death animation is the feedback
+  // that the click landed, and the kill itself takes a beat to reach Ghostty.
+  signalDying(sessionId);
   void act("kill", { sessionId });
 }
 
