@@ -36,6 +36,7 @@
     --scrim:transparent;
     --scrim-a:0;
     --crt-strength:1;          /* per-theme multiplier on the whole CRT stack */
+    --bev-strength:1;          /* the same dial for the glass bevel */
     /* One font for everything: Source Code Pro, with monospace fallbacks. */
     --mono:"Source Code Pro",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
     --display:var(--mono);     /* the face for titles; themes may differ */
@@ -270,6 +271,108 @@
     .crt-hum,.crt-power{display:none}
     :root[data-crt="max"] .crt-scan{animation:none}
   }
+
+  /* ---- tube bevel ----------------------------------------------------------
+     The moulded glass front of a real TV set, in front of the whole CRT stack.
+     Its own setting — <html data-bevel="off|slim|thick"> — because the glass
+     and the raster are different things and people want them separately.
+
+     Two numbers drive it: --bev-w, how thick the glass reads, and --bev-r, how
+     hard the picture's corners are rounded. Everything else is derived, so the
+     two sizes are one honest dial rather than two hand-tuned recipes.
+
+     Two things have to be true at once for a band to read as curved glass, and
+     they are drawn by different layers: shading ACROSS the band (dark at the
+     seam, catching light near the outer lip) and a light DIRECTION along it
+     (bright top-left, shadowed bottom-right). Either alone reads as a flat
+     picture frame. Back to front:
+
+       surround  the set beyond the glass, filling the four rounded corners
+       glass     the light direction — one gradient ring across the whole face
+       inner     the seam, the across-band shading, and the picture bending in
+       shine     the specular hit a window leaves on curved glass
+
+     vmin units, so the glass stays in proportion on a narrow window instead of
+     eating the whole picture. */
+  :root[data-bevel="slim"] {--bev-w:1.5vmin;--bev-r:2.6vmin;--bev-a:.9}
+  :root[data-bevel="thick"]{--bev-w:3.2vmin;--bev-r:5vmin;  --bev-a:1.1}
+
+  .bev-stack{display:contents}
+  .bev{
+    position:fixed;inset:0;pointer-events:none;z-index:94;
+    border-radius:var(--bev-r);
+    opacity:calc(var(--bev-a) * var(--bev-strength,1));
+  }
+
+  /* The set around the glass. A huge outer spread paints everything OUTSIDE the
+     rounded rect with the page ground, so the picture ends at a curve; the
+     shorter ring in front of it is the dark hairline where the glass is seated.
+     Full opacity, always — a translucent corner fill would show the UI through
+     the corner it is meant to cut off. */
+  .bev-surround{
+    opacity:1;
+    box-shadow:
+      0 0 0 .22vmin rgba(0,0,0,.55),
+      0 0 0 100vmax var(--night);
+  }
+
+  /* The light direction. A transparent border with a border-box gradient behind
+     it, masked to the border ring only (padding-box XOR border-box) — the one
+     way to fill just the band and keep both radii correct. One gradient runs
+     across the whole face, so the top-left of the ring is lit and the
+     bottom-right falls into shadow, the way a room lights a real screen. */
+  .bev-glass{
+    border:var(--bev-w) solid transparent;
+    background:linear-gradient(158deg,
+      rgba(236,246,255,.24)  0%,
+      rgba(236,246,255,.09) 24%,
+      rgba(190,215,255,.02) 48%,
+      rgba(0,0,0,.30)       72%,
+      rgba(0,0,0,.40)       90%,
+      rgba(236,246,255,.11) 100%) border-box;
+    -webkit-mask:linear-gradient(#000 0 0) padding-box,linear-gradient(#000 0 0);
+    -webkit-mask-composite:xor;
+    mask:linear-gradient(#000 0 0) padding-box,linear-gradient(#000 0 0);
+    mask-composite:exclude;
+  }
+
+  /* The seam and the shape of the chamfer. This box is the picture area, inset
+     by the glass thickness: its INSET shadow is the picture bending away into
+     the glass, and its OUTER shadows are rings spreading back across the band —
+     listed thinnest first, which is also innermost first, so they read as
+     seam → shadow → the lip catching the light. Doing the across-band shading
+     from here is deliberate: an inset shadow on .bev-glass would be painted
+     from its padding edge and then masked away entirely. */
+  .bev-inner{
+    inset:var(--bev-w);
+    border-radius:max(0px, calc(var(--bev-r) - var(--bev-w)));
+    box-shadow:
+      inset 0 0 calc(var(--bev-w)*1.7) calc(var(--bev-w)*.25) rgba(0,0,0,.5),
+      0 0 0 .12vmin rgba(0,0,0,.85),
+      0 0 0 calc(var(--bev-w)*.20) rgba(0,0,0,.55),
+      0 0 0 calc(var(--bev-w)*.46) rgba(0,0,0,.30),
+      0 0 0 calc(var(--bev-w)*.70) rgba(226,240,255,.14);
+  }
+
+  /* Two specular hits on the glass — the bright one top-left, a weaker bounce
+     bottom-right. Masked to the same ring, screened so it only ever lightens. */
+  .bev-shine{
+    border:var(--bev-w) solid transparent;
+    background:
+      radial-gradient(24% 16% at 15% 0%,   rgba(255,255,255,.38), transparent 74%),
+      radial-gradient(14% 20% at 100% 70%, rgba(255,255,255,.12), transparent 78%) border-box;
+    mix-blend-mode:screen;
+    -webkit-mask:linear-gradient(#000 0 0) padding-box,linear-gradient(#000 0 0);
+    -webkit-mask-composite:xor;
+    mask:linear-gradient(#000 0 0) padding-box,linear-gradient(#000 0 0);
+    mask-composite:exclude;
+  }
+
+  /* With a bevel on, the glass owns the tube face: the CRT's own thin rounded
+     edge would fight it with a second radius and a second vignette. The rest of
+     the CRT stack — raster, grille, glow — stays exactly as it was. */
+  :root[data-bevel="slim"] .crt-bezel,
+  :root[data-bevel="thick"] .crt-bezel{display:none}
 
   /* ---- tube control ---- */
   .tube{
@@ -1344,6 +1447,8 @@ body{background:transparent}
   /* Scanlines over a light surface go muddy fast — keep the texture, lose the
      weight. The user can still pick MAX if they want it. */
   --crt-strength:.28;
+  /* A heavy black chamfer over light surfaces reads as a hole, not as glass. */
+  --bev-strength:.55;
   --mono:"Roboto","Helvetica Neue",system-ui,-apple-system,"Segoe UI",sans-serif;
   --code:"Roboto Mono",ui-monospace,"SF Mono",Menlo,monospace;
   --display:var(--mono);

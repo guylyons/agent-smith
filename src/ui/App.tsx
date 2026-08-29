@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSnapshot } from "./useSnapshot";
 import { Backdrop } from "./Backdrop";
-import { Crt } from "./Crt";
+import { Crt, TubeBevel } from "./Crt";
 import { Header } from "./Header";
 import { Crew } from "./Crew";
 import { TheLine } from "./TheLine";
@@ -29,7 +29,7 @@ export function App() {
   // Theme / CRT / background live here rather than in the Settings panel: the
   // CRT overlay needs the mode to play its power-on sweep, and the panel is
   // unmounted most of the time.
-  const [display, setDisplay] = useState<Display>(() => ({ theme: "default", crt: "on", bg: "night", bgImage: "", bgDim: 0 }));
+  const [display, setDisplay] = useState<Display>(() => ({ theme: "default", crt: "on", bevel: "off", bg: "night", bgImage: "", bgDim: 0 }));
   // The status face ships on; the toggle is an opt-OUT, so it can't default to
   // false the way an unset alerts key does.
   const [faceEnabled, setFaceEnabled] = useState(true);
@@ -132,6 +132,7 @@ export function App() {
     <>
       <Backdrop />
       <Crt mode={display.crt} />
+      <TubeBevel mode={display.bevel} />
       <Header snap={snap} live={live} onNewAgent={() => setSpawnSeed({})} onFind={() => setPaletteOpen(true)} onSettings={() => setSettingsOpen(true)} />
       <Crew agents={snap.agents} board={snap.board} unread={unread} onOpen={openAgent} />
       <TheLine board={snap.board} agents={snap.agents} onSpawnForCard={(task, cardId) => setSpawnSeed({ task, cardId })} />

@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { ModalBackdrop } from "./Backdrop";
-import { THEMES, CRT_MODES, BACKGROUNDS, CUSTOM_BG, type CrtMode, type Display } from "./settings";
+import { THEMES, CRT_MODES, BEVEL_MODES, BACKGROUNDS, CUSTOM_BG, type BevelMode, type CrtMode, type Display } from "./settings";
 import { uploadImage } from "./actions";
 import { toast } from "./toast";
 
@@ -74,6 +74,21 @@ export function SettingsPanel({ display, onChange, alertsEnabled, onToggleAlerts
           </div>
           <div className="pix settings-hint">
             Scanlines, aperture grille, phosphor bloom and a curved tube face. MAX adds the roll bar and flicker.
+          </div>
+
+          <div className="pix settings-label">DISPLAY · BEVEL</div>
+          <div className="settings-row">
+            {BEVEL_MODES.map((m) => (
+              <button
+                key={m.id}
+                className={`deskbtn ${display.bevel === m.id ? "on" : ""}`}
+                aria-pressed={display.bevel === m.id}
+                onClick={() => onChange({ bevel: m.id as BevelMode })}
+              >{m.label}</button>
+            ))}
+          </div>
+          <div className="pix settings-hint">
+            Puts the screen behind moulded glass: rounded corners, a lit chamfer round the edge and the picture bending away into it. Works with the CRT setting or on its own.
           </div>
 
           <div className="pix settings-label">BACKGROUND</div>
