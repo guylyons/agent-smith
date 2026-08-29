@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { mergeForWrite, scanLiveSessions, freshTranscripts, chooseLive, isEphemeralCwd, readConversation, budgetTotalOf, isClaudeComm, isSessionHostComm, parseProcessTable, type GhosttyTerminal } from "../src/scan";
+import { mergeForWrite, scanLiveSessions, freshTranscripts, chooseLive, isEphemeralCwd, readConversation, budgetTotalOf, isClaudeComm, isSessionHostComm, parseProcessTable, processInfoOk, type GhosttyTerminal } from "../src/scan";
 import type { AgentStatus } from "../src/schema";
 import { mkdirSync, writeFileSync, rmSync, readFileSync, utimesSync, existsSync } from "node:fs";
 import { join } from "node:path";
@@ -481,4 +481,47 @@ test("parseProcessTable: unusable ps output yields an empty table (callers keep 
   const { procs, sessionPids } = parseProcessTable("");
   expect(procs.size).toBe(0);
   expect(sessionPids).toEqual([]);
+});
+
+// --- closing your LAST session must empty the board, not fill it. Before the
+// fix below, "ps ran fine and found no claude sessions" was reported as
+// ok:false — the same value as "we couldn't read the process table at all" —
+// so chooseLive took its never-blank-the-board fallback and resurrected every
+// transcript touched in the last 15 minutes as a live agent. ---------------
+
+test("processInfoOk: a usable process table with zero sessions is a fact, not a failure", () => {
+  const procs = new Map([[1, "launchd"], [2, "Google Chrome"]]);
+  expect(processInfoOk(procs, [], new Map())).toBe(true);
+});
+
+test("processInfoOk: an unreadable process table is untrustworthy", () => {
+  expect(processInfoOk(new Map(), [], new Map())).toBe(false);
+});
+
+test("processInfoOk: sessions found but no cwd resolved (lsof failed) is untrustworthy", () => {
+  expect(processInfoOk(new Map([[1, "claude"]]), ["1"], new Map())).toBe(false);
+});
+
+test("processInfoOk: sessions with resolved cwds are trustworthy", () => {
+  expect(processInfoOk(new Map([[1, "claude"]]), ["1"], new Map([["/repo", 1]]))).toBe(true);
+});
+
+test("scanLiveSessions: with no session running, recent transcripts do NOT come back as agents", async () => {
+  reset();
+  const now = 40_000_000;
+  // three sessions that are over, all touched within the freshness window
+  for (const sid of ["gone1", "gone2", "gone3"]) {
+    writeTranscript("-repo", sid, [
+      { type: "assistant", sessionId: sid, cwd: "/repo", gitBranch: "b", message: { content: [{ type: "text", text: "done." }] } },
+    ], 60, now);
+  }
+  // the one just closed left a hook-written file behind (no SessionEnd on a tab close)
+  writeFileSync(join(status, "gone1.json"), JSON.stringify(S({ sessionId: "gone1", cwd: "/repo", pid: 4242 })));
+  const procs = new Map([[1, "launchd"], [2, "Google Chrome"]]); // ps fine, no claude
+  const n = await scanLiveSessions(now, 15 * 60_000,
+    { counts: new Map(), ok: processInfoOk(procs, [], new Map()), procs }, NO_GHOSTTY);
+  expect(n).toBe(0);
+  expect(existsSync(join(status, "gone1.json"))).toBe(false);
+  expect(existsSync(join(status, "gone2.json"))).toBe(false);
+  expect(existsSync(join(status, "gone3.json"))).toBe(false);
 });
