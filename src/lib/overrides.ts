@@ -1,5 +1,7 @@
-// Per-session user overrides (currently just a custom name), stored next to the
-// status files so a rename survives restarts. Applied when building the snapshot.
+// Per-agent user overrides (a custom name, a chosen look), stored next to the
+// status files so a rename survives restarts. Keyed by crew id when the agent
+// has one (so the override follows it through a /clear), else by session id.
+// Applied when building the snapshot.
 import { join } from "node:path";
 import { readFileSync, writeFileSync, renameSync } from "node:fs";
 import type { AgentStatus } from "../schema";
@@ -42,7 +44,7 @@ export function setSpriteOverride(dir: string, sessionId: string, sprite: { pale
 /** Return agents with any custom name/sprite applied. Never mutates the inputs. */
 export function applyOverrides(agents: AgentStatus[], overrides: Overrides): AgentStatus[] {
   return agents.map((a) => {
-    const o = overrides[a.sessionId];
+    const o = (a.crew && overrides[a.crew.id]) || overrides[a.sessionId];
     if (!o) return a;
     return { ...a, ...(o.name ? { name: o.name } : {}), ...(o.sprite ? { sprite: o.sprite } : {}) };
   });

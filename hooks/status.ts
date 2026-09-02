@@ -5,6 +5,7 @@ import type { AgentStatus } from "../src/schema";
 import { parseStatus } from "../src/schema";
 import { parseTicket } from "../src/lib/ticket";
 import { identify } from "../src/lib/identity";
+import { crewFrom, readNotes, notesContext, type Crew } from "../src/lib/crew";
 import { humanizeTool } from "../src/lib/humanize";
 import { ensureStatusDir } from "../src/lib/paths";
 
@@ -21,10 +22,15 @@ export type HookEvent = {
   tool_input?: Record<string, unknown>;
 };
 
-function seed(e: HookEvent, now: number, persona?: string): AgentStatus {
-  const { role, name } = identify(e.session_id, e.branch, e.cwd);
+function seed(e: HookEvent, now: number, persona?: string, crew?: Crew): AgentStatus {
+  const identified = identify(e.session_id, e.branch, e.cwd);
+  // A crew member keeps its name across sessions (see src/lib/crew.ts); only a
+  // session with no crew at all falls back to the hashed roster name.
+  const { role } = identified;
+  const name = crew?.name ?? identified.name;
   return {
     sessionId: e.session_id, name, role,
+    ...(crew ? { crew } : {}),
     ticket: parseTicket(e.branch), state: "working",
     doing: "starting up", cwd: e.cwd, branch: e.branch, updatedAt: now,
     // Set at launch by the dashboard and inherited by this hook from the claude
@@ -63,8 +69,8 @@ function parseQuestions(input: Record<string, unknown> | undefined): AgentStatus
   return questions.length ? { questions } : undefined;
 }
 
-export function applyEvent(prev: AgentStatus | null, e: HookEvent, now: number, persona?: string): AgentStatus | null {
-  let next = applyEventInner(prev, e, now, persona);
+export function applyEvent(prev: AgentStatus | null, e: HookEvent, now: number, persona?: string, crew?: Crew): AgentStatus | null {
+  let next = applyEventInner(prev, e, now, persona, crew);
   if (next) {
     // Track when the current state began: reset on every transition (and on
     // SessionStart, which is a fresh session even if the state string matches),
@@ -80,16 +86,21 @@ export function applyEvent(prev: AgentStatus | null, e: HookEvent, now: number, 
   // session — stripping the agent's name/sprite and dropping it out of the
   // scrum-master notification fan-out.
   if (next && next.persona === undefined && persona && PERSONA_ID_RE.test(persona)) {
-    return { ...next, persona };
+    next = { ...next, persona };
+  }
+  // The crew likewise: the scanner never knows it, so a prev it wrote would
+  // otherwise drop the desk back to a hashed name and unbind it from its cards.
+  if (next && next.crew === undefined && crew) {
+    next = { ...next, crew };
   }
   return next;
 }
 
-function applyEventInner(prev: AgentStatus | null, e: HookEvent, now: number, persona?: string): AgentStatus | null {
-  const base = prev ?? seed(e, now, persona);
+function applyEventInner(prev: AgentStatus | null, e: HookEvent, now: number, persona?: string, crew?: Crew): AgentStatus | null {
+  const base = prev ?? seed(e, now, persona, crew);
   switch (e.hook_event_name) {
     case "SessionStart":
-      return seed(e, now, persona);
+      return seed(e, now, persona, crew);
     case "PreToolUse": {
       // These tools BLOCK on the user. PreToolUse fires the instant they begin,
       // which is the earliest any signal exists — the transcript scanner would
@@ -209,14 +220,18 @@ async function main() {
       prev = null; // corrupt/partial prior status file; treat as fresh
     }
   }
-  let next = applyEvent(prev, e, Date.now(), process.env.AGENT_PERSONA);
+  const { pid, tty } = resolveProcess();
+  // Who we are across sessions: the crew the dashboard minted at spawn, or
+  // (a session started by hand) an anchor on the claude pid, which /clear
+  // keeps just as the env is kept.
+  const crew = crewFrom({ AGENT_CREW: process.env.AGENT_CREW, AGENT_NAME: process.env.AGENT_NAME }, pid);
+  let next = applyEvent(prev, e, Date.now(), process.env.AGENT_PERSONA, crew);
   if (next === null) { rmSync(file, { force: true }); return; }
   // A turn that is about to end may have board events waiting for it. Fetch
   // them BEFORE writing the status, so a session that is sent back to work
   // isn't recorded as idle in between.
   const decision = e.hook_event_name === "Stop" ? stopDecision(await drainInbox(DASHBOARD_URL(), e.session_id)) : null;
   if (decision) next = { ...next, state: "working", doing: "reading board notifications" };
-  const { pid, tty } = resolveProcess();
   if (pid) next.pid = pid;
   if (tty) next.tty = tty;
   // Unique per-process tmp so concurrent hook invocations for the same session
@@ -239,9 +254,21 @@ async function main() {
   if (e.hook_event_name === "SessionStart" && process.env.AGENT_CARD) {
     await assignCardOnStart(process.env.AGENT_CARD, e.session_id);
   }
-  // Last, because stdout is the hook's answer: block the stop with the queued
-  // board events as the reason. Nothing printed means "carry on as normal".
+  // Last, because stdout is the hook's answer. On Stop: block the stop with
+  // the queued board events as the reason. On SessionStart (a launch, and
+  // every /clear): hand the crew member its notes as context, so what it wrote
+  // down comes back for a few hundred tokens. Nothing printed means "carry on
+  // as normal".
   if (decision) process.stdout.write(JSON.stringify(decision) + "\n");
+  else if (e.hook_event_name === "SessionStart" && crew) {
+    process.stdout.write(JSON.stringify(sessionStartOutput(crew, readNotes(dir, crew.id), DASHBOARD_URL())) + "\n");
+  }
+}
+
+/** The SessionStart hook's answer: the crew member's notes as additional
+ *  context, in the shape Claude Code reads from a hook's stdout. */
+export function sessionStartOutput(crew: Crew, notes: string, serverUrl: string): { hookSpecificOutput: { hookEventName: "SessionStart"; additionalContext: string } } {
+  return { hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: notesContext(crew, notes, serverUrl) } };
 }
 
 /** POST the card-assign the dashboard couldn't do at spawn time. Fire-and-await

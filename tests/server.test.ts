@@ -168,7 +168,7 @@ test("GET /personas lists the built-ins without prompt text", async () => {
   expect(res.status).toBe(200);
   const list = (await res.json()) as any[];
   expect(list.map((p) => p.id)).toEqual(["backend-dev", "editor", "frontend-ux", "scrum-master"]);
-  expect(list[0].name).toBeTruthy();
+  expect(list[0].name).toBeUndefined(); // a persona is a role; the crew member brings the name
   expect(list[0].role).toBeTruthy();
   expect(Array.isArray(list[0].skills)).toBe(true);
   expect(list[0].prompt).toBeUndefined();
@@ -179,7 +179,7 @@ test("readSnapshot resolves a persona onto the agent", () => {
   reset();
   writeFileSync(join(dir, "a.json"), valid({ sessionId: "a", persona: "backend-dev", name: "NOVA", role: "General" }));
   const [agent] = readSnapshot(dir, Date.now()).agents;
-  expect(agent.name).toBe("ANVIL");
+  expect(agent.name).toBe("NOVA"); // the shipped personas carry no name
   expect(agent.role).toBe("Backend Dev");
   expect(agent.sprite!.body).toBe("robot");
 });
@@ -262,7 +262,7 @@ test("GET /agents lists live sessions with resolved names", async () => {
   const out = (await res.json()) as { agents: any[] };
   expect(out.agents.length).toBe(1);
   expect(out.agents[0].sessionId).toBe("a");
-  expect(out.agents[0].name).toBe("ANVIL");
+  expect(out.agents[0].name).toBe("A");
   expect(out.agents[0].state).toBe("working");
   server.stop(true);
 });
@@ -419,7 +419,7 @@ test("send-task without a live assignee is refused", async () => {
 test("a worker's card-comment wakes the scrum master, not the worker itself", async () => {
   const { server, post, sent } = await notifyServer();
   writeFileSync(join(dir, `${WORKER}.json`), valid({ sessionId: WORKER, name: "VOLT", state: "idle" }));
-  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", state: "idle" }));
+  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", crew: { id: "cadence-0001", name: "CADENCE" }, state: "idle" }));
   const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "Fix bug" })).json()) as any;
   await post("/action/card-assign", { cardId, sessionId: WORKER });
   sent.length = 0;
@@ -434,11 +434,11 @@ test("a worker's card-comment wakes the scrum master, not the worker itself", as
 test("a scrum master's card-comment wakes the assignee, not itself", async () => {
   const { server, post, sent } = await notifyServer();
   writeFileSync(join(dir, `${WORKER}.json`), valid({ sessionId: WORKER, name: "VOLT", state: "idle" }));
-  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", state: "idle" }));
+  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", crew: { id: "cadence-0001", name: "CADENCE" }, state: "idle" }));
   const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "Fix bug" })).json()) as any;
   await post("/action/card-assign", { cardId, sessionId: WORKER });
   sent.length = 0;
-  // CADENCE is the scrum-master persona's display name
+  // CADENCE is the scrum master's crew name (its persona brings no name)
   await post("/action/card-comment", { cardId, author: "CADENCE", text: "please add a test" });
   expect(sent.map((s) => s.sessionId)).toEqual([WORKER]);
   expect(sent[0]!.text).toContain("please add a test");
@@ -447,7 +447,7 @@ test("a scrum master's card-comment wakes the assignee, not itself", async () =>
 
 test("a worker's card-move wakes the scrum master", async () => {
   const { server, post, sent } = await notifyServer();
-  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", state: "idle" }));
+  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", crew: { id: "cadence-0001", name: "CADENCE" }, state: "idle" }));
   const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "Fix bug" })).json()) as any;
   sent.length = 0;
   await post("/action/card-move", { cardId, toColumnId: "review", author: "VOLT" });
@@ -476,7 +476,7 @@ test("card ops without any scrum master or assignee deliver nothing", async () =
 
 test("nothing is typed into a session that is waiting on a dialog; it is queued instead", async () => {
   const { server, post, sent } = await notifyServer();
-  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", state: "waiting" }));
+  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", crew: { id: "cadence-0001", name: "CADENCE" }, state: "waiting" }));
   const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
   sent.length = 0;
   const r = (await (await post("/action/card-comment", { cardId, author: "VOLT", text: "update" })).json()) as any;
@@ -494,7 +494,7 @@ test("nothing is typed into a session that is waiting on a dialog; it is queued 
 
 test("an event for a working session is queued and drained by its Stop hook", async () => {
   const { server, post, sent } = await notifyServer();
-  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", state: "working" }));
+  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", crew: { id: "cadence-0001", name: "CADENCE" }, state: "working" }));
   const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
   sent.length = 0;
   await post("/action/card-comment", { cardId, author: "VOLT", text: "first" });
@@ -515,7 +515,7 @@ test("an event for a working session is queued and drained by its Stop hook", as
 
 test("a typed delivery that fails falls back to the queue rather than vanishing", async () => {
   const { server, post, sent } = await notifyServer({ deliverOk: false });
-  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", state: "idle" }));
+  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", crew: { id: "cadence-0001", name: "CADENCE" }, state: "idle" }));
   const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
   const r = (await (await post("/action/card-comment", { cardId, author: "VOLT", text: "note" })).json()) as any;
   expect(sent).toEqual([]);
@@ -526,12 +526,12 @@ test("a typed delivery that fails falls back to the queue rather than vanishing"
 
 test("a queued item is typed as soon as the session turns idle (no-hook fallback)", async () => {
   const { server, post, sent } = await notifyServer();
-  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", state: "working" }));
+  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", crew: { id: "cadence-0001", name: "CADENCE" }, state: "working" }));
   const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
   sent.length = 0;
   await post("/action/card-comment", { cardId, author: "VOLT", text: "note" });
   expect(sent).toEqual([]);
-  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", state: "idle" }));
+  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", crew: { id: "cadence-0001", name: "CADENCE" }, state: "idle" }));
   // the fs watcher (debounced) notices the file and the next push flushes
   for (let i = 0; i < 40 && sent.length === 0; i++) await new Promise((r) => setTimeout(r, 50));
   expect(sent.map((s) => s.sessionId)).toEqual([SCRUM]);
@@ -569,7 +569,7 @@ test("an assignee signing as itself is never woken by its own update, whatever i
   // desk name is PIXEL (persona), but the human renamed it Biff: the old
   // name-based exclusion would have typed PIXEL's own comment back at it
   writeFileSync(join(dir, `${WORKER}.json`), valid({ sessionId: WORKER, name: "PIXEL", state: "idle" }));
-  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", state: "idle" }));
+  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", crew: { id: "cadence-0001", name: "CADENCE" }, state: "idle" }));
   const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
   await post("/action/card-assign", { cardId, sessionId: WORKER });
   setNameOverride(dir, WORKER, "Biff");
@@ -583,7 +583,7 @@ test("an assignee signing as itself is never woken by its own update, whatever i
 
 test("a write may also be signed by sessionId, resolving to that session's name", async () => {
   const { server, post } = await notifyServer();
-  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", state: "idle" }));
+  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", crew: { id: "cadence-0001", name: "CADENCE" }, state: "idle" }));
   const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
   await post("/action/card-comment", { cardId, sessionId: SCRUM, text: "from the orchestrator" });
   const card = readSnapshot(dir, Date.now()).board.cards[0]!;
@@ -599,7 +599,7 @@ test("a write may also be signed by sessionId, resolving to that session's name"
 test("a human's comment wakes the assignee expecting a reply, and the scrum master FYI", async () => {
   const { server, post, sent } = await notifyServer();
   writeFileSync(join(dir, `${WORKER}.json`), valid({ sessionId: WORKER, name: "VOLT", state: "idle" }));
-  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", state: "idle" }));
+  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", crew: { id: "cadence-0001", name: "CADENCE" }, state: "idle" }));
   const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
   await post("/action/card-assign", { cardId, sessionId: WORKER });
   sent.length = 0;
@@ -614,7 +614,7 @@ test("a human's comment wakes the assignee expecting a reply, and the scrum mast
 test("an assignee's own comment reaches the scrum master as FYI, no reply needed", async () => {
   const { server, post, sent } = await notifyServer();
   writeFileSync(join(dir, `${WORKER}.json`), valid({ sessionId: WORKER, name: "VOLT", state: "idle" }));
-  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", state: "idle" }));
+  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", crew: { id: "cadence-0001", name: "CADENCE" }, state: "idle" }));
   const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
   await post("/action/card-assign", { cardId, sessionId: WORKER });
   sent.length = 0;
@@ -903,4 +903,113 @@ test("card-merge is browser-only — an agent cannot land its own work", async (
   const log = Bun.spawnSync(["git", "-C", mergeRepo, "log", "-1", "--pretty=%s"]).stdout.toString();
   expect(log).not.toContain("Merge branch");
   server.stop(true);
+});
+
+// ---- crew: the identity that outlives the session id ------------------------
+// A /clear (which send-task does) mints a new session id. The crew id minted at
+// spawn rides the env into every later session, so a card, a rename and the
+// notes follow the agent rather than the id. See src/lib/crew.ts.
+
+const RIPLEY = { id: "ripley-3f2a", name: "RIPLEY" };
+const WORKER2 = "7777aaaa-1111-4222-8333-444455556666";
+
+test("card-assign records the assignee's crew id, and the snapshot shows the crew name", async () => {
+  const { server, post } = await notifyServer();
+  writeFileSync(join(dir, `${WORKER}.json`), valid({ sessionId: WORKER, name: "HASHED", state: "idle", crew: RIPLEY }));
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
+  await post("/action/card-assign", { cardId, sessionId: WORKER });
+  const snap = readSnapshot(dir, Date.now());
+  expect(snap.board.cards[0]!.assignee).toEqual({ id: WORKER, name: "RIPLEY", crew: "ripley-3f2a" });
+  expect(snap.agents[0]!.name).toBe("RIPLEY");
+  server.stop(true);
+});
+
+test("after a /clear the card follows the crew member into its new session id", async () => {
+  const { server, post, sent } = await notifyServer();
+  writeFileSync(join(dir, `${WORKER}.json`), valid({ sessionId: WORKER, state: "idle", crew: RIPLEY }));
+  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", crew: { id: "cadence-0001", name: "CADENCE" }, state: "idle" }));
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T", description: "do it" })).json()) as any;
+  await post("/action/card-assign", { cardId, sessionId: WORKER });
+  await post("/action/card-comment", { cardId, as: "assignee", text: "first pass done" });
+  // The /clear: the old session file goes, a new one arrives under the same crew.
+  rmSync(join(dir, `${WORKER}.json`));
+  writeFileSync(join(dir, `${WORKER2}.json`), valid({ sessionId: WORKER2, state: "idle", crew: RIPLEY }));
+  sent.length = 0;
+  // Signing as the assignee resolves to the NEW session: it wakes the scrum
+  // master, not itself.
+  const r = (await (await post("/action/card-comment", { cardId, as: "assignee", text: "back on it" })).json()) as any;
+  expect(r.ok).toBe(true);
+  expect(readSnapshot(dir, Date.now()).board.cards[0]!.comments!.at(-1)!.author).toBe("RIPLEY");
+  expect(sent.map((x) => x.sessionId)).toEqual([SCRUM]);
+  // A human's comment reaches the new session.
+  sent.length = 0;
+  await post("/action/card-comment", { cardId, author: "You", text: "how is it going?" });
+  expect(sent.map((x) => x.sessionId).sort()).toEqual([SCRUM, WORKER2].sort());
+  // send-task finds the new session, and tells the agent it has been here before.
+  sent.length = 0;
+  const st = await post("/action/send-task", { cardId });
+  expect(st.status).toBe(200);
+  expect(sent.length).toBe(1);
+  expect(sent[0]!.sessionId).toBe(WORKER2);
+  expect(sent[0]!.text).toContain("You have worked this card before");
+  server.stop(true);
+});
+
+test("send-task to an agent new to the card does not claim it has been there", async () => {
+  const { server, post, sent } = await notifyServer();
+  writeFileSync(join(dir, `${WORKER}.json`), valid({ sessionId: WORKER, state: "idle", crew: RIPLEY }));
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
+  await post("/action/card-assign", { cardId, sessionId: WORKER });
+  await post("/action/send-task", { cardId });
+  expect(sent[0]!.text).not.toContain("worked this card before");
+  server.stop(true);
+});
+
+test("crew-note keeps notes by crew id, by session id, or as a card's assignee", async () => {
+  const { server, post } = await notifyServer();
+  writeFileSync(join(dir, `${WORKER}.json`), valid({ sessionId: WORKER, state: "idle", crew: RIPLEY }));
+  let r = (await (await post("/action/crew-note", { crew: "ripley-3f2a", text: "tests live in tests/" })).json()) as any;
+  expect(r).toEqual({ ok: true, notes: "tests live in tests/\n" });
+  r = (await (await post("/action/crew-note", { sessionId: WORKER, text: "bun test runs them" })).json()) as any;
+  expect(r.notes).toBe("tests live in tests/\nbun test runs them\n");
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
+  await post("/action/card-assign", { cardId, sessionId: WORKER });
+  r = (await (await post("/action/crew-note", { cardId, as: "assignee", text: "only the cap", replace: true })).json()) as any;
+  expect(r.notes).toBe("only the cap\n");
+  expect(readFileSync(join(dir, "crew", "ripley-3f2a.md"), "utf8")).toBe("only the cap\n");
+  server.stop(true);
+});
+
+test("crew-note refuses a bad id, a crewless session, an unassigned card, and a note past the cap", async () => {
+  const { server, post } = await notifyServer();
+  writeFileSync(join(dir, `${WORKER}.json`), valid({ sessionId: WORKER, state: "idle" }));
+  expect((await post("/action/crew-note", { crew: "../x", text: "n" })).status).toBe(400);
+  expect((await post("/action/crew-note", { sessionId: WORKER, text: "n" })).status).toBe(400);
+  expect((await post("/action/crew-note", { sessionId: "0000-nope", text: "n" })).status).toBe(404);
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
+  expect((await post("/action/crew-note", { cardId, as: "assignee", text: "n" })).status).toBe(400);
+  expect((await post("/action/crew-note", { text: "n" })).status).toBe(400);
+  const big = await post("/action/crew-note", { crew: "ripley-3f2a", text: "x".repeat(3000) });
+  expect(big.status).toBe(400);
+  expect(((await big.json()) as any).error).toContain("replace");
+  server.stop(true);
+});
+
+test("a rename is stored against the crew, so it survives the session id changing", async () => {
+  const { server, post } = await notifyServer();
+  writeFileSync(join(dir, `${WORKER}.json`), valid({ sessionId: WORKER, state: "idle", crew: RIPLEY }));
+  await post("/action/rename", { sessionId: WORKER, name: "ELLEN" });
+  expect(readSnapshot(dir, Date.now()).agents[0]!.name).toBe("ELLEN");
+  rmSync(join(dir, `${WORKER}.json`));
+  writeFileSync(join(dir, `${WORKER2}.json`), valid({ sessionId: WORKER2, state: "idle", crew: RIPLEY }));
+  expect(readSnapshot(dir, Date.now()).agents[0]!.name).toBe("ELLEN");
+  server.stop(true);
+});
+
+test("name precedence: override > crew > persona name > hashed", () => {
+  reset();
+  writeFileSync(join(dir, "a.json"), valid({ sessionId: "a", name: "HASHED", persona: "backend-dev", crew: { id: "kane-1", name: "KANE" } }));
+  expect(readSnapshot(dir, Date.now()).agents[0]!.name).toBe("KANE");
+  setNameOverride(dir, "kane-1", "MINE");
+  expect(readSnapshot(dir, Date.now()).agents[0]!.name).toBe("MINE");
 });

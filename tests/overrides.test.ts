@@ -47,3 +47,14 @@ test("readOverrides tolerates a missing/corrupt file", () => {
   reset();
   expect(readOverrides(dir)).toEqual({});
 });
+
+test("an override keyed by crew id applies to whichever session carries that crew", () => {
+  const base = { role: "r", ticket: null, state: "idle" as const, doing: "", cwd: "/", branch: null, updatedAt: 0 };
+  const agents = [
+    { ...base, sessionId: "new", name: "RIPLEY", crew: { id: "ripley-1", name: "RIPLEY" } },
+    { ...base, sessionId: "other", name: "KANE" },
+  ];
+  const out = applyOverrides(agents, { "ripley-1": { name: "ELLEN" }, other: { name: "TOM" } });
+  expect(out[0]!.name).toBe("ELLEN");
+  expect(out[1]!.name).toBe("TOM");
+});

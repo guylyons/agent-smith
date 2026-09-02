@@ -525,3 +525,10 @@ test("scanLiveSessions: with no session running, recent transcripts do NOT come 
   expect(existsSync(join(status, "gone2.json"))).toBe(false);
   expect(existsSync(join(status, "gone3.json"))).toBe(false);
 });
+
+test("mergeForWrite carries the crew the hook set, so a scan pass can't drop the desk's name", () => {
+  const base = { sessionId: "s", name: "HASHED", role: "r", ticket: null, state: "working" as const, doing: "", cwd: "/", branch: null, updatedAt: 0 };
+  const existing = { ...base, crew: { id: "ripley-1", name: "RIPLEY" } };
+  expect(mergeForWrite(existing, base, 5).crew).toEqual({ id: "ripley-1", name: "RIPLEY" });
+  expect(mergeForWrite(null, base, 5).crew).toBeUndefined();
+});

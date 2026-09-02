@@ -2,24 +2,12 @@
 // Used by BOTH the hook writer and the transcript scanner so a session looks the
 // same however it was surfaced. A branch that matches a known work type keeps the
 // mock's persona (FORGE for component work, etc.); anything else gets a stable
-// codename from the sessionId and shows its repo as the role, so every open window
-// reads as a distinct person doing recognizable work.
+// roster name from the sessionId and shows its repo as the role, so every open
+// window reads as a distinct person doing recognizable work. This is the
+// fallback: a session with a crew (src/lib/crew.ts) shows its crew name instead.
 import { inferRole } from "./role";
+import { rosterName } from "./crew";
 
-const CODENAMES = [
-  "NOVA", "RELAY", "ANVIL", "EMBER", "QUILL", "VOLT", "MASON", "PIXEL",
-  "ROOK", "SABLE", "TALLY", "FLINT", "WREN", "ONYX", "CLOVE", "DELTA",
-  "ORBIT", "GLYPH", "AXLE", "CEDAR", "VERGE", "MICA", "SLATE", "HAZEL",
-  "JUNO", "LOOM", "MOSS", "OTTER", "PACER", "QUARK", "RIVET", "TIDE",
-  "UMBER", "VESPER", "WILLOW", "XENO", "YARROW", "ZEPHYR", "BRIO", "COBALT",
-  "DRIFT", "FABLE", "GROVE", "HALO", "INDIGO", "KESTREL", "LUMEN", "MARLOW",
-].map((n) => n.toUpperCase());
-
-function hash(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
-  return Math.abs(h);
-}
 
 function repoName(cwd: string): string {
   const parts = cwd.split("/").filter(Boolean);
@@ -32,6 +20,6 @@ export function identify(sessionId: string, branch: string | null, cwd: string):
   const repo = repoName(cwd);
   return {
     role: repo || "General",
-    name: CODENAMES[hash(sessionId) % CODENAMES.length],
+    name: rosterName(sessionId),
   };
 }

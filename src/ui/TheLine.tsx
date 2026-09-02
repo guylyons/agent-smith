@@ -320,7 +320,9 @@ function CardView({
   const hasMeta = !!card.assignee || commentCount > 0 || !!card.description;
   // The live session behind the assignee, if any — gives us its sprite. A card
   // assigned to a session that has since ended falls back to initials.
-  const assignedAgent = card.assignee ? agents.find((a) => a.sessionId === card.assignee!.id) : undefined;
+  const assignedAgent = card.assignee
+    ? agents.find((a) => a.sessionId === card.assignee!.id || (!!card.assignee!.crew && a.crew?.id === card.assignee!.crew))
+    : undefined;
 
   // Deleting takes the card's whole comment thread with it, so it has to be
   // recoverable. Rather than a blocking confirm() in front of every delete

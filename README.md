@@ -105,9 +105,12 @@ for focus/prompt/pause (see below).
 
 Each open session is a pixel character with:
 
-- **name / sprite** — a stable codename + pixel look derived from the session
-  id (a branch matching a known kind of work — component, docs, tests,
-  migration, triage — gets that persona), or a character you've picked yourself.
+- **name / sprite** — a crew name from the Alien films (RIPLEY, VASQUEZ,
+  BISHOP, …) and a pixel look. A session the dashboard spawns gets a random name
+  no live desk is using; one started by hand gets a stable one from its process.
+  Either way it survives `/clear` — see [Crew](#crew). A branch matching a known
+  kind of work (component, docs, tests, migration, triage) still gets that
+  role line, or pick a character yourself.
 - **role line** — the repo the session is working in (or the matched work type).
 - **ticket** — parsed from the git branch (`fix/115-primary-nav` → `#115`).
 - **doing** — the current tool activity, humanized (`editing card.twig`,
@@ -170,10 +173,11 @@ review stage) when finished.
 
 **Signing.** A worker's writes carry `"as": "assignee"` rather than a typed
 name: the server signs them with the card's assignee's *current* desk name, so
-a renamed desk or a persona whose codename differs from its desk can never
-mis-sign a comment, and the author is matched by session when deciding whom to
-wake. `"sessionId": "<uuid>"` signs as any live session; a bare `"author"` is
-the human's `You` or an orchestrator that knows its codename.
+a renamed desk can never mis-sign a comment, and the author is matched by
+session when deciding whom to wake. `"sessionId": "<uuid>"` signs as any live
+session; a bare `"author"` is the human's `You` or an orchestrator that knows
+its own name. An assignee is remembered by crew id as well as session id, so a
+card stays with its agent through the `/clear` a new task starts with.
 
 **Waking.** Every move/comment **wakes the sessions that care** — the card's
 assignee and any live scrum-master session, never the actor itself — with a
@@ -214,7 +218,7 @@ bun run install-mcp     # claude mcp add --scope user the-line -- bun run src/mc
 claude mcp list         # the-line: … - ✔ Connected
 ```
 
-Nine tools, named for what they do:
+Ten tools, named for what they do:
 
 | Tool | What it does |
 | --- | --- |
@@ -227,6 +231,7 @@ Nine tools, named for what they do:
 | `card_assign` | Bind a live session to the card, or `null` to clear |
 | `card_send_task` | Hand the card's composed task to its assigned session |
 | `agents_list` | The live sessions — the only things a card can be assigned to |
+| `crew_note` | Add a line to (or rewrite) your own notes — see [Crew](#crew) |
 
 Writes go through the dashboard's HTTP actions, not the board file, so an MCP
 write is exactly as safe as the `curl` it replaces: applied against a fresh read,
@@ -286,20 +291,48 @@ Click a desk to open its pane, with two tabs:
 ![conversation pane](docs/drawer.png)
 ![live subagents](docs/subagents.png)
 
+## Crew
+
+Every agent is a **crew member**: a name from the Alien films plus a crew id,
+minted by the dashboard when it spawns the session and carried in the launch
+env (`AGENT_CREW`, `AGENT_NAME`). Claude Code mints a *new session id* on every
+`/clear` — and a card's task is delivered with a `/clear` — but the process,
+and its env, stay put. So the hook stamps the same crew onto every session the
+process runs, and three things follow the agent instead of resetting with its
+context:
+
+- **its name** (and any rename or look you gave it),
+- **its cards** — an assignee is matched by crew id, so a comment, a
+  notification or SEND TASK reaches the agent's *current* session,
+- **its notes** — a small file (`~/.agent-status/crew/<id>.md`, 2KB cap) the
+  agent keeps for its future self: decisions, gotchas, where things live. The
+  `SessionStart` hook hands it back as context at every launch and `/clear`,
+  for a few hundred tokens rather than a whole transcript. The agent adds to it
+  with `crew_note` (MCP) or `POST /action/crew-note {"crew": "<id>", "text":
+  "…"}` (`"replace": true` rewrites it); a write past the cap is refused so the
+  agent rewrites it shorter. A task re-sent to an agent that already left
+  comments on that card tells it so, and sends it to read them first.
+
+A session started by hand has no env; its crew id is anchored to the claude
+process's pid (`pid-<n>`), which is just as stable across `/clear`. A session
+with no hooks at all keeps the old behaviour: a name hashed from its session id.
+
 ## Personas
 
 An agent can be launched *as* someone. Pick a **PERSONA** in **+ NEW AGENT** and
 the session starts with that role's system prompt — naming the skills it should
-reach for — and takes that persona's name, role line, and sprite on the board.
+reach for — and takes that persona's role line and sprite on the board. A
+persona is a *role*; the name belongs to the crew member spawned into it, so two
+`frontend-ux` agents are RIPLEY and VASQUEZ, both "Frontend UX".
 
 Four ship with the app:
 
 | persona | plays | reaches for |
 | --- | --- | --- |
-| `scrum-master` | CADENCE — sizes and clarifies work before it starts | `task-review`, `superpowers:writing-plans` |
-| `editor` | QUILL — prose, docs, changelogs, commit messages | `superpowers:requesting-code-review` |
-| `backend-dev` | ANVIL — data, state, server correctness, test-first | `superpowers:test-driven-development`, `superpowers:systematic-debugging` |
-| `frontend-ux` | PIXEL — what the user sees and touches | `superpowers:brainstorming` |
+| `scrum-master` | owns THE LINE: splits work into cards, staffs and watches them | `task-review`, `superpowers:writing-plans` |
+| `editor` | prose, docs, changelogs, commit messages | `superpowers:requesting-code-review` |
+| `backend-dev` | data, state, server correctness, test-first | `superpowers:test-driven-development`, `superpowers:systematic-debugging` |
+| `frontend-ux` | what the user sees and touches | `superpowers:brainstorming` |
 
 They live in `personas/` — one markdown file each, YAML frontmatter plus a prompt
 body. Edit one, or drop in your own; the file's `id` must match its filename and
@@ -310,13 +343,15 @@ next snapshot for the board), with no restart.
 ```markdown
 ---
 id: frontend-ux
-name: PIXEL
 role: Frontend UX
 sprite: { body: engineer, palette: 2 }
 skills: [superpowers:brainstorming]
 ---
 You are the frontend/UX developer on this team. …
 ```
+
+A persona may still carry a `name:` of its own; it is used only when the session
+has no crew name (a fixed codename, the old behaviour).
 
 Two limits worth knowing. Claude Code skills are model-invoked, so `skills:`
 tells an agent what to reach for — it can't force a skill to load. And a persona

@@ -738,3 +738,28 @@ test("cardTaskPrompt signs writes as the card's assignee, never a typed name", (
   expect(p).not.toContain("<your name>");
   expect(p).toContain("assigned agent on this card, VOLT");
 });
+
+// ---- crew on the assignee, and the footer for a returning agent -------------
+
+test("sanitizeBoard keeps a well-formed crew id on an assignee and drops a bad one", () => {
+  const sid = "502d0e8c-8790-4804-b767-0549edfc959c";
+  const b = sanitizeBoard({
+    columns: [{ id: "c", name: "C", instruction: "" }],
+    cards: [
+      { id: "k1", title: "a", columnId: "c", assignee: { id: sid, name: "RIPLEY", crew: "ripley-3f2a" } },
+      { id: "k2", title: "b", columnId: "c", assignee: { id: sid, name: "RIPLEY", crew: "../x" } },
+      { id: "k3", title: "c", columnId: "c", assignee: { id: sid, name: "RIPLEY" } },
+    ],
+  });
+  expect(b.cards[0]!.assignee).toEqual({ id: sid, name: "RIPLEY", crew: "ripley-3f2a" });
+  expect(b.cards[1]!.assignee).toEqual({ id: sid, name: "RIPLEY" });
+  expect(b.cards[2]!.assignee).toEqual({ id: sid, name: "RIPLEY" });
+});
+
+test("cardTaskPrompt sends a returning agent to its own comments first, and only then", () => {
+  const b = { columns: [{ id: "todo", name: "Todo", instruction: "" }], cards: [{ id: "k1", title: "T", columnId: "todo" }] };
+  const again = cardTaskPrompt(b, "k1", "http://x", "RIPLEY", { workedBefore: true });
+  expect(again).toContain("You have worked this card before");
+  expect(/^[\x00-\x7f]*$/.test(again)).toBe(true);
+  expect(cardTaskPrompt(b, "k1", "http://x", "RIPLEY")).not.toContain("worked this card before");
+});

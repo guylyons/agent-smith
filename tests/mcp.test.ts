@@ -284,3 +284,38 @@ test("a lone session in its folder signs by session id, an explicit author still
   expect(second.author).toBe("CADENCE");
   expect(second.sessionId).toBeUndefined();
 });
+
+// ---- crew_note: a crew member's notes for its future self -------------------
+
+test("tools/list includes crew_note", async () => {
+  expect(TOOLS.map((t) => t.name)).toContain("crew_note");
+});
+
+test("crew_note signs by the crew id from the launch env and reads the notes back", async () => {
+  const { api, calls } = fakeApi({ "/action/crew-note": { status: 200, body: { ok: true, notes: "tests live in tests/\n" } } });
+  const c: Ctx = { api, url: "http://localhost:4173", cwd: "/w/one", crew: "ripley-3f2a" };
+  const res = await handleMessage({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "crew_note", arguments: { text: "tests live in tests/" } } }, c) as any;
+  expect(calls[0]!.body).toEqual({ crew: "ripley-3f2a", text: "tests live in tests/", replace: false });
+  expect(res.result.content[0].text).toContain("tests live in tests/");
+});
+
+test("crew_note falls back to the spawned-for card, then the session in this folder", async () => {
+  const { api, calls } = fakeApi();
+  await handleMessage({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "crew_note", arguments: { text: "n", replace: true } } },
+    { api, url: "http://localhost:4173", cwd: "/w/one", card: "card_1" });
+  expect(calls[0]!.body).toEqual({ cardId: "card_1", as: "assignee", text: "n", replace: true });
+
+  const agents = [{ sessionId: "s2", name: "ANVIL", role: "r", state: "working", doing: "x", cwd: "/w/two" }];
+  const second = fakeApi({ "/agents": { status: 200, body: { agents } } });
+  await handleMessage({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "crew_note", arguments: { text: "n" } } },
+    { api: second.api, url: "http://localhost:4173", cwd: "/w/two" });
+  expect((second.calls.find((x) => x.path === "/action/crew-note")!.body as any).sessionId).toBe("s2");
+});
+
+test("crew_note is a tool error when nobody can tell whose notes they are", async () => {
+  const { api } = fakeApi({ "/agents": { status: 200, body: { agents: [] } } });
+  const res = await handleMessage({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "crew_note", arguments: { text: "n" } } },
+    { api, url: "http://localhost:4173", cwd: "/w/none" }) as any;
+  expect(res.result.isError).toBe(true);
+  expect(res.result.content[0].text).toContain("AGENT_CREW");
+});

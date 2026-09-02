@@ -26,6 +26,9 @@ export type Ctx = {
   /** The card this session was spawned for (AGENT_CARD), if any: on that card
    *  we are its assignee and sign as such. */
   card?: string;
+  /** This session's crew id (AGENT_CREW), if the dashboard minted one: whose
+   *  notes crew_note keeps. */
+  crew?: string;
   /** Memo for signatureFor. Resolving costs a request, and the answer can't
    *  change for the life of the process. */
   resolvedSignature?: Signature;
@@ -314,6 +317,37 @@ export const TOOLS: Tool[] = [
       const body = { cardId: str(args, "cardId"), author: optionalStr(args, "author") ?? (await authorFor(ctx)) };
       await request(ctx, "POST", "/action/send-task", body);
       return `Sent ${body.cardId} to its assignee.`;
+    },
+  },
+  {
+    name: "crew_note",
+    description:
+      "Keep your own notes: what your future self should know after a /clear (decisions, gotchas, where things live). They are handed back to you at the start of every session. Short lines; the whole file is capped, and a write past the cap is refused so you rewrite it shorter with replace: true.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        text: { type: "string", description: "The note to add (one line is best). With replace: true, the whole new contents." },
+        replace: { type: "boolean", description: "Replace all your notes with `text` instead of adding a line." },
+      },
+      required: ["text"],
+    },
+    async run(args, ctx) {
+      const text = String(args.text ?? "");
+      const replace = args.replace === true;
+      // Who we are: the crew id from the launch env, else the card we were
+      // spawned for, else the live session in this folder. A bare author name
+      // can't own notes, so it is not a fallback here.
+      let who: Record<string, unknown>;
+      if (ctx.crew) who = { crew: ctx.crew };
+      else if (ctx.card) who = { cardId: ctx.card, as: "assignee" };
+      else {
+        const sig = await signatureFor(ctx, "");
+        if (!("sessionId" in sig)) throw new Error("can't tell which crew member you are (no AGENT_CREW, no card, and this folder is ambiguous)");
+        who = sig;
+      }
+      const r = await request(ctx, "POST", "/action/crew-note", { ...who, text, replace });
+      const notes = String(r?.notes ?? "").trim();
+      return notes ? `Your notes now read:\n${notes}` : "Your notes are empty.";
     },
   },
   {

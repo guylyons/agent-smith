@@ -15,7 +15,11 @@ export const PERSONA_ID_RE = /^[a-z0-9-]{1,64}$/;
 
 const PersonaMetaSchema = z.object({
   id: z.string().regex(PERSONA_ID_RE),
-  name: z.string().min(1),
+  // Optional, and the shipped personas leave it out: a persona is a ROLE, and
+  // the name belongs to the crew member the dashboard spawns into it (see
+  // src/lib/crew.ts), so two frontend-ux agents are RIPLEY and VASQUEZ rather
+  // than PIXEL twice. A persona that still names itself is a fixed codename.
+  name: z.string().min(1).optional(),
   role: z.string().min(1),
   sprite: z.object({
     body: z.string().min(1),
@@ -70,23 +74,14 @@ export function getPersona(id: string, dir: string = PERSONAS_DIR): Persona | nu
   return loadPersonas(dir).find((p) => p.id === id) ?? null;
 }
 
-/** The text appended to the session's system prompt: an identity line (so the
- *  agent knows the codename its desk and board comments go by), the persona's
- *  own body, a generated line naming its skills (so `skills:` stays declarative
- *  data rather than prose each author has to remember to write twice), and the
- *  shared board protocol every persona plays by.
- *  Claude Code skills are model-invoked — naming them is the strongest lever a
- *  persona has; it cannot force them to load.
- *  The generated lines are pure ASCII: this text rides into the session as an
- *  argv through a path known to mangle anything else. */
-export function composePrompt(p: Persona): string {
-  const skills = p.skills.length === 0
-    ? ""
-    : `\n\nReach for ${p.skills.map((s) => `\`${s}\``).join(", ")} via the Skill tool when the work calls for it.`;
-  const board = [
+/** The shared board protocol every launched agent plays by, addressed to the
+ *  name the board shows it under. Pure ASCII: this text rides into the session
+ *  as an argv through a path known to mangle anything else. */
+function boardProtocol(name: string): string {
+  return [
     "",
     "",
-    `Board protocol: the team board knows you as ${p.name}. If a task carries a`,
+    `Board protocol: the team board knows you as ${name}. If a task carries a`,
     '"-- THE LINE --" footer, follow its protocol exactly: move your card and',
     "comment through the curl commands it gives, as you work, signed exactly as",
     'they show. A message starting with "[THE LINE]" is a board notification and',
@@ -100,7 +95,30 @@ export function composePrompt(p: Persona): string {
     "literally, exactly as your task footer shows it: permission allowlists match",
     "the literal command text, so an env-var form stalls on an approval prompt.",
   ].join("\n");
-  return `You are ${p.name}, the team's ${p.role}.\n\n${p.prompt}${skills}${board}`;
+}
+
+/** The text appended to the session's system prompt: an identity line (so the
+ *  agent knows the name its desk and board comments go by), the persona's own
+ *  body, a generated line naming its skills (so `skills:` stays declarative
+ *  data rather than prose each author has to remember to write twice), and the
+ *  shared board protocol every persona plays by. `name` is the crew member's
+ *  name minted at spawn; a persona with its own fixed name is the fallback.
+ *  Claude Code skills are model-invoked — naming them is the strongest lever a
+ *  persona has; it cannot force them to load. */
+export function composePrompt(p: Persona, name?: string): string {
+  const who = name ?? p.name;
+  const skills = p.skills.length === 0
+    ? ""
+    : `\n\nReach for ${p.skills.map((s) => `\`${s}\``).join(", ")} via the Skill tool when the work calls for it.`;
+  const opening = who ? `You are ${who}, the team's ${p.role}.` : `You are the team's ${p.role}.`;
+  return `${opening}\n\n${p.prompt}${skills}${boardProtocol(who ?? "your desk name")}`;
+}
+
+/** The system prompt for a spawn with a crew name but no persona: just who the
+ *  agent is and how the board works, so a plain worker still signs and
+ *  follows the protocol under the name its desk shows. */
+export function composeIdentityPrompt(name: string): string {
+  return `You are ${name}, a member of this team.${boardProtocol(name)}`;
 }
 
 /** Fill name/role/sprite from each agent's persona. Mirrors `applyOverrides` in
@@ -111,6 +129,6 @@ export function applyPersonas(agents: AgentStatus[], personas: Persona[]): Agent
   const byId = new Map(personas.map((p) => [p.id, p]));
   return agents.map((a) => {
     const p = a.persona ? byId.get(a.persona) : undefined;
-    return p ? { ...a, name: p.name, role: p.role, sprite: { ...p.sprite } } : a;
+    return p ? { ...a, ...(p.name ? { name: p.name } : {}), role: p.role, sprite: { ...p.sprite } } : a;
   });
 }

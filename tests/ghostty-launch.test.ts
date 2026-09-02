@@ -135,11 +135,13 @@ test("workerPermissionSettings allows the board read, card writes, and local git
     "Bash(curl -s http://localhost:4173/agents)",
     "Bash(curl -s -X POST http://localhost:4173/action/card-move:*)",
     "Bash(curl -s -X POST http://localhost:4173/action/card-comment:*)",
+    "Bash(curl -s -X POST http://localhost:4173/action/crew-note:*)",
     "mcp__the-line__board_read",
     "mcp__the-line__card_read",
     "mcp__the-line__agents_list",
     "mcp__the-line__card_move",
     "mcp__the-line__card_comment",
+    "mcp__the-line__crew_note",
     "Bash(git status:*)",
     "Bash(git diff:*)",
     "Bash(git log:*)",
@@ -152,4 +154,26 @@ test("workerPermissionSettings allows the board read, card writes, and local git
   expect(s.permissions.allow).not.toContain("mcp__the-line__card_assign");
   expect(JSON.stringify(s)).not.toContain("/action/spawn");
   expect(JSON.stringify(s)).not.toContain("git push");
+});
+
+// --- crew: the name and id ride the env, and the prompt is addressed to it ---
+
+test("a crew member rides into the env after the persona, and the prompt speaks to its name", () => {
+  const out = buildLaunchInput("t", { crew: { id: "ripley-3f2a", name: "RIPLEY" } }, P);
+  expect(out.startsWith("AGENT_PERSONA=frontend-ux AGENT_CREW='ripley-3f2a' AGENT_NAME='RIPLEY' claude ")).toBe(true);
+  expect(out).toContain("You are RIPLEY, the team'\\''s Frontend UX.");
+  expect(out).not.toContain("PIXEL");
+});
+
+test("a crew member without a persona still gets an identity prompt", () => {
+  const out = buildLaunchInput("t", { crew: { id: "kane-0001", name: "KANE" } }, null);
+  expect(out.startsWith("AGENT_CREW='kane-0001' AGENT_NAME='KANE' claude --append-system-prompt ")).toBe(true);
+  expect(out).toContain("You are KANE, a member of this team.");
+  expect(out).not.toContain("AGENT_PERSONA");
+});
+
+test("no crew means no crew env and no identity prompt", () => {
+  const out = buildLaunchInput("t", {}, null);
+  expect(out).not.toContain("AGENT_CREW");
+  expect(out).not.toContain("--append-system-prompt");
 });

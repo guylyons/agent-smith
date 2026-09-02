@@ -51,7 +51,7 @@ function useImageAttach() {
  *  would press keys on its dialog. */
 export function sendTaskGate(assigned: Assignee | null | undefined, agents: AgentStatus[]): { enabled: boolean; reason: string } {
   if (!assigned) return { enabled: false, reason: "Assign a running agent first" };
-  const live = agents.find((a) => a.sessionId === assigned.id);
+  const live = agents.find((a) => a.sessionId === assigned.id || (!!assigned.crew && a.crew?.id === assigned.crew));
   if (!live) return { enabled: false, reason: `${assigned.name}'s session has ended - assign a running agent` };
   if (live.state === "working") return { enabled: false, reason: `${live.name} is working - wait for it to go idle (or pause it) before sending a new task` };
   if (live.state === "waiting") return { enabled: false, reason: `${live.name} is waiting on a prompt in its terminal - answer that first` };
@@ -83,7 +83,11 @@ export function CardModal({
   // that session is no longer in the snapshot it has ended — we keep it selected
   // and labelled so the card still shows who had it.
   const assigned = card.assignee;
-  const assignedAgent = assigned ? agents.find((a) => a.sessionId === assigned.id) : undefined;
+  // Matched by crew as well as session id: the same agent comes back under a
+  // new session id after a /clear (see src/lib/crew.ts).
+  const assignedAgent = assigned
+    ? agents.find((a) => a.sessionId === assigned.id || (!!assigned.crew && a.crew?.id === assigned.crew))
+    : undefined;
   const assignedIsLive = !!assignedAgent;
   const gate = sendTaskGate(assigned, agents);
 
@@ -240,11 +244,11 @@ export function CardModal({
             <label className="pix cardmodal-label">ASSIGNEE</label>
             <select
               className="cardmodal-select"
-              value={assigned?.id ?? ""}
+              value={assignedAgent?.sessionId ?? assigned?.id ?? ""}
               onChange={(e) => {
                 const a = agents.find((x) => x.sessionId === e.target.value);
                 mutate(
-                  (b) => assignCard(b, card.id, a ? { id: a.sessionId, name: a.name } : null),
+                  (b) => assignCard(b, card.id, a ? { id: a.sessionId, name: a.name, ...(a.crew ? { crew: a.crew.id } : {}) } : null),
                   () => assignCardAction(card.id, a ? a.sessionId : null),
                 );
               }}

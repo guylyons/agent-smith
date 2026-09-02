@@ -203,8 +203,8 @@ const AgentCard = memo(function AgentCard({ a, onCard, unread, dying, onOpen }: 
 /** "title · column" for the first board card assigned to this session (+N when
  *  it holds more), or "" — precomputed here so the memoized card compares a
  *  string, not the board. */
-export function assignedCardLabel(board: Board, sessionId: string): string {
-  const mine = board.cards.filter((c) => c.assignee?.id === sessionId);
+export function assignedCardLabel(board: Board, sessionId: string, crewId?: string): string {
+  const mine = board.cards.filter((c) => c.assignee && (c.assignee.id === sessionId || (!!crewId && c.assignee.crew === crewId)));
   if (mine.length === 0) return "";
   const first = mine[0]!;
   const col = board.columns.find((c) => c.id === first.columnId);
@@ -243,7 +243,7 @@ export function Crew({ agents, board, unread, onOpen }: {
         <AgentCard
           key={a.sessionId}
           a={a}
-          onCard={ghost ? "" : assignedCardLabel(board, a.sessionId)}
+          onCard={ghost ? "" : assignedCardLabel(board, a.sessionId, a.crew?.id)}
           unread={!ghost && unread.has(a.sessionId)}
           dying={ghost || dying.has(a.sessionId)}
           onOpen={onOpen}

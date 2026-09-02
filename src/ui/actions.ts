@@ -168,7 +168,7 @@ export async function pickFolder(startIn?: string): Promise<string | null> {
   return null;
 }
 
-export type PersonaInfo = { id: string; name: string; role: string; skills: string[] };
+export type PersonaInfo = { id: string; name?: string; role: string; skills: string[] };
 
 // Re-exported (imported at the top) so components keep importing them from "./actions".
 export type { ChatMessage, QuestionOption, Question, PendingQuestion, BlockingTool, Subagent, RepoInfo, MergeState, MergeResult };

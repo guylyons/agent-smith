@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { parsePersona, loadPersonas, getPersona, composePrompt, PERSONA_ID_RE } from "../src/lib/personas";
+import { parsePersona, loadPersonas, getPersona, composePrompt, composeIdentityPrompt, PERSONA_ID_RE } from "../src/lib/personas";
 
 const dir = "/tmp/aw-personas-test";
 function reset() { rmSync(dir, { recursive: true, force: true }); mkdirSync(dir, { recursive: true }); }
@@ -32,7 +32,7 @@ test("rejects malformed and invalid personas", () => {
   expect(parsePersona(GOOD, "different-stem")).toBeNull();
   expect(parsePersona(GOOD.replace("palette: 2", "palette: 9"), "frontend-ux")).toBeNull();
   expect(parsePersona(GOOD.replace("body: engineer", "body: dragon"), "frontend-ux")).toBeNull();
-  expect(parsePersona(GOOD.replace("name: PIXEL\n", ""), "frontend-ux")).toBeNull();
+  expect(parsePersona(GOOD.replace("role: Frontend UX\n", ""), "frontend-ux")).toBeNull();
   expect(parsePersona(GOOD.replace("You are the frontend/UX developer.", ""), "frontend-ux")).toBeNull();
 });
 
@@ -72,6 +72,49 @@ test("composePrompt omits the skills line when there are no skills", () => {
 test("composePrompt opens with the persona's codename and role", () => {
   const p = parsePersona(GOOD, "frontend-ux")!;
   expect(composePrompt(p).startsWith(`You are ${p.name}, the team's ${p.role}.`)).toBe(true);
+});
+
+// --- crew names: a persona is a role; the name belongs to whoever was spawned --
+
+const NAMELESS = GOOD.replace("name: PIXEL\n", "");
+
+test("a persona without a name parses; the name is the crew member's", () => {
+  const p = parsePersona(NAMELESS, "frontend-ux")!;
+  expect(p.name).toBeUndefined();
+  expect(p.role).toBe("Frontend UX");
+});
+
+test("composePrompt addresses the crew name over the persona's own", () => {
+  const p = parsePersona(GOOD, "frontend-ux")!;
+  const out = composePrompt(p, "RIPLEY");
+  expect(out.startsWith("You are RIPLEY, the team's Frontend UX.")).toBe(true);
+  expect(out).toContain("the team board knows you as RIPLEY");
+  expect(out).not.toContain("PIXEL");
+});
+
+test("composePrompt with neither name still opens with the role", () => {
+  const p = parsePersona(NAMELESS, "frontend-ux")!;
+  expect(composePrompt(p).startsWith("You are the team's Frontend UX.")).toBe(true);
+});
+
+test("composeIdentityPrompt names the agent and teaches the board protocol, in ASCII", () => {
+  const out = composeIdentityPrompt("VASQUEZ");
+  expect(out.startsWith("You are VASQUEZ, a member of this team.")).toBe(true);
+  expect(out).toContain("the team board knows you as VASQUEZ");
+  expect(out).toContain("-- THE LINE --");
+  expect(/^[\x00-\x7f]*$/.test(out)).toBe(true);
+});
+
+test("a nameless persona sets role and sprite but leaves the name alone", () => {
+  const personas = [parsePersona(NAMELESS, "frontend-ux")!];
+  const [a] = applyPersonas([A({ persona: "frontend-ux" })], personas);
+  expect(a.name).toBe("NOVA");
+  expect(a.role).toBe("Frontend UX");
+  expect(a.sprite).toEqual({ body: "engineer", palette: 2, gear: "" });
+});
+
+test("the shipped personas carry no fixed name", () => {
+  for (const p of loadPersonas()) expect(p.name).toBeUndefined();
 });
 
 test("composePrompt teaches the board protocol to every persona", () => {

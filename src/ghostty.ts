@@ -5,7 +5,8 @@
 import { writeFile } from "node:fs/promises";
 import type { AgentStatus } from "./schema";
 import { prepareLaunch } from "./lib/worktree";
-import { composePrompt, getPersona, type Persona } from "./lib/personas";
+import { composeIdentityPrompt, composePrompt, getPersona, type Persona } from "./lib/personas";
+import type { Crew } from "./lib/crew";
 import { isSessionHostComm } from "./lib/proc";
 
 export type ActionResult = { ok: boolean; error?: string };
@@ -176,17 +177,23 @@ function shq(s: string): string {
  *  value is dropped, never interpolated. The persona rides in twice: its prompt
  *  as --append-system-prompt (so it survives compaction and never shows up in
  *  the CHAT tab), and its id as an env var the session's hooks inherit, which is
- *  what binds the persona to the real session id. */
+ *  what binds the persona to the real session id. The crew member (id + name,
+ *  minted by the server) rides the same way: the prompt is addressed to the
+ *  name, and the env carries both so every session the process runs — this
+ *  one, and each one a /clear starts — keeps the same identity. */
 export function buildLaunchInput(
   task: string,
-  opts: { model?: string; permissionMode?: string; serverUrl?: string; cardId?: string },
+  opts: { model?: string; permissionMode?: string; serverUrl?: string; cardId?: string; crew?: Crew },
   persona: Persona | null,
 ): string {
   let flags = "";
   if (opts.model && ALLOWED_MODELS.has(opts.model)) flags += ` --model ${opts.model}`;
   if (opts.permissionMode && ALLOWED_PERMISSION_MODES.has(opts.permissionMode)) flags += ` --permission-mode ${opts.permissionMode}`;
-  if (persona) flags += ` --append-system-prompt ${shq(composePrompt(persona))}`;
+  const crew = opts.crew;
+  if (persona) flags += ` --append-system-prompt ${shq(composePrompt(persona, crew?.name))}`;
+  else if (crew) flags += ` --append-system-prompt ${shq(composeIdentityPrompt(crew.name))}`;
   let env = persona ? `AGENT_PERSONA=${persona.id} ` : "";
+  if (crew) env += `AGENT_CREW=${shq(crew.id)} AGENT_NAME=${shq(crew.name)} `;
   // Where the dashboard's card API lives — how a launched agent addresses the
   // board (the persona prompt points it at $AGENT_WORKSHOP_URL).
   if (opts.serverUrl) env += `AGENT_WORKSHOP_URL=${shq(opts.serverUrl)} `;
@@ -214,6 +221,9 @@ export function workerPermissionSettings(serverUrl: string): { permissions: { al
         `Bash(curl -s ${serverUrl}/agents)`,
         `Bash(curl -s -X POST ${serverUrl}/action/card-move:*)`,
         `Bash(curl -s -X POST ${serverUrl}/action/card-comment:*)`,
+        // Its own notes (see src/lib/crew.ts): what it wants its future self to
+        // know, handed back at every SessionStart.
+        `Bash(curl -s -X POST ${serverUrl}/action/crew-note:*)`,
         // The same reads and writes again as MCP tools, for sessions that have
         // the board's MCP server registered (bun run install-mcp). Same line
         // drawn in the same place: nothing here reaches another session.
@@ -222,6 +232,7 @@ export function workerPermissionSettings(serverUrl: string): { permissions: { al
         "mcp__the-line__agents_list",
         "mcp__the-line__card_move",
         "mcp__the-line__card_comment",
+        "mcp__the-line__crew_note",
         // The Done column's usual instruction is "worktree clean and committed",
         // so the local git verbs a worker needs mustn't stall it either. The
         // worktree is isolated, so a commit here can't touch anyone's branch;
@@ -249,7 +260,8 @@ export function workerPermissionSettings(serverUrl: string): { permissions: { al
  *  on the branch you named. A failure to prepare aborts the launch with its error.
  *  `opts.persona`, when it names a known persona, binds that persona to the new
  *  session (see buildLaunchInput); an unknown id resolves to null and is
- *  ignored, same as an unknown model.
+ *  ignored, same as an unknown model. `opts.crew` is the crew member (id +
+ *  name) the server minted for this launch.
  *  `opts.serverUrl` (the dashboard's own origin) rides into the session's env,
  *  and — for a fresh worktree only — is written into the worktree's
  *  `.claude/settings.local.json` as a narrow curl allowlist, so the agent can
@@ -259,7 +271,7 @@ export function workerPermissionSettings(serverUrl: string): { permissions: { al
 export async function spawnAgent(
   cwd: string,
   task: string,
-  opts?: { model?: string; permissionMode?: string; worktree?: string; branch?: string; persona?: string; serverUrl?: string; cardId?: string },
+  opts?: { model?: string; permissionMode?: string; worktree?: string; branch?: string; persona?: string; serverUrl?: string; cardId?: string; crew?: Crew },
 ): Promise<ActionResult> {
   const prepared = await prepareLaunch(cwd, { worktree: opts?.worktree, branch: opts?.branch });
   if (!prepared.ok) return { ok: false, error: prepared.error ?? "could not prepare the working area" };

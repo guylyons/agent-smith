@@ -8,6 +8,7 @@ import { matchChat } from "./lib/chatsearch";
 import type { ChatMessage } from "./lib/conversation";
 import { readOverrides, applyOverrides, setNameOverride, setSpriteOverride } from "./lib/overrides";
 import { loadPersonas, applyPersonas } from "./lib/personas";
+import { applyCrew, pickName, mintCrewId, findAssigneeSession, isAssigneeSession, addNote, CREW_ID_RE } from "./lib/crew";
 import { readBoard, writeBoard, sanitizeBoard, boardFile, addCard, moveCard, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, addColumn, renameColumn, setInstruction, setColumnStage, STAGES, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, sanitizeCard, sanitizeColumn, type Board, type Card, type Column, type Stage } from "./lib/board";
 import { ALLOWED_MODELS, ALLOWED_PERMISSION_MODES, focusSession, interruptSession, killAgent, sendPrompt, sendFreshPrompt, spawnAgent } from "./ghostty";
 import { readRepo } from "./repo";
@@ -31,19 +32,20 @@ function loadStatus(dir: string, sessionId: string): AgentStatus | null {
   catch { return null; }
 }
 
-/** Resolve a session id to an `{ id, name }` assignee, applying the same
- *  persona/override name resolution the live view uses. Prefers the fresh
- *  snapshot, but falls back to the session's own on-disk status file when it
- *  isn't surfaced as live yet — so a NEW agent's self-assign at SessionStart
+/** Resolve a session id to an `{ id, name, crew? }` assignee, applying the
+ *  same crew/persona/override name resolution the live view uses. Prefers the
+ *  fresh snapshot, but falls back to the session's own on-disk status file when
+ *  it isn't surfaced as live yet — so a NEW agent's self-assign at SessionStart
  *  can't lose the race with the snapshot and silently leave the card unassigned.
- *  Returns null only when no status file exists for the id at all. */
-export function resolveAssignee(dir: string, sessionId: string): { id: string; name: string } | null {
+ *  The crew id is what lets the card follow the agent through a /clear (see
+ *  src/lib/crew.ts). Returns null only when no status file exists for the id. */
+export function resolveAssignee(dir: string, sessionId: string): { id: string; name: string; crew?: string } | null {
   const live = readSnapshot(dir, Date.now()).agents.find((a) => a.sessionId === sessionId);
-  if (live) return { id: live.sessionId, name: live.name };
-  const raw = loadStatus(dir, sessionId);
+  const raw = live ?? loadStatus(dir, sessionId);
   if (!raw) return null;
-  const [resolved] = applyOverrides(applyPersonas([raw], loadPersonas()), readOverrides(dir));
-  return resolved ? { id: resolved.sessionId, name: resolved.name } : null;
+  const [resolved] = live ? [live] : applyOverrides(applyCrew(applyPersonas([raw], loadPersonas())), readOverrides(dir));
+  if (!resolved) return null;
+  return { id: resolved.sessionId, name: resolved.name, ...(resolved.crew ? { crew: resolved.crew.id } : {}) };
 }
 
 export function readSnapshot(dir: string, now: number): Snapshot {
@@ -57,9 +59,9 @@ export function readSnapshot(dir: string, now: number): Snapshot {
       if (s) agents.push(s);
     } catch { /* half-written; skip */ }
   }
-  // personas resolve INSIDE applyOverrides so a name you typed yourself wins:
-  // user override > persona > inferRole > hashed codename
-  return buildSnapshot(applyOverrides(applyPersonas(agents, loadPersonas()), readOverrides(dir)), now, {
+  // personas and crew resolve INSIDE applyOverrides so a name you typed
+  // yourself wins: user override > crew name > persona name > inferRole > hashed
+  return buildSnapshot(applyOverrides(applyCrew(applyPersonas(agents, loadPersonas())), readOverrides(dir)), now, {
     board: readBoard(dir),
   });
 }
@@ -186,8 +188,11 @@ export function makeServer(
   function resolveActor(card: Card, body: { as?: unknown; sessionId?: unknown; author?: unknown }): Actor | { error: string; status: number } {
     if (body.as === "assignee") {
       if (!card.assignee) return { error: "card has no assignee to sign as", status: 400 };
-      const fresh = resolveAssignee(dir, card.assignee.id);
-      return { name: fresh?.name ?? card.assignee.name, sessionId: card.assignee.id };
+      // The assignee's CURRENT session: after a /clear it is a new id under the
+      // same crew, and signing with the stale id would wake the actor itself.
+      const live = findAssigneeSession(readSnapshot(dir, Date.now()).agents, card.assignee);
+      const fresh = live ?? resolveAssignee(dir, card.assignee.id);
+      return { name: fresh?.name ?? card.assignee.name, sessionId: live?.sessionId ?? card.assignee.id };
     }
     if (typeof body.sessionId === "string") {
       if (!validSessionId(body.sessionId)) return { error: "bad sessionId", status: 400 };
@@ -196,6 +201,31 @@ export function makeServer(
     }
     const author = typeof body.author === "string" ? body.author.trim() : "";
     return { name: author };
+  }
+
+  /** Whose notes a crew-note write is for. `crew` names the member outright;
+   *  `sessionId` is a live session that has one; `cardId` + `as: "assignee"`
+   *  is the card's assignee. A session without a crew (no hooks) has nowhere
+   *  to keep notes, and says so. */
+  function resolveCrewId(body: { crew?: unknown; sessionId?: unknown; cardId?: unknown; as?: unknown }): { id: string } | { error: string; status: number } {
+    if (typeof body.crew === "string") {
+      return CREW_ID_RE.test(body.crew) ? { id: body.crew } : { error: "bad crew id", status: 400 };
+    }
+    if (typeof body.sessionId === "string") {
+      if (!validSessionId(body.sessionId)) return { error: "bad sessionId", status: 400 };
+      const st = loadStatus(dir, body.sessionId);
+      if (!st) return { error: "no session with that id", status: 404 };
+      return st.crew ? { id: st.crew.id } : { error: "that session has no crew id (hooks not installed?)", status: 400 };
+    }
+    if (body.as === "assignee" && typeof body.cardId === "string") {
+      const card = readBoard(dir).cards.find((k) => k.id === body.cardId);
+      if (!card) return { error: `unknown card: ${body.cardId}`, status: 404 };
+      if (!card.assignee) return { error: "card has no assignee", status: 400 };
+      const live = findAssigneeSession(readSnapshot(dir, Date.now()).agents, card.assignee);
+      const id = live?.crew?.id ?? card.assignee.crew;
+      return id ? { id } : { error: "the card's assignee has no crew id", status: 400 };
+    }
+    return { error: "a crew id, sessionId, or cardId with as: \"assignee\" is required", status: 400 };
   }
 
   // Wake the sessions that care about a card event, best-effort and without
@@ -218,7 +248,7 @@ export function makeServer(
     const out: Delivery[] = [];
     for (const a of agents) {
       if (isActor(a)) continue;
-      const isAssignee = !!card.assignee && a.sessionId === card.assignee.id;
+      const isAssignee = isAssigneeSession(card.assignee, a);
       if (isAssignee) {
         if (opts.kind === "move" && opts.direction !== "back") continue;
         const ask = opts.kind === "move"
@@ -351,8 +381,8 @@ export function makeServer(
       if (url.pathname === "/agents") {
         const { agents } = snapshot();
         return json({
-          agents: agents.map(({ sessionId, name, role, state, doing, persona, cwd, branch, inbox }) =>
-            ({ sessionId, name, role, state, doing, persona, cwd, branch, ...(inbox ? { inbox } : {}) })),
+          agents: agents.map(({ sessionId, name, role, state, doing, persona, crew, cwd, branch, inbox }) =>
+            ({ sessionId, name, role, state, doing, persona, crew, cwd, branch, ...(inbox ? { inbox } : {}) })),
         });
       }
 
@@ -370,7 +400,9 @@ export function makeServer(
         const card = readBoard(dir).cards.find((k) => k.id === cardId);
         if (!card) return { error: `unknown card: ${cardId}`, status: 404 };
         if (!card.assignee) return { error: "card has no assignee, so there's no branch to merge", status: 400 };
-        const st = loadStatus(dir, card.assignee.id);
+        // The crew member's current session first (its id moved on with a
+        // /clear), then the session the card was bound to.
+        const st = findAssigneeSession(readSnapshot(dir, Date.now()).agents, card.assignee) ?? loadStatus(dir, card.assignee.id);
         if (!st?.cwd) return { error: `no working directory known for ${card.assignee.name}`, status: 404 };
         return { cwd: st.cwd };
       };
@@ -401,7 +433,7 @@ export function makeServer(
           return json({ ok: false, error: "cross-site blocked" }, 403);
         }
         const action = url.pathname.slice("/action/".length);
-        let body: { sessionId?: string | null; name?: string; text?: string; cwd?: string; palette?: number; gear?: string; body?: string; model?: string; permissionMode?: string; worktree?: string; branch?: string; persona?: string; board?: unknown; type?: string; dataBase64?: string; cardId?: string; columnId?: string; toColumnId?: string; title?: string; description?: string; author?: string; instruction?: string; toIndex?: number; index?: number; column?: unknown; card?: unknown; cards?: unknown; commentId?: string; as?: string; stage?: string | null };
+        let body: { sessionId?: string | null; name?: string; text?: string; cwd?: string; palette?: number; gear?: string; body?: string; model?: string; permissionMode?: string; worktree?: string; branch?: string; persona?: string; board?: unknown; type?: string; dataBase64?: string; cardId?: string; columnId?: string; toColumnId?: string; title?: string; description?: string; author?: string; instruction?: string; toIndex?: number; index?: number; column?: unknown; card?: unknown; cards?: unknown; commentId?: string; as?: string; stage?: string | null; crew?: string; replace?: boolean };
         try { body = await req.json(); } catch { return json({ ok: false, error: "bad body" }, 400); }
         // pick-folder opens the real macOS folder chooser on the user's screen and
         // hands back the path they picked. Browser-only on purpose: it puts a
@@ -442,7 +474,11 @@ export function makeServer(
           if (persona === "scrum-master" && !req.headers.get("sec-fetch-site")) {
             return json({ ok: false, error: "agents may not spawn a scrum-master — only a human can (use the + NEW AGENT dialog)" }, 403);
           }
-          return json(await spawnAgent(cwd, task, { model, permissionMode, worktree, branch, persona, serverUrl: url.origin, cardId }));
+          // Who the new agent is: a roster name no live desk is using, and a
+          // crew id it keeps across every /clear (see src/lib/crew.ts).
+          const name = pickName(readSnapshot(dir, Date.now()).agents.map((a) => a.name));
+          const crew = { id: mintCrewId(name), name };
+          return json(await spawnAgent(cwd, task, { model, permissionMode, worktree, branch, persona, serverUrl: url.origin, cardId, crew }));
         }
         // board: a whole-board write. Kept for external/scripted callers, but
         // NOTHING in the UI uses it any more: it overwrites the file wholesale,
@@ -639,7 +675,7 @@ export function makeServer(
           if (action === "send-task") {
             const assignee = card.assignee;
             if (!assignee) return json({ ok: false, error: "card has no assignee" }, 400);
-            const agent = readSnapshot(dir, Date.now()).agents.find((a) => a.sessionId === assignee.id);
+            const agent = findAssigneeSession(readSnapshot(dir, Date.now()).agents, assignee);
             if (!agent) return json({ ok: false, error: `assignee "${assignee.name}" is not a live session` }, 404);
             // A session waiting on a dialog would take the typed task as
             // keystrokes ON the dialog (Enter approves it) — refuse instead.
@@ -650,7 +686,11 @@ export function makeServer(
             if (agent.state === "working") {
               return json({ ok: false, error: `${agent.name} is still working — wait for it to go idle (or pause it), then resend` }, 409);
             }
-            const prompt = cardTaskPrompt(board, cardId, url.origin, agent.name);
+            // An agent that already left comments here has worked this card
+            // before: its context is about to be cleared, so the footer sends
+            // it back to its own notes on the card first.
+            const workedBefore = (card.comments ?? []).some((c) => c.author === agent.name);
+            const prompt = cardTaskPrompt(board, cardId, url.origin, agent.name, { workedBefore });
             if (!prompt.trim()) return json({ ok: false, error: "card has no task text to send" }, 400);
             // Fresh delivery: clear the agent's context before the new task so
             // the previous ticket doesn't bleed into this one.
@@ -686,6 +726,15 @@ export function makeServer(
           const r = saveUpload(name, type, data);
           return json(r, r.ok ? 200 : 400);
         }
+        // crew-note: a crew member keeping its notes (see src/lib/crew.ts),
+        // signed like a card write: by crew id (the SessionStart context hands
+        // the agent its own), by session id, or as a card's assignee.
+        if (action === "crew-note") {
+          const crewId = resolveCrewId(body);
+          if ("error" in crewId) return json({ ok: false, error: crewId.error }, crewId.status);
+          const r = addNote(dir, crewId.id, typeof body.text === "string" ? body.text : "", { replace: body.replace === true });
+          return json(r, r.ok ? 200 : 400);
+        }
         if (!validSessionId(body.sessionId)) return json({ ok: false, error: "bad sessionId" }, 400);
         // inbox-drain: a session's Stop hook collecting the board events that
         // arrived while it was busy. Hands them over once; the hook feeds them
@@ -695,13 +744,16 @@ export function makeServer(
           if (items.length) push();
           return json({ ok: true, items });
         }
+        // A rename or a new look is stored against the crew member when the
+        // session has one, so it survives the /clear that ends this session id.
+        const overrideKey = (sessionId: string) => loadStatus(dir, sessionId)?.crew?.id ?? sessionId;
         if (action === "rename") {
           // name must be a string (or absent = clear); a non-string would throw
           // inside setNameOverride (.trim()) and 500 the handler.
           if (body.name !== undefined && typeof body.name !== "string") {
             return json({ ok: false, error: "name must be a string" }, 400);
           }
-          setNameOverride(dir, body.sessionId, body.name ?? null);
+          setNameOverride(dir, overrideKey(body.sessionId), body.name ?? null);
           push();
           return json({ ok: true });
         }
@@ -710,7 +762,7 @@ export function makeServer(
             return json({ ok: false, error: "palette and gear are required" }, 400);
           }
           const character = typeof body.body === "string" ? body.body : undefined;
-          setSpriteOverride(dir, body.sessionId, { palette: body.palette, gear: body.gear, body: character });
+          setSpriteOverride(dir, overrideKey(body.sessionId), { palette: body.palette, gear: body.gear, body: character });
           push();
           return json({ ok: true });
         }

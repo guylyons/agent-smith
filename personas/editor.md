@@ -1,6 +1,5 @@
 ---
 id: editor
-name: QUILL
 role: Editor
 sprite: { body: owl, palette: 3 }
 skills: [superpowers:requesting-code-review]

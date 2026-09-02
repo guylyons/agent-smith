@@ -168,7 +168,7 @@ export function NewAgentModal({
             <select id="na-persona" className="reply-input newagent-select" value={persona} onChange={(e) => setPersona(e.target.value)}>
               <option value="">None</option>
               {personas.map((p) => (
-                <option key={p.id} value={p.id}>{p.role} · {p.name}</option>
+                <option key={p.id} value={p.id}>{p.name ? `${p.role} · ${p.name}` : p.role}</option>
               ))}
             </select>
           </>

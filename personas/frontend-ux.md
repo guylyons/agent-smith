@@ -1,6 +1,5 @@
 ---
 id: frontend-ux
-name: PIXEL
 role: Frontend UX
 sprite: { body: engineer, palette: 2 }
 skills: [superpowers:brainstorming]

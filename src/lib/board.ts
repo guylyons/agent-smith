@@ -16,9 +16,11 @@ import { readFileSync, writeFileSync, renameSync } from "node:fs";
 export type Comment = { id: string; author: string; text: string; at: number };
 /** A card's assignee — a live agent session from the grid: its `id` is that
  *  session's id, plus a display name so the label survives after the session
- *  ends. Never a persona: a persona isn't a running session, so it could never
- *  be sent the card's task. */
-export type Assignee = { id: string; name: string };
+ *  ends, plus the session's crew id when it has one (see src/lib/crew.ts): a
+ *  /clear mints a new session id, and the crew id is how the card follows the
+ *  same agent into it. Never a persona: a persona isn't a running session, so
+ *  it could never be sent the card's task. */
+export type Assignee = { id: string; name: string; crew?: string };
 export type Card = {
   id: string;
   title: string;
@@ -230,7 +232,7 @@ export function cardTaskText(board: Board, id: string): string {
  *  so two agents (or an agent and the UI) can never clobber each other's write.
  *
  *  Empty string for an unknown card (nothing to send). */
-export function cardTaskPrompt(board: Board, id: string, server: string, agentName?: string): string {
+export function cardTaskPrompt(board: Board, id: string, server: string, agentName?: string, opts: { workedBefore?: boolean } = {}): string {
   const card = board.cards.find((k) => k.id === id);
   if (!card) return "";
   const flow = board.columns.map((c) => c.id).join(" -> ");
@@ -267,6 +269,10 @@ export function cardTaskPrompt(board: Board, id: string, server: string, agentNa
     "",
     `You are the assigned agent on this card${who}. This task replaces anything`,
     "you were told before it. The board is how your progress is watched, so",
+    ...(opts.workedBefore ? [
+      "You have worked this card before and your earlier comments are on it:",
+      "read them first (curl the board, below) and carry on from where you left off.",
+    ] : []),
     "update it as you go, not in one write at the end. Update it ONLY with the",
     "curl commands below; never edit the board file directly.",
     "If you have the-line MCP tools (mcp__the-line__card_move, card_comment,",
@@ -387,6 +393,9 @@ function str(v: unknown): string | null {
 
 /** A Claude Code session id — the only thing that can be an assignee. Persona
  *  ids (`backend-dev`, `frontend-ux`, …) deliberately fail this. */
+/** Mirrors CREW_ID_RE in src/lib/crew.ts (kept local: board.ts is imported by
+ *  the browser bundle, crew.ts touches the filesystem). */
+const CREW_ID = /^[a-z0-9-]{1,64}$/;
 const SESSION_ID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 /** Repair an assignee: needs a name and an id that is a real session id, else
@@ -399,7 +408,8 @@ function sanitizeAssignee(v: unknown): Assignee | null {
   const id = str(o.id);
   const name = str(o.name);
   if (id === null || name === null || !SESSION_ID.test(id)) return null;
-  return { id, name };
+  const crew = str(o.crew);
+  return crew !== null && CREW_ID.test(crew) ? { id, name, crew } : { id, name };
 }
 
 /** Repair a comment list, dropping any entry missing a valid id/author/text/at.

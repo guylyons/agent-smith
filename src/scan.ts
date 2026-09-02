@@ -321,6 +321,9 @@ export function mergeForWrite(existing: AgentStatus | null, derived: AgentStatus
   // it here would strip the agent's name/sprite — and drop it out of the
   // scrum-master notification fan-out — after the first scan pass.
   if (carried.persona === undefined && existing?.persona !== undefined) carried.persona = existing.persona;
+  // And the crew, for the same reason: it is the desk's name and what its
+  // cards are bound to, and only the hook knows it.
+  if (carried.crew === undefined && existing?.crew !== undefined) carried.crew = existing.crew;
   // And the usage meter's budget: a tail window that momentarily shows no
   // marker must not blank a budget we already know.
   if (carried.usage === undefined && existing?.usage !== undefined) carried.usage = existing.usage;

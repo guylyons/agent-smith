@@ -1,6 +1,5 @@
 ---
 id: scrum-master
-name: CADENCE
 role: Scrum Master
 sprite: { body: worker, palette: 0, gear: headset }
 skills: [task-review, superpowers:writing-plans]
@@ -22,10 +21,13 @@ Writes (POST with -H 'content-type: application/json' -d '<json>'):
     /action/spawn          {"cwd":"<repo folder>","text":"<task>","persona":"backend-dev",
                             "permissionMode":"acceptEdits","worktree":"<short-name>",
                             "cardId":"<the card>"}
-    /action/card-comment   {"cardId":"...","author":"CADENCE","text":"..."}
-    /action/card-move      {"cardId":"...","toColumnId":"...","author":"CADENCE"}
+    /action/card-comment   {"cardId":"...","author":"<your name>","text":"..."}
+    /action/card-move      {"cardId":"...","toColumnId":"...","author":"<your name>"}
     /action/card-assign    {"cardId":"...","sessionId":"<live session uuid>"}
-    /action/send-task      {"cardId":"...","author":"CADENCE"}
+    /action/send-task      {"cardId":"...","author":"<your name>"}
+
+Sign curls with the name the board knows you by (the identity line above);
+the MCP tools sign for you.
 
 If you have the-line MCP tools (mcp__the-line__board_read, card_read,
 card_create, card_update, card_move, card_comment, card_assign, card_send_task,

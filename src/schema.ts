@@ -41,6 +41,11 @@ export const AgentStatusSchema = z.object({
   // launch. Only the id is stored — name/role/sprite resolve from the registry
   // at snapshot time, so editing a persona file updates live desks.
   persona: z.string().optional(),
+  // crew member (see src/lib/crew.ts): the identity that outlives the session
+  // id. Set by the hook from AGENT_CREW/AGENT_NAME (a dashboard spawn) or from
+  // the claude pid (a session started by hand); carried across every event and
+  // scanner pass, so a /clear keeps the desk's name, its cards and its notes.
+  crew: z.object({ id: z.string().min(1), name: z.string().min(1) }).optional(),
   // user-chosen sprite override (palette index + gear id + character body),
   // replacing the deterministic default derived from sessionId+role
   sprite: z.object({ palette: z.number(), gear: z.string(), body: z.string().optional() }).optional(),
