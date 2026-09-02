@@ -107,3 +107,56 @@ test("gear only composites onto bodies that accept it", () => {
   const d = spriteRects({ body: "cat", gear: "hood", palette: PALETTES[0] });
   expect(c).toEqual(d);
 });
+
+// ---- the Alien cast (src/ui/sprite-alien.ts) ----
+import { ALIEN_BODIES, BODY_FOR_NAME, bodyForName } from "../src/ui/sprite-alien";
+import { ROSTER } from "../src/lib/crew";
+import { hasFixedColors } from "../src/ui/sprite-data";
+
+test("every Alien character is a pickable 24x16 body with its own colors", () => {
+  for (const [id, body] of Object.entries(ALIEN_BODIES)) {
+    expect(BODIES[id]).toBe(body);
+    expect(BODY_IDS).toContain(id);
+    expect(body.rows).toHaveLength(24);
+    for (const row of body.rows) expect(row).toHaveLength(16);
+    expect(hasFixedColors(id)).toBe(true);
+    // every letter in the grid resolves to a color: nothing silently vanishes
+    const rects = spriteRects({ body: id, gear: "none", palette: PALETTES[0] });
+    const cells = body.rows.join("").replace(/\./g, "").length;
+    expect(rects.length).toBe(cells);
+  }
+  expect(hasFixedColors("worker")).toBe(false);
+});
+
+test("the cast keeps its colors on every palette; the original bodies recolor", () => {
+  const xeno = PALETTES.map((p) => JSON.stringify(spriteRects({ body: "xenomorph", gear: "none", palette: p })));
+  expect(new Set(xeno).size).toBe(1);
+  const worker = PALETTES.map((p) => JSON.stringify(spriteRects({ body: "worker", gear: "none", palette: p })));
+  expect(new Set(worker).size).toBe(PALETTES.length);
+});
+
+test("every roster name wears a character, and every mapped body exists", () => {
+  for (const name of ROSTER) expect(BODY_FOR_NAME[name], name).toBeDefined();
+  for (const [name, body] of Object.entries(BODY_FOR_NAME)) expect(ALIEN_BODIES[body], `${name} -> ${body}`).toBeDefined();
+});
+
+test("bodyForName matches the first word, any case, and ignores the uniquifier", () => {
+  expect(bodyForName("RIPLEY")).toBe("ripley");
+  expect(bodyForName("ripley")).toBe("ripley");
+  expect(bodyForName("RIPLEY 3f2a")).toBe("ripley");
+  expect(bodyForName("  HICKS ")).toBe("marine");
+  expect(bodyForName("FORGE")).toBeUndefined();
+  expect(bodyForName("")).toBeUndefined();
+  expect(bodyForName(undefined)).toBeUndefined();
+});
+
+test("paletteFor wears the crew name's character, and the worker without one", () => {
+  expect(paletteFor("abc", "General", "VASQUEZ").body).toBe("vasquez");
+  expect(paletteFor("abc", "General", "NOSTROMO").body).toBe("xenomorph");
+  expect(paletteFor("abc", "General", "FORGE").body).toBe("worker");
+  expect(paletteFor("abc", "General").body).toBe("worker");
+  // the name changes the body, never the palette or gear
+  const a = paletteFor("abc", "General"), b = paletteFor("abc", "General", "RIPLEY");
+  expect(b.palette).toBe(a.palette);
+  expect(b.gear).toBe(a.gear);
+});

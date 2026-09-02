@@ -431,7 +431,7 @@ function CardView({
             {card.assignee && (
               assignedAgent
                 ? <span className="card-avatar" title={card.assignee.name}>
-                    <Sprite sessionId={assignedAgent.sessionId} role={assignedAgent.role} state={avatarState} override={assignedAgent.sprite} />
+                    <Sprite sessionId={assignedAgent.sessionId} role={assignedAgent.role} name={assignedAgent.name} state={avatarState} override={assignedAgent.sprite} />
                   </span>
                 : <span className="card-assignee" title={`${card.assignee.name} (session ended)`}>{initials(card.assignee.name)}</span>
             )}

@@ -21,13 +21,16 @@ const PersonaMetaSchema = z.object({
   // than PIXEL twice. A persona that still names itself is a fixed codename.
   name: z.string().min(1).optional(),
   role: z.string().min(1),
+  // Optional, like `name`: without it the desk wears the look its crew name
+  // earns (the Alien cast in src/ui/sprite-alien.ts), so a persona only sets a
+  // sprite when the role should look the same whoever plays it.
   sprite: z.object({
     body: z.string().min(1),
     palette: z.number().int().min(0).max(PALETTES.length - 1),
     // Gear overlays are only positioned for the `worker` body; every other body
     // ignores it, so an omitted gear is the empty string rather than an error.
     gear: z.string().default(""),
-  }),
+  }).optional(),
   skills: z.array(z.string().min(1)).default([]),
 });
 
@@ -48,7 +51,7 @@ export function parsePersona(text: string, stem: string): Persona | null {
   const r = PersonaMetaSchema.safeParse(meta);
   if (!r.success) return null;
   if (r.data.id !== stem) return null;
-  if (!(r.data.sprite.body in BODIES)) return null;
+  if (r.data.sprite && !(r.data.sprite.body in BODIES)) return null;
   const prompt = m[2].trim();
   if (!prompt) return null;
   return { ...r.data, prompt };
@@ -129,6 +132,6 @@ export function applyPersonas(agents: AgentStatus[], personas: Persona[]): Agent
   const byId = new Map(personas.map((p) => [p.id, p]));
   return agents.map((a) => {
     const p = a.persona ? byId.get(a.persona) : undefined;
-    return p ? { ...a, ...(p.name ? { name: p.name } : {}), role: p.role, sprite: { ...p.sprite } } : a;
+    return p ? { ...a, ...(p.name ? { name: p.name } : {}), role: p.role, ...(p.sprite ? { sprite: { ...p.sprite } } : {}) } : a;
   });
 }

@@ -109,7 +109,10 @@ for focus/prompt/pause (see below).
 Each open session is a pixel character with:
 
 - **name / sprite** — a crew name from the Alien films (RIPLEY, VASQUEZ,
-  BISHOP, …) and a pixel look. A session the dashboard spawns gets a random name
+  BISHOP, …) and the pixel character to match: RIPLEY wears her tank top and
+  pulse rifle, the marines their helmets, the synthetics one pale face, and
+  the ships (NOSTROMO, SULACO, …) the creatures that came aboard them. A
+  session the dashboard spawns gets a random name
   no live desk is using; one started by hand gets a stable one from its process.
   Either way it survives `/clear` — see [Crew](#crew). A branch matching a known
   kind of work (component, docs, tests, migration, triage) still gets that
@@ -338,23 +341,24 @@ Four ship with the app:
 | `frontend-ux` | what the user sees and touches | `superpowers:brainstorming` |
 
 They live in `personas/` — one markdown file each, YAML frontmatter plus a prompt
-body. Edit one, or drop in your own; the file's `id` must match its filename and
-`sprite.body` must be one of the characters in the sprite picker. A malformed
-file is skipped, never fatal. Changes take effect on the next launch (and on the
-next snapshot for the board), with no restart.
+body. Edit one, or drop in your own; the file's `id` must match its filename. A
+malformed file is skipped, never fatal. Changes take effect on the next launch
+(and on the next snapshot for the board), with no restart.
 
 ```markdown
 ---
 id: frontend-ux
 role: Frontend UX
-sprite: { body: engineer, palette: 2 }
 skills: [superpowers:brainstorming]
 ---
 You are the frontend/UX developer on this team. …
 ```
 
 A persona may still carry a `name:` of its own; it is used only when the session
-has no crew name (a fixed codename, the old behaviour).
+has no crew name (a fixed codename, the old behaviour). Likewise a `sprite:`
+(`{ body, palette, gear }`, with `body` one of the characters in the sprite
+picker) pins a look for the role, whoever plays it; without one the desk wears
+its crew name's character.
 
 Two limits worth knowing. Claude Code skills are model-invoked, so `skills:`
 tells an agent what to reach for — it can't force a skill to load. And a persona
@@ -372,10 +376,14 @@ are what a persona points at, not where personas live.)*
 ## Controls
 
 - **Click the sprite** (on a desk or in the pane) to pick a custom character —
-  a character + palette + gear picker, overriding the deterministic default.
-  Characters include the human **worker** and **engineer** plus standalone
-  critters/droids — **cat**, **fox**, **owl**, **robot** — each recolored by any
-  of the five palettes. (Gear overlays apply only to the human worker.)
+  a character + palette + gear picker, overriding the default the crew name
+  earns. The cast is the Alien films' — **Ripley**, a Colonial **marine**,
+  **Vasquez**, **Bishop**, **Newt**, **Jonesy**, **Dallas**, **Burke**,
+  **Dillon**, **Shaw**, the **xenomorph**, the **Queen**, a **facehugger** and
+  a **chestburster** — each painted in its own colors; plus the original
+  **worker** and **engineer** and the **cat**, **fox**, **owl** and **robot**,
+  which recolor by any of the five palettes. (Gear overlays apply only to the
+  human worker.)
 - **↗ TERMINAL** jumps to the session's exact Ghostty tab.
 - **Click the name** (in the pane) to rename the agent. Stored in
   `~/.agent-status/.overrides.json` and survives restarts.
