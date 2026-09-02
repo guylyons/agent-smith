@@ -50,7 +50,7 @@ export function Notifier({ snap, enabled }: { snap: Snapshot; enabled: boolean }
     // the completion party toast is visual and always shows, so a finished
     // hand-off is unmistakable even with sound off.
     for (const move of moves) {
-      if (isCompletion(move)) {
+      if (isCompletion(move, snap.board)) {
         toast(`🎉 ${move.title} — done!`);
         if (enabled) playCue("celebrate");
       } else if (enabled) {

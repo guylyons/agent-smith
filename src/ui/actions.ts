@@ -4,14 +4,18 @@ import { toast } from "./toast";
 import { flashSend } from "./flash";
 import { signalDying } from "./dying";
 import { playSubmit } from "./sounds";
-import type { Board, Card, Column } from "../lib/board";
+import type { Board, Card, Column, Stage } from "../lib/board";
 // Shared with the UI as types only — nothing server-side is bundled into the browser.
 import type { ChatMessage, QuestionOption, Question, PendingQuestion, BlockingTool } from "../lib/conversation";
 import type { Subagent } from "../lib/subagents";
 import type { RepoInfo } from "../repo";
 import type { MergeState, MergeResult } from "../lib/merge";
 
-type Result = { ok: boolean; error?: string; path?: string; url?: string; cancelled?: boolean; branch?: string; base?: string };
+/** Where a card event went: typed into an idle agent's terminal now, or queued
+ *  for a busy one's Stop hook to collect when its turn ends. */
+export type Delivery = { sessionId: string; name: string; via: "typed" | "queued" };
+
+type Result = { ok: boolean; error?: string; path?: string; url?: string; cancelled?: boolean; branch?: string; base?: string; delivery?: Delivery[] };
 
 async function post(action: string, body: object): Promise<Result> {
   try {
@@ -69,6 +73,7 @@ export function setSprite(sessionId: string, palette: number, gear: string, body
 export function addColumnAction(name: string): void { void act("column-add", { name }); }
 export function renameColumnAction(columnId: string, name: string): void { void act("column-update", { columnId, name }); }
 export function setInstructionAction(columnId: string, instruction: string): void { void act("column-update", { columnId, instruction }); }
+export function setColumnStageAction(columnId: string, stage: Stage | null): void { void act("column-update", { columnId, stage }); }
 export function deleteColumnAction(columnId: string): void { void act("column-delete", { columnId }); }
 export function reorderColumnAction(columnId: string, toIndex: number): void { void act("column-reorder", { columnId, toIndex }); }
 export function restoreColumnAction(column: Column, index: number, cards: Card[]): void {
@@ -84,7 +89,14 @@ export function moveCardAction(cardId: string, toColumnId: string, toIndex?: num
 export function deleteCardAction(cardId: string): void { void act("card-delete", { cardId }); }
 export function restoreCardAction(card: Card, index: number): void { void act("card-restore", { card, index }); }
 export function assignCardAction(cardId: string, sessionId: string | null): void { void act("card-assign", { cardId, sessionId }); }
-export function addCommentAction(cardId: string, text: string): void { void act("card-comment", { cardId, author: ME, text }); }
+/** Post a comment as the human. The server delivers it to the card's assignee
+ *  (and any scrum master) itself; the returned delivery says how each got it,
+ *  so the modal can toast "Notified" vs "Queued" truthfully. */
+export async function addCommentAction(cardId: string, text: string): Promise<Delivery[]> {
+  const r = await post("card-comment", { cardId, author: ME, text });
+  if (!r.ok) { toast(r.error ?? "card-comment failed"); return []; }
+  return r.delivery ?? [];
+}
 export function deleteCommentAction(cardId: string, commentId: string): void { void act("comment-delete", { cardId, commentId }); }
 
 /** The human's byline on comments and moves they make. Agents append with their

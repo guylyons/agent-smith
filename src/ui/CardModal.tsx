@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from "react";
 import type { AgentStatus } from "../schema";
 import type { Board, Card } from "../lib/board";
-import { renameCard, setCardDescription, assignCard, addComment, deleteComment, moveCard, cardTaskPrompt, commentNotifyText } from "../lib/board";
+import type { Assignee } from "../lib/board";
+import { renameCard, setCardDescription, assignCard, addComment, deleteComment, moveCard, cardTaskPrompt } from "../lib/board";
 import {
-  sendCardTask, sendPromptTo, uploadImage, ME,
+  sendCardTask, uploadImage, ME,
   renameCardAction, setCardDescriptionAction, assignCardAction,
-  addCommentAction, deleteCommentAction, moveCardAction,
+  addCommentAction, deleteCommentAction, moveCardAction, type Delivery,
 } from "./actions";
 import { ModalBackdrop } from "./Backdrop";
 import { MergeKey } from "./MergeKey";
@@ -44,6 +45,30 @@ function useImageAttach() {
   return { busy, upload };
 }
 
+/** Whether SEND TASK can fire, and if not, why — shown as the button's title.
+ *  A fresh task clears the agent's context first, so it must be idle: sending
+ *  into a working session would wipe its work mid-task, and into a waiting one
+ *  would press keys on its dialog. */
+export function sendTaskGate(assigned: Assignee | null | undefined, agents: AgentStatus[]): { enabled: boolean; reason: string } {
+  if (!assigned) return { enabled: false, reason: "Assign a running agent first" };
+  const live = agents.find((a) => a.sessionId === assigned.id);
+  if (!live) return { enabled: false, reason: `${assigned.name}'s session has ended - assign a running agent` };
+  if (live.state === "working") return { enabled: false, reason: `${live.name} is working - wait for it to go idle (or pause it) before sending a new task` };
+  if (live.state === "waiting") return { enabled: false, reason: `${live.name} is waiting on a prompt in its terminal - answer that first` };
+  return { enabled: true, reason: "Send this card's task to the assigned agent" };
+}
+
+/** One line on where a posted comment went, from the server's delivery report. */
+export function deliveryToast(delivery: Delivery[]): string {
+  const typed = delivery.filter((d) => d.via === "typed").map((d) => d.name);
+  const queued = delivery.filter((d) => d.via === "queued").map((d) => d.name);
+  if (!typed.length && !queued.length) return "No running agent to notify - comment saved";
+  if (!typed.length) return `Queued for ${queued.join(", ")} (busy) - lands when its turn ends`;
+  const parts = [`Notified ${typed.join(", ")}`];
+  if (queued.length) parts.push(`queued for ${queued.join(", ")} (busy)`);
+  return parts.join("; ");
+}
+
 // A Trello-style detail view for one card, over a dimmed backdrop. Gives a
 // single card room to breathe: editable title + description, an agent
 // assignee, a comment thread, and images you can paste, drop, or pick.
@@ -58,7 +83,9 @@ export function CardModal({
   // that session is no longer in the snapshot it has ended — we keep it selected
   // and labelled so the card still shows who had it.
   const assigned = card.assignee;
-  const assignedIsLive = !!assigned && agents.some((a) => a.sessionId === assigned.id);
+  const assignedAgent = assigned ? agents.find((a) => a.sessionId === assigned.id) : undefined;
+  const assignedIsLive = !!assignedAgent;
+  const gate = sendTaskGate(assigned, agents);
 
   // Both editable texts live here rather than in the fields, so an image dropped
   // anywhere on the modal can be appended to whichever one is active.
@@ -123,26 +150,16 @@ export function CardModal({
     void sendCardTask(card.id, assigned.id).then((ok) => { if (ok) toast(`Sent to ${assigned.name}`); });
   }
 
-  // Post a comment, and — since every comment is meant for whoever's on the
-  // card — deliver it to the assigned agent so it's not left waiting on a note
-  // it can't see. The comment always saves; delivery only happens when the
-  // assignee is a running agent, and either outcome is toasted so it's never
-  // ambiguous whether the note reached anyone. A live send also pulses that
-  // agent's crew card green (see sendPromptTo).
+  // Post a comment. The SERVER delivers it to whoever is on the card — the
+  // assignee, any scrum master — typed in if they are idle, queued for their
+  // turn to end if not; it reports which, and that is what the toast says.
+  // (This used to also type the note in from here, so every comment arrived
+  // twice, in two wordings.)
   function postComment(text: string) {
-    mutate((b) => addComment(b, card.id, ME, text), () => addCommentAction(card.id, text));
-    if (assigned && assignedIsLive) {
-      const msg = commentNotifyText(board, card.id, text);
-      // Only claim "Notified" once the send actually succeeds — otherwise the
-      // user gets a "Notified X" toast contradicted a moment later by the error
-      // toast from a failed delivery.
-      if (msg) {
-        const name = assigned.name;
-        void sendPromptTo(assigned.id, msg).then((ok) => { if (ok) toast(`Notified ${name}`); });
-      }
-    } else {
-      toast("No running agent assigned — comment saved, not delivered");
-    }
+    mutate(
+      (b) => addComment(b, card.id, ME, text),
+      () => { void addCommentAction(card.id, text).then((delivery) => toast(deliveryToast(delivery))); },
+    );
   }
 
   // What POST actually sends: the typed note, then each attached image on its
@@ -244,11 +261,16 @@ export function CardModal({
               ))}
             </select>
             {!agents.length && <p className="cardmodal-empty">No agents are running right now.</p>}
+            {/* Notes for a busy agent wait in the server's inbox until its turn
+                ends; say so, or a comment looks unanswered for no reason. */}
+            {assignedAgent?.inbox ? (
+              <p className="cardmodal-empty">{assignedAgent.inbox} note{assignedAgent.inbox === 1 ? "" : "s"} queued for {assignedAgent.name} - delivered when its turn ends.</p>
+            ) : null}
             <div className="cardmodal-assign-actions">
               <button
                 className="pix cardmodal-send"
-                disabled={!assignedIsLive}
-                title={assignedIsLive ? "Send this card's task to the assigned agent" : "Assign a running agent first"}
+                disabled={!gate.enabled}
+                title={gate.reason}
                 onClick={sendToAssigned}
               >▸ SEND TASK</button>
               <button

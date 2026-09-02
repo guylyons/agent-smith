@@ -21,12 +21,21 @@ export type Ctx = {
   api: Api;
   url: string;
   author?: string;
-  /** This session's folder, used to look our own board name up. */
+  /** This session's folder, used to look our own session up. */
   cwd?: string;
-  /** Memo for authorFor. Resolving costs a request, and the answer can't change
-   *  for the life of the process. */
-  resolvedAuthor?: string;
+  /** The card this session was spawned for (AGENT_CARD), if any: on that card
+   *  we are its assignee and sign as such. */
+  card?: string;
+  /** Memo for signatureFor. Resolving costs a request, and the answer can't
+   *  change for the life of the process. */
+  resolvedSignature?: Signature;
 };
+
+/** How a write is signed. The server resolves `as: "assignee"` to the card's
+ *  assignee and `sessionId` to that session's current desk name — both by
+ *  identity, so a rename or a persona can never mis-sign a comment. A bare
+ *  `author` is the last resort. */
+export type Signature = { as: "assignee" } | { sessionId: string } | { author: string };
 
 /** Signed on a comment when we can't tell which agent we are. */
 const UNKNOWN_AUTHOR = "Claude";
@@ -56,24 +65,34 @@ async function request(ctx: Ctx, method: "GET" | "POST", path: string, body?: un
   return res.body;
 }
 
-/** Who to sign a move or comment as. A Claude session has no way to know the
- *  codename the board shows it under, and one environment variable can't name
- *  every session, so an unset author is resolved from the live agent running in
- *  this very folder. Two agents sharing a folder is ambiguous — sign it
- *  generically rather than attribute the note to the wrong teammate. */
-export async function authorFor(ctx: Ctx): Promise<string> {
-  if (ctx.author?.trim()) return ctx.author.trim();
-  if (ctx.resolvedAuthor) return ctx.resolvedAuthor;
-  let name = UNKNOWN_AUTHOR;
+/** Who to sign a move or comment on `cardId` as. An explicit name (the
+ *  AGENT_WORKSHOP_AUTHOR env, or an `author` argument) wins. On the card this
+ *  session was spawned for, it is the assignee. Otherwise the live agent
+ *  running in this very folder is us — signed by session id, so the server
+ *  uses its current desk name. Two agents sharing a folder is ambiguous:
+ *  sign generically rather than attribute the note to the wrong teammate. */
+export async function signatureFor(ctx: Ctx, cardId: string, author?: string): Promise<Signature> {
+  const explicit = (author ?? ctx.author)?.trim();
+  if (explicit) return { author: explicit };
+  if (ctx.card && ctx.card === cardId) return { as: "assignee" };
+  if (ctx.resolvedSignature) return ctx.resolvedSignature;
+  let sig: Signature = { author: UNKNOWN_AUTHOR };
   if (ctx.cwd) {
     try {
-      const agents: { name: string; cwd?: string }[] = (await request(ctx, "GET", "/agents")).agents ?? [];
+      const agents: { sessionId: string; cwd?: string }[] = (await request(ctx, "GET", "/agents")).agents ?? [];
       const here = agents.filter((a) => a.cwd === ctx.cwd);
-      if (here.length === 1) name = here[0]!.name;
+      if (here.length === 1) sig = { sessionId: here[0]!.sessionId };
     } catch { /* dashboard down — the tool's own call reports that properly */ }
   }
-  ctx.resolvedAuthor = name;
-  return name;
+  ctx.resolvedSignature = sig;
+  return sig;
+}
+
+/** Kept for callers that only want a display name (tests, the send-task
+ *  author line): the name a signature would resolve to when it is a bare one. */
+export async function authorFor(ctx: Ctx): Promise<string> {
+  const sig = await signatureFor(ctx, "");
+  return "author" in sig ? sig.author : UNKNOWN_AUTHOR;
 }
 
 const getBoard = async (ctx: Ctx): Promise<Board> => (await request(ctx, "GET", "/board")).board as Board;
@@ -233,12 +252,13 @@ export const TOOLS: Tool[] = [
       properties: {
         cardId: CARD_ID,
         toColumnId: { type: "string", description: "Destination column id (from board_read)." },
-        author: { type: "string", description: "Who is moving it. Defaults to your own board codename." },
+        author: { type: "string", description: "Who is moving it. Leave it out: the board signs it as you." },
       },
       required: ["cardId", "toColumnId"],
     },
     async run(args, ctx) {
-      const body = { cardId: str(args, "cardId"), toColumnId: str(args, "toColumnId"), author: optionalStr(args, "author") ?? (await authorFor(ctx)) };
+      const cardId = str(args, "cardId");
+      const body = { cardId, toColumnId: str(args, "toColumnId"), ...(await signatureFor(ctx, cardId, optionalStr(args, "author"))) };
       await request(ctx, "POST", "/action/card-move", body);
       return `Moved ${body.cardId} to "${body.toColumnId}".`;
     },
@@ -251,12 +271,13 @@ export const TOOLS: Tool[] = [
       properties: {
         cardId: CARD_ID,
         text: { type: "string", description: "The comment body." },
-        author: { type: "string", description: "Who is writing. Defaults to your own board codename." },
+        author: { type: "string", description: "Who is writing. Leave it out: the board signs it as you." },
       },
       required: ["cardId", "text"],
     },
     async run(args, ctx) {
-      const body = { cardId: str(args, "cardId"), author: optionalStr(args, "author") ?? (await authorFor(ctx)), text: str(args, "text") };
+      const cardId = str(args, "cardId");
+      const body = { cardId, text: str(args, "text"), ...(await signatureFor(ctx, cardId, optionalStr(args, "author"))) };
       await request(ctx, "POST", "/action/card-comment", body);
       return `Commented on ${body.cardId}.`;
     },

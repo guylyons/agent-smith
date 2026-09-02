@@ -202,3 +202,41 @@ test("SessionStart resets stateSince even when the state string matches", () => 
   const b = applyEvent(a, start as any, 8000)!;    // a fresh session, also working
   expect(b.stateSince).toBe(8000);
 });
+
+// ---- Stop: drain the board inbox and hand it back as the reason to go on ---
+// Board events that arrived while the session was busy wait in the server's
+// inbox. On Stop the hook collects them and, if there are any, answers Claude
+// Code with a block decision whose reason is the batch — so the agent reads
+// them as its next instruction without anything being typed into its pty.
+
+import { stopDecision, drainInbox } from "../hooks/status";
+
+test("stopDecision with nothing queued lets the turn end", () => {
+  expect(stopDecision([])).toBeNull();
+});
+
+test("stopDecision with queued items blocks the stop and carries them as the reason", () => {
+  const d = stopDecision(["[THE LINE] You commented on \"T\":\nhello", "[THE LINE] You moved \"T\" to \"in-progress\"."]);
+  expect(d!.decision).toBe("block");
+  expect(d!.reason).toContain("hello");
+  expect(d!.reason).toContain("in-progress");
+  expect(d!.reason.startsWith("Board notifications arrived while you were working")).toBe(true);
+});
+
+test("drainInbox asks the dashboard for this session's items and returns them", async () => {
+  const calls: { url: string; body: any }[] = [];
+  const fetchFn = (async (url: string, init: any) => {
+    calls.push({ url, body: JSON.parse(init.body) });
+    return new Response(JSON.stringify({ ok: true, items: ["a", "b"] }), { status: 200 });
+  }) as unknown as typeof fetch;
+  expect(await drainInbox("http://localhost:4173", "s1", fetchFn)).toEqual(["a", "b"]);
+  expect(calls[0]!.url).toBe("http://localhost:4173/action/inbox-drain");
+  expect(calls[0]!.body).toEqual({ sessionId: "s1" });
+});
+
+test("drainInbox returns nothing when the dashboard is down or answers badly", async () => {
+  const down = (async () => { throw new Error("ECONNREFUSED"); }) as unknown as typeof fetch;
+  expect(await drainInbox("http://localhost:4173", "s1", down)).toEqual([]);
+  const bad = (async () => new Response("nope", { status: 500 })) as unknown as typeof fetch;
+  expect(await drainInbox("http://localhost:4173", "s1", bad)).toEqual([]);
+});

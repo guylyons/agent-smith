@@ -6,7 +6,7 @@
 // panels tell the same story twice.
 
 import type { AgentStatus } from "../schema";
-import { DONE_COLUMN_ID, type Board } from "./board";
+import { isDoneColumn, type Board } from "./board";
 import { fleetUsage } from "./usage";
 
 /** Weapon slots on DOOM's ARMS panel — the fleet gets one per agent. */
@@ -66,7 +66,7 @@ export function hudStats(agents: AgentStatus[], board: Board): HudStats {
   // below, so a board that reorders its columns can't hide the one number that
   // says how much work is actually finished.
   const total = board.cards.length;
-  const done = board.cards.filter((c) => c.columnId === DONE_COLUMN_ID).length;
+  const done = board.cards.filter((c) => isDoneColumn(board, c.columnId)).length;
   const armor = total > 0 ? Math.round((done / total) * 100) : 0;
 
   const table = board.columns.slice(0, TABLE_ROWS).map((col) => ({

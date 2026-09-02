@@ -1,5 +1,5 @@
 import type { AgentStatus } from "../schema";
-import { DONE_COLUMN_ID, type Board } from "../lib/board";
+import { isDoneColumn, type Board } from "../lib/board";
 
 // Which cue to play. Kept separate from the WebAudio synth (sounds.ts) so this
 // transition logic stays pure and unit-testable.
@@ -51,9 +51,6 @@ export type PrevCols = Map<string, string>;
 export type CardMove = { cardId: string; title: string; from: string; to: string };
 export type BoardMoveDiff = { moves: CardMove[]; next: PrevCols };
 
-// Re-exported from the board module, which owns the id it names.
-export { DONE_COLUMN_ID };
-
 /**
  * Diff the previous per-card columns against the current board and report which
  * cards changed column. Pure — no audio, no DOM — so the caller (Notifier) maps
@@ -78,7 +75,7 @@ export function boardMoves(prev: PrevCols, board: Board, primed: boolean): Board
   return { moves, next };
 }
 
-/** A move that finishes a task — into the done column. */
-export function isCompletion(move: CardMove): boolean {
-  return move.to === DONE_COLUMN_ID;
+/** A move that finishes a task — into a column whose stage is done. */
+export function isCompletion(move: CardMove, board: Board): boolean {
+  return isDoneColumn(board, move.to);
 }

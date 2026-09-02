@@ -29,12 +29,22 @@ export type Card = {
   assignee?: Assignee | null;
   comments?: Comment[];
 };
-export type Column = { id: string; name: string; instruction: string };
+/** What a column MEANS to the protocol, independent of where it sits. `todo`
+ *  is where new cards wait, `doing` is where an agent works, `review` is where
+ *  finished work lands for a human, `done` is finished. A column with no stage
+ *  (a user's "Merged", "Archived") is just a place cards can be put. */
+export type Stage = "todo" | "doing" | "review" | "done";
+export const STAGES: readonly Stage[] = ["todo", "doing", "review", "done"];
+export type Column = { id: string; name: string; instruction: string; stage?: Stage };
 export type Board = { columns: Column[]; cards: Card[] };
 
-// The column a completed card lands in — a move INTO it finishes a task. Lives
-// here beside defaultBoard, which is what makes the id "done" true.
+// The stock Done column's id. Kept for the default board; anything deciding
+// whether a column is "done" should ask isDoneColumn, which keys off the stage.
 export const DONE_COLUMN_ID = "done";
+
+/** The stage a stock column id implies, for boards written before stages
+ *  existed. Only the four ids defaultBoard mints are recognised. */
+const LEGACY_STAGE: Record<string, Stage> = { backlog: "todo", "in-progress": "doing", review: "review", done: "done" };
 
 const VERSION = 3;
 
@@ -47,14 +57,15 @@ function genId(prefix: string): string {
 export function defaultBoard(): Board {
   return {
     columns: [
-      { id: "backlog", name: "Backlog", instruction: "" },
-      { id: "in-progress", name: "In Progress", instruction: "" },
-      { id: "review", name: "Review", instruction: "" },
+      { id: "backlog", name: "Backlog", instruction: "", stage: "todo" },
+      { id: "in-progress", name: "In Progress", instruction: "", stage: "doing" },
+      { id: "review", name: "Review", instruction: "", stage: "review" },
       {
         id: DONE_COLUMN_ID,
         name: "Done",
         instruction:
           "Once done, ensure the worktree is clean and committed, then share a report in the ticket.",
+        stage: "done",
       },
     ],
     cards: [],
@@ -74,6 +85,36 @@ export function renameColumn(board: Board, id: string, name: string): Board {
 
 export function setInstruction(board: Board, id: string, instruction: string): Board {
   return { ...board, columns: board.columns.map((c) => (c.id === id ? { ...c, instruction } : c)) };
+}
+
+/** Set what a column means to the protocol, or clear it with `null`. */
+export function setColumnStage(board: Board, id: string, stage: Stage | null): Board {
+  return {
+    ...board,
+    columns: board.columns.map((c) => {
+      if (c.id !== id) return c;
+      const { stage: _old, ...rest } = c;
+      return stage ? { ...rest, stage } : rest;
+    }),
+  };
+}
+
+/** A column's stage: explicit, or implied by a stock id (so a board built by
+ *  hand from the four stock columns behaves like one that went through
+ *  sanitizeColumn). */
+export function columnStage(col: Column): Stage | undefined {
+  return col.stage ?? LEGACY_STAGE[col.id];
+}
+
+/** The first column carrying `stage`, if the board has one. */
+export function stageColumn(board: Board, stage: Stage): Column | undefined {
+  return board.columns.find((c) => columnStage(c) === stage);
+}
+
+/** Is a move INTO this column what finishes a task? */
+export function isDoneColumn(board: Board, columnId: string): boolean {
+  const col = board.columns.find((c) => c.id === columnId);
+  return !!col && columnStage(col) === "done";
 }
 
 export function deleteColumn(board: Board, id: string): Board {
@@ -174,19 +215,6 @@ export function cardTaskText(board: Board, id: string): string {
     .join("\n\n");
 }
 
-/** The message delivered to a card's assigned agent when a human posts a comment
- *  on it: a header line naming the card so the agent can correlate the note to
- *  the ticket, then the comment body. Returns "" if the comment is blank or the
- *  card is unknown, so callers can skip an empty send. */
-export function commentNotifyText(board: Board, id: string, text: string): string {
-  const body = text.trim();
-  if (!body) return "";
-  const card = board.cards.find((k) => k.id === id);
-  if (!card) return "";
-  const title = card.title.trim() || "(untitled card)";
-  return `[THE LINE] New comment on "${title}":\n${body}`;
-}
-
 /** The full prompt handed to an assigned agent: the card's task text, then a
  *  protocol footer telling it which card it is on and how to drive its own
  *  ticket over the dashboard's HTTP API — move to the next column, comment as
@@ -207,18 +235,30 @@ export function cardTaskPrompt(board: Board, id: string, server: string, agentNa
   if (!card) return "";
   const flow = board.columns.map((c) => c.id).join(" -> ");
   const here = board.columns.find((c) => c.id === card.columnId);
-  // Columns are user-editable, so "where next" is positional: the column after
-  // this one is where the work happens, the one after that is where it lands.
-  const at = board.columns.findIndex((c) => c.id === card.columnId);
-  const start = board.columns[at + 1] ?? here;
-  const finish = board.columns[at + 2] ?? start;
-  // The board shows the agent under its own codename, so comments should carry
-  // that name to line up with the desk. Only SEND TASK knows it — a card being
-  // spawned for has no session yet, so that case tells the agent to use its own.
+  const { work, land } = taskColumns(board, card);
+  // The board shows the agent under its own codename; the identity line carries
+  // it when known. Writes are signed `"as":"assignee"` regardless: the server
+  // resolves that to the card's assignee at write time, so a renamed desk or a
+  // persona whose name differs from its desk can never mis-sign a comment.
   const who = agentName ? `, ${agentName}` : "";
-  const author = agentName ?? "<your name>";
   const post = (path: string, json: string) =>
     `  curl -s -X POST ${server}${path} -H 'content-type: application/json' -d '${json}'`;
+  const comment = (text: string) => post("/action/card-comment", `{"cardId":"${card.id}","as":"assignee","text":"${text}"}`);
+
+  // STEP 1 is a move only when the card isn't already where work happens — a
+  // task re-sent to a card in progress must not push it forward before starting.
+  const step1 = work.id === card.columnId
+    ? [
+        `STEP 1, before any other work: this card is already in "${work.id}", so leave it`,
+        "there and say you picked it up (or resumed it):",
+        comment("Picked this up. <one line on your plan>"),
+      ]
+    : [
+        `STEP 1, before any other work, move this card to "${work.id}" and say you`,
+        "picked it up:",
+        post("/action/card-move", `{"cardId":"${card.id}","as":"assignee","toColumnId":"${work.id}"}`),
+        comment("Picked this up. <one line on your plan>"),
+      ];
 
   const footer = [
     "-- THE LINE --",
@@ -232,18 +272,19 @@ export function cardTaskPrompt(board: Board, id: string, server: string, agentNa
     "If you have the-line MCP tools (mcp__the-line__card_move, card_comment,",
     "board_read, ...), use those instead -- same board, same effect, no curl.",
     "",
-    `STEP 1, before any other work, move this card to "${start?.id ?? card.columnId}" and say you`,
-    "picked it up:",
-    post("/action/card-move", `{"cardId":"${card.id}","toColumnId":"${start?.id ?? card.columnId}","author":"${author}"}`),
-    post("/action/card-comment", `{"cardId":"${card.id}","author":"${author}","text":"Picked this up. <one line on your plan>"}`),
+    ...step1,
     "STEP 2: do the work. Whenever you find or decide something worth knowing,",
     "post it as a card-comment (same shape as above). Keep comments plain and",
     "short -- write like a quick note to a busy teammate, no jargon or filler,",
     "unless this card asks for more detail.",
     "STEP 3, when the work is done: post a final card-comment saying what you did",
-    `and how you verified it, then move the card to "${finish?.id ?? card.columnId}" (card-move with`,
-    `{"toColumnId":"${finish?.id ?? card.columnId}"}). Each column's instruction says what that stage`,
+    `and how you verified it, then move the card to "${land.id}" (card-move with`,
+    `{"toColumnId":"${land.id}"}). Each column's instruction says what that stage`,
     "expects of work landing in it.",
+    "",
+    'A message starting with "[THE LINE]" is a board notification. One that says',
+    "a reply is expected: answer it on the card with a card-comment. One marked",
+    "no reply needed: read it and carry on; comment only if it changes your work.",
     "",
     "Scope: work ONLY this card. Never touch other cards or columns, and follow",
     "this card's constraints exactly (if it says do not commit, do not commit).",
@@ -254,6 +295,27 @@ export function cardTaskPrompt(board: Board, id: string, server: string, agentNa
   ].join("\n");
 
   return [cardTaskText(board, id), footer].filter(Boolean).join("\n\n");
+}
+
+/** Where a card's work happens and where it lands when finished. Keyed off the
+ *  column stages when the board has them: work in `doing`, land in `review`
+ *  (or `done` when there is no review stage). A board with no stages at all
+ *  falls back to the old positional rule: the column after this one, then the
+ *  one after that, clamped at the end. */
+function taskColumns(board: Board, card: Card): { work: Column; land: Column } {
+  const here = board.columns.find((c) => c.id === card.columnId) ?? board.columns[0]!;
+  const doing = stageColumn(board, "doing");
+  const review = stageColumn(board, "review");
+  const done = stageColumn(board, "done");
+  if (doing || review || done) {
+    const work = doing ?? here;
+    const land = review ?? done ?? work;
+    return { work, land };
+  }
+  const at = board.columns.findIndex((c) => c.id === card.columnId);
+  const work = board.columns[at + 1] ?? here;
+  const land = board.columns[at + 2] ?? work;
+  return { work, land };
 }
 
 /** Move a card into `toColumnId`. Without `toIndex` it appends; with one it
@@ -370,7 +432,12 @@ export function sanitizeColumn(v: unknown): Column | null {
   const id = str(o.id);
   const name = str(o.name);
   if (id === null || name === null) return null;
-  return { id, name, instruction: str(o.instruction) ?? "" };
+  const col: Column = { id, name, instruction: str(o.instruction) ?? "" };
+  // An explicit stage wins; a stock id from before stages existed implies one,
+  // so an old board picks up the protocol without anyone editing it.
+  const stage = (STAGES as readonly string[]).includes(o.stage as string) ? (o.stage as Stage) : LEGACY_STAGE[id];
+  if (stage) col.stage = stage;
+  return col;
 }
 
 /** Repair one card: needs a string id, title and columnId; optional detail is

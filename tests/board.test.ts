@@ -22,8 +22,11 @@ import {
   addComment,
   deleteComment,
   cardTaskText,
-  commentNotifyText,
   cardTaskPrompt,
+  sanitizeColumn,
+  setColumnStage,
+  stageColumn,
+  isDoneColumn,
   readBoard,
   writeBoard,
   type Board,
@@ -369,41 +372,11 @@ test("cardTaskText returns empty string for an unknown card", () => {
   expect(cardTaskText(defaultBoard(), "nope")).toBe("");
 });
 
-// ---- commentNotifyText: the message pushed to a card's assigned agent ------
 
-test("commentNotifyText labels the comment with the card title", () => {
-  let b = defaultBoard();
-  b = addCard(b, b.columns[0]!.id, "Fix login bug");
-  const id = b.cards[0]!.id;
-  expect(commentNotifyText(b, id, "please cover the SSO case")).toBe(
-    '[THE LINE] New comment on "Fix login bug":\nplease cover the SSO case',
-  );
-});
 
-test("commentNotifyText trims the comment body", () => {
-  let b = defaultBoard();
-  b = addCard(b, b.columns[0]!.id, "Card A");
-  const id = b.cards[0]!.id;
-  expect(commentNotifyText(b, id, "  hi  ")).toBe('[THE LINE] New comment on "Card A":\nhi');
-});
 
-test("commentNotifyText returns empty string for a blank comment", () => {
-  let b = defaultBoard();
-  b = addCard(b, b.columns[0]!.id, "Card A");
-  expect(commentNotifyText(b, b.cards[0]!.id, "   ")).toBe("");
-});
 
-test("commentNotifyText returns empty string for an unknown card", () => {
-  expect(commentNotifyText(defaultBoard(), "nope", "hello")).toBe("");
-});
 
-test("commentNotifyText falls back to a placeholder for an untitled card", () => {
-  let b = defaultBoard();
-  b = addCard(b, b.columns[0]!.id, "temp");
-  const id = b.cards[0]!.id;
-  b = renameCard(b, id, "   ");
-  expect(commentNotifyText(b, id, "note")).toBe('[THE LINE] New comment on "(untitled card)":\nnote');
-});
 
 // ---- assignee must be a live agent session, never a persona ---------------
 // Cards used to be assigned to a persona (`backend-dev`, `frontend-ux`, …).
@@ -490,14 +463,15 @@ test("cardTaskPrompt names where to start and where to land, positionally", () =
   expect(p).toContain('{"toColumnId":"review"}');
 });
 
-test("cardTaskPrompt clamps to the last column when there's nowhere further", () => {
-  let b = defaultBoard();
-  b = addCard(b, "done", "Fix login bug");
-  const id = b.cards[0]!.id;
-  const p = cardTaskPrompt(b, id, SRV);
+test("cardTaskPrompt clamps to the last column when a stageless board has nowhere further", () => {
+  const b: Board = {
+    columns: [{ id: "a", name: "A", instruction: "" }, { id: "z", name: "Z", instruction: "" }],
+    cards: [{ id: "k", title: "T", columnId: "z" }],
+  };
+  const p = cardTaskPrompt(b, "k", SRV);
   // last column: both the start and the finish clamp to where it already is
-  expect(p).toContain(`move this card to "done"`);
-  expect(p).toContain('{"toColumnId":"done"}');
+  expect(p).toContain(`already in "z"`);
+  expect(p).toContain('{"toColumnId":"z"}');
 });
 
 test("cardTaskPrompt gives runnable curl calls for move and comment", () => {
@@ -523,14 +497,14 @@ test("cardTaskPrompt names the agent so its comments match its desk", () => {
   b = addCard(b, "backlog", "Fix login bug");
   const p = cardTaskPrompt(b, b.cards[0]!.id, SRV, "VOLT");
   expect(p).toContain("assigned agent on this card, VOLT");
-  expect(p).toContain('"author":"VOLT"');
 });
 
-test("cardTaskPrompt falls back to a placeholder author when spawning", () => {
+test("cardTaskPrompt without a name (spawning) still signs as the assignee", () => {
   let b = defaultBoard();
   b = addCard(b, "backlog", "Fix login bug");
   const p = cardTaskPrompt(b, b.cards[0]!.id, SRV);
-  expect(p).toContain('"author":"<your name>"');
+  expect(p).toContain("assigned agent on this card.");
+  expect(p).toContain('"as":"assignee"');
 });
 
 test("cardTaskPrompt demands the move happen first and comments along the way", () => {
@@ -664,4 +638,103 @@ test("cardMoveTarget lands past the end of a shorter column rather than vanishin
 test("cardMoveTarget returns null for an unknown card", () => {
   const { b } = threeColumnBoard();
   expect(cardMoveTarget(b, "card_nope", "right")).toBeNull();
+});
+
+// ---- column stages: what a column MEANS, not where it sits ---------------
+// The footer used to be positional (the column after this one is where work
+// happens, the one after that is where it lands). A card re-sent from In
+// Progress was therefore told to move to Review before starting, and a board
+// with columns added after Done broke every "the one before last" rule. Each
+// column now carries an explicit stage the protocol keys off.
+
+test("defaultBoard marks its columns with the four stages", () => {
+  expect(defaultBoard().columns.map((c) => c.stage)).toEqual(["todo", "doing", "review", "done"]);
+});
+
+test("sanitizeColumn keeps a valid stage and drops an unknown one", () => {
+  expect(sanitizeColumn({ id: "x", name: "X", stage: "doing" })!.stage).toBe("doing");
+  expect(sanitizeColumn({ id: "x", name: "X", stage: "bogus" })!.stage).toBeUndefined();
+});
+
+test("sanitizeColumn infers a stage from the stock column ids (migrates old boards)", () => {
+  expect(sanitizeColumn({ id: "backlog", name: "B" })!.stage).toBe("todo");
+  expect(sanitizeColumn({ id: "in-progress", name: "B" })!.stage).toBe("doing");
+  expect(sanitizeColumn({ id: "review", name: "B" })!.stage).toBe("review");
+  expect(sanitizeColumn({ id: "done", name: "B" })!.stage).toBe("done");
+  expect(sanitizeColumn({ id: "col_abc", name: "Merged" })!.stage).toBeUndefined();
+});
+
+test("setColumnStage sets or clears a column's stage", () => {
+  let b = addColumn(defaultBoard(), "Merged");
+  const id = b.columns[4]!.id;
+  b = setColumnStage(b, id, "done");
+  expect(b.columns[4]!.stage).toBe("done");
+  b = setColumnStage(b, id, null);
+  expect(b.columns[4]!.stage).toBeUndefined();
+});
+
+test("stageColumn finds the first column of a stage, and isDoneColumn keys off the stage", () => {
+  let b = addColumn(defaultBoard(), "Merged");
+  const merged = b.columns[4]!.id;
+  expect(stageColumn(b, "done")!.id).toBe("done");
+  expect(isDoneColumn(b, "done")).toBe(true);
+  expect(isDoneColumn(b, merged)).toBe(false);
+  b = setColumnStage(b, merged, "done");
+  expect(isDoneColumn(b, merged)).toBe(true);
+});
+
+test("cardTaskPrompt keys start and finish off the stages, not the positions", () => {
+  // A Triage column wedged in after Backlog: positionally it would be "start".
+  let b = defaultBoard();
+  b = { ...b, columns: [b.columns[0]!, { id: "triage", name: "Triage", instruction: "" }, ...b.columns.slice(1)] };
+  b = addCard(b, "backlog", "Fix login bug");
+  const p = cardTaskPrompt(b, b.cards[0]!.id, SRV);
+  expect(p).toContain('move this card to "in-progress"');
+  expect(p).toContain('{"toColumnId":"review"}');
+  expect(p).not.toContain('"triage"');
+});
+
+test("cardTaskPrompt re-sent to a card already in the doing stage tells it to stay put", () => {
+  let b = addCard(defaultBoard(), "backlog", "Fix login bug");
+  const id = b.cards[0]!.id;
+  b = moveCard(b, id, "in-progress");
+  const p = cardTaskPrompt(b, id, SRV);
+  expect(p).not.toContain('move this card to "review"');
+  expect(p).toContain('already in "in-progress"');
+  expect(p).toContain('{"toColumnId":"review"}'); // finishing still lands in review
+});
+
+test("cardTaskPrompt re-sent to a card in review sends it back to the doing stage", () => {
+  let b = addCard(defaultBoard(), "backlog", "Fix login bug");
+  const id = b.cards[0]!.id;
+  b = moveCard(b, id, "review");
+  const p = cardTaskPrompt(b, id, SRV);
+  expect(p).toContain('move this card to "in-progress"');
+});
+
+test("cardTaskPrompt lands in done when the board has no review stage", () => {
+  let b = defaultBoard();
+  b = deleteColumn(b, "review");
+  b = addCard(b, "backlog", "Fix login bug");
+  const p = cardTaskPrompt(b, b.cards[0]!.id, SRV);
+  expect(p).toContain('{"toColumnId":"done"}');
+});
+
+test("cardTaskPrompt falls back to positions on a board with no stages at all", () => {
+  const b: Board = {
+    columns: [{ id: "a", name: "A", instruction: "" }, { id: "b", name: "B", instruction: "" }, { id: "c", name: "C", instruction: "" }],
+    cards: [{ id: "k", title: "T", columnId: "a" }],
+  };
+  const p = cardTaskPrompt(b, "k", SRV);
+  expect(p).toContain('move this card to "b"');
+  expect(p).toContain('{"toColumnId":"c"}');
+});
+
+test("cardTaskPrompt signs writes as the card's assignee, never a typed name", () => {
+  const b = addCard(defaultBoard(), "backlog", "Fix login bug");
+  const p = cardTaskPrompt(b, b.cards[0]!.id, SRV, "VOLT");
+  expect(p).toContain('"as":"assignee"');
+  expect(p).not.toContain('"author":"VOLT"');
+  expect(p).not.toContain("<your name>");
+  expect(p).toContain("assigned agent on this card, VOLT");
 });

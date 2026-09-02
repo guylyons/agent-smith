@@ -201,8 +201,13 @@ test("readSnapshot: a name override on a persona'd agent wins the name but not t
 });
 
 test("scan:true runs a pass and stop() cleans up without leaking a timer", async () => {
-  reset();
-  process.env.AGENT_STATUS_DIR = dir;
+  // Its OWN status dir: a scan pass (ps, lsof, osascript) can outlive stop(),
+  // and its cleanup deletes pid-less status files — which would wipe the agents
+  // a later test writes into the shared dir, minutes of confusion later.
+  const scanDir = "/tmp/aw-server-test-scan";
+  rmSync(scanDir, { recursive: true, force: true });
+  mkdirSync(scanDir, { recursive: true });
+  process.env.AGENT_STATUS_DIR = scanDir;
   // point the scanner at an empty projects dir so it doesn't touch ~/.claude
   const empty = "/tmp/aw-server-test-empty-projects";
   rmSync(empty, { recursive: true, force: true });
@@ -214,7 +219,8 @@ test("scan:true runs a pass and stop() cleans up without leaking a timer", async
   await new Promise((r) => setTimeout(r, 160));
   server.stop(true); // must clear the scan interval; if it didn't, the test process would hang
   // a scan over an empty projects dir writes nothing
-  expect(readSnapshot(dir, Date.now()).agents).toEqual([]);
+  expect(readSnapshot(scanDir, Date.now()).agents).toEqual([]);
+  process.env.AGENT_STATUS_DIR = dir;
 });
 
 // ---- the card-scoped agent API -------------------------------------------
@@ -359,13 +365,16 @@ test("card-assign binds a just-spawned session even before it enters the live vi
 const WORKER = "502d0e8c-8790-4804-b767-0549edfc959c";
 const SCRUM = "9a1b2c3d-1111-4222-8333-444455556666";
 
-async function notifyServer() {
+async function notifyServer(opts: { deliverOk?: boolean } = {}) {
   reset();
   process.env.AGENT_STATUS_DIR = dir;
   const sent: { sessionId: string; text: string; fresh: boolean }[] = [];
   const { makeServer } = await import("../src/server");
   const server = makeServer(0, {
-    deliver: async (target: any, text: string) => { sent.push({ sessionId: target.sessionId, text, fresh: false }); return { ok: true }; },
+    deliver: async (target: any, text: string) => {
+      if (opts.deliverOk === false) return { ok: false, error: "no terminal" };
+      sent.push({ sessionId: target.sessionId, text, fresh: false }); return { ok: true };
+    },
     deliverFresh: async (target: any, text: string) => { sent.push({ sessionId: target.sessionId, text, fresh: true }); return { ok: true }; },
   });
   const base = `http://localhost:${server.port}`;
@@ -380,7 +389,7 @@ async function notifyServer() {
 
 test("send-task delivers the protocol prompt to the assigned live session", async () => {
   const { server, base, post, sent } = await notifyServer();
-  writeFileSync(join(dir, `${WORKER}.json`), valid({ sessionId: WORKER, name: "VOLT" }));
+  writeFileSync(join(dir, `${WORKER}.json`), valid({ sessionId: WORKER, name: "VOLT", state: "idle" }));
   const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "Fix bug" })).json()) as any;
   await post("/action/card-assign", { cardId, sessionId: WORKER });
   const res = await post("/action/send-task", { cardId });
@@ -391,7 +400,8 @@ test("send-task delivers the protocol prompt to the assigned live session", asyn
   expect(sent[0]!.text).toContain("Fix bug");
   expect(sent[0]!.text).toContain(cardId);
   expect(sent[0]!.text).toContain(`${base}/action/card-move`); // curl target is this server
-  expect(sent[0]!.text).toContain('"author":"VOLT"');
+  expect(sent[0]!.text).toContain('"as":"assignee"');
+  expect(sent[0]!.text).toContain("assigned agent on this card, VOLT");
   // and the thread records the send
   const card = readSnapshot(dir, Date.now()).board.cards[0]!;
   expect(card.comments!.some((c) => c.text.includes("Sent task to VOLT"))).toBe(true);
@@ -408,8 +418,8 @@ test("send-task without a live assignee is refused", async () => {
 
 test("a worker's card-comment wakes the scrum master, not the worker itself", async () => {
   const { server, post, sent } = await notifyServer();
-  writeFileSync(join(dir, `${WORKER}.json`), valid({ sessionId: WORKER, name: "VOLT" }));
-  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master" }));
+  writeFileSync(join(dir, `${WORKER}.json`), valid({ sessionId: WORKER, name: "VOLT", state: "idle" }));
+  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", state: "idle" }));
   const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "Fix bug" })).json()) as any;
   await post("/action/card-assign", { cardId, sessionId: WORKER });
   sent.length = 0;
@@ -423,8 +433,8 @@ test("a worker's card-comment wakes the scrum master, not the worker itself", as
 
 test("a scrum master's card-comment wakes the assignee, not itself", async () => {
   const { server, post, sent } = await notifyServer();
-  writeFileSync(join(dir, `${WORKER}.json`), valid({ sessionId: WORKER, name: "VOLT" }));
-  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master" }));
+  writeFileSync(join(dir, `${WORKER}.json`), valid({ sessionId: WORKER, name: "VOLT", state: "idle" }));
+  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", state: "idle" }));
   const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "Fix bug" })).json()) as any;
   await post("/action/card-assign", { cardId, sessionId: WORKER });
   sent.length = 0;
@@ -437,7 +447,7 @@ test("a scrum master's card-comment wakes the assignee, not itself", async () =>
 
 test("a worker's card-move wakes the scrum master", async () => {
   const { server, post, sent } = await notifyServer();
-  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master" }));
+  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", state: "idle" }));
   const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "Fix bug" })).json()) as any;
   sent.length = 0;
   await post("/action/card-move", { cardId, toColumnId: "review", author: "VOLT" });
@@ -464,14 +474,192 @@ test("card ops without any scrum master or assignee deliver nothing", async () =
 // pending actions), and confused scrum-masters spawning scrum-masters
 // exponentially. These lock both doors.
 
-test("no notification is delivered to a session that is waiting on a dialog", async () => {
+test("nothing is typed into a session that is waiting on a dialog; it is queued instead", async () => {
   const { server, post, sent } = await notifyServer();
   writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", state: "waiting" }));
   const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
   sent.length = 0;
-  await post("/action/card-comment", { cardId, author: "VOLT", text: "update" });
+  const r = (await (await post("/action/card-comment", { cardId, author: "VOLT", text: "update" })).json()) as any;
   await post("/action/card-move", { cardId, toColumnId: "review", author: "VOLT" });
   expect(sent).toEqual([]);
+  expect(r.delivery).toEqual([{ sessionId: SCRUM, name: "CADENCE", via: "queued" }]);
+  server.stop(true);
+});
+
+// ---- the inbox: events for a busy session wait for its turn to end --------
+// Typing into a working session races its next permission prompt, and typing
+// into a waiting one presses keys on the dialog. So only an IDLE session is
+// typed at; everything else queues, and the session's Stop hook drains the
+// queue as the turn ends (the same idea as a queued message, minus the pty).
+
+test("an event for a working session is queued and drained by its Stop hook", async () => {
+  const { server, post, sent } = await notifyServer();
+  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", state: "working" }));
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
+  sent.length = 0;
+  await post("/action/card-comment", { cardId, author: "VOLT", text: "first" });
+  await post("/action/card-comment", { cardId, author: "VOLT", text: "second" });
+  expect(sent).toEqual([]);
+  // the snapshot shows the backlog, so the human can see it is waiting to land
+  const agents = ((await (await fetch(`http://localhost:${server.port}/agents`)).json()) as any).agents;
+  expect(agents.find((a: any) => a.sessionId === SCRUM).inbox).toBe(2);
+  const drained = (await (await post("/action/inbox-drain", { sessionId: SCRUM })).json()) as any;
+  expect(drained.ok).toBe(true);
+  expect(drained.items.length).toBe(2);
+  expect(drained.items[0]).toContain("first");
+  expect(drained.items[1]).toContain("second");
+  // drained means gone
+  expect(((await (await post("/action/inbox-drain", { sessionId: SCRUM })).json()) as any).items).toEqual([]);
+  server.stop(true);
+});
+
+test("a typed delivery that fails falls back to the queue rather than vanishing", async () => {
+  const { server, post, sent } = await notifyServer({ deliverOk: false });
+  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", state: "idle" }));
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
+  const r = (await (await post("/action/card-comment", { cardId, author: "VOLT", text: "note" })).json()) as any;
+  expect(sent).toEqual([]);
+  expect(r.delivery).toEqual([{ sessionId: SCRUM, name: "CADENCE", via: "queued" }]);
+  expect(((await (await post("/action/inbox-drain", { sessionId: SCRUM })).json()) as any).items.length).toBe(1);
+  server.stop(true);
+});
+
+test("a queued item is typed as soon as the session turns idle (no-hook fallback)", async () => {
+  const { server, post, sent } = await notifyServer();
+  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", state: "working" }));
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
+  sent.length = 0;
+  await post("/action/card-comment", { cardId, author: "VOLT", text: "note" });
+  expect(sent).toEqual([]);
+  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", state: "idle" }));
+  // the fs watcher (debounced) notices the file and the next push flushes
+  for (let i = 0; i < 40 && sent.length === 0; i++) await new Promise((r) => setTimeout(r, 50));
+  expect(sent.map((s) => s.sessionId)).toEqual([SCRUM]);
+  expect(sent[0]!.text).toContain("note");
+  expect(((await (await post("/action/inbox-drain", { sessionId: SCRUM })).json()) as any).items).toEqual([]);
+  server.stop(true);
+});
+
+// ---- identity: a write is signed by WHO the session is, not a typed name ---
+// Personas hardcode a name, desks get renamed, and the MCP fallback signs as
+// "Claude" — so name-matching mis-attributed comments and woke agents with
+// their own updates. `as: "assignee"` resolves to the card's assignee.
+
+test("a comment signed as: assignee carries the assignee's CURRENT desk name", async () => {
+  const { server, post } = await notifyServer();
+  writeFileSync(join(dir, `${WORKER}.json`), valid({ sessionId: WORKER, name: "PIXEL", state: "idle" }));
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
+  await post("/action/card-assign", { cardId, sessionId: WORKER });
+  setNameOverride(dir, WORKER, "Biff"); // renamed AFTER assignment
+  await post("/action/card-comment", { cardId, as: "assignee", text: "hello" });
+  const card = readSnapshot(dir, Date.now()).board.cards[0]!;
+  expect(card.comments!.at(-1)!.author).toBe("Biff");
+  server.stop(true);
+});
+
+test("a comment signed as: assignee on an unassigned card is refused", async () => {
+  const { server, post } = await notifyServer();
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
+  expect((await post("/action/card-comment", { cardId, as: "assignee", text: "hello" })).status).toBe(400);
+  server.stop(true);
+});
+
+test("an assignee signing as itself is never woken by its own update, whatever its persona says", async () => {
+  const { server, post, sent } = await notifyServer();
+  // desk name is PIXEL (persona), but the human renamed it Biff: the old
+  // name-based exclusion would have typed PIXEL's own comment back at it
+  writeFileSync(join(dir, `${WORKER}.json`), valid({ sessionId: WORKER, name: "PIXEL", state: "idle" }));
+  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", state: "idle" }));
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
+  await post("/action/card-assign", { cardId, sessionId: WORKER });
+  setNameOverride(dir, WORKER, "Biff");
+  sent.length = 0;
+  await post("/action/card-comment", { cardId, as: "assignee", text: "progress" });
+  await post("/action/card-move", { cardId, as: "assignee", toColumnId: "in-progress" });
+  expect(sent.map((s) => s.sessionId)).toEqual([SCRUM, SCRUM]);
+  expect(sent[0]!.text).toContain("Biff");
+  server.stop(true);
+});
+
+test("a write may also be signed by sessionId, resolving to that session's name", async () => {
+  const { server, post } = await notifyServer();
+  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", state: "idle" }));
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
+  await post("/action/card-comment", { cardId, sessionId: SCRUM, text: "from the orchestrator" });
+  const card = readSnapshot(dir, Date.now()).board.cards[0]!;
+  expect(card.comments!.at(-1)!.author).toBe("CADENCE");
+  expect((await post("/action/card-comment", { cardId, sessionId: "0000-nope", text: "x" })).status).toBe(404);
+  server.stop(true);
+});
+
+// ---- reply semantics: who is woken, and whether an answer is expected -------
+// Every notification used to demand a reply, so worker and scrum master
+// acknowledged each other's acknowledgements. Now a notification says which.
+
+test("a human's comment wakes the assignee expecting a reply, and the scrum master FYI", async () => {
+  const { server, post, sent } = await notifyServer();
+  writeFileSync(join(dir, `${WORKER}.json`), valid({ sessionId: WORKER, name: "VOLT", state: "idle" }));
+  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", state: "idle" }));
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
+  await post("/action/card-assign", { cardId, sessionId: WORKER });
+  sent.length = 0;
+  await post("/action/card-comment", { cardId, author: "You", text: "is this done?" });
+  const toWorker = sent.find((s) => s.sessionId === WORKER)!;
+  const toScrum = sent.find((s) => s.sessionId === SCRUM)!;
+  expect(toWorker.text).toContain("reply expected");
+  expect(toScrum.text).toContain("no reply needed");
+  server.stop(true);
+});
+
+test("an assignee's own comment reaches the scrum master as FYI, no reply needed", async () => {
+  const { server, post, sent } = await notifyServer();
+  writeFileSync(join(dir, `${WORKER}.json`), valid({ sessionId: WORKER, name: "VOLT", state: "idle" }));
+  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", state: "idle" }));
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
+  await post("/action/card-assign", { cardId, sessionId: WORKER });
+  sent.length = 0;
+  await post("/action/card-comment", { cardId, as: "assignee", text: "done, verified" });
+  expect(sent.map((s) => s.sessionId)).toEqual([SCRUM]);
+  expect(sent[0]!.text).toContain("no reply needed");
+  server.stop(true);
+});
+
+test("a human moving a card FORWARD does not wake the assignee; moving it BACK does", async () => {
+  const { server, post, sent } = await notifyServer();
+  writeFileSync(join(dir, `${WORKER}.json`), valid({ sessionId: WORKER, name: "VOLT", state: "idle" }));
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
+  await post("/action/card-assign", { cardId, sessionId: WORKER });
+  await post("/action/card-move", { cardId, toColumnId: "review", author: "You" });
+  sent.length = 0;
+  await post("/action/card-move", { cardId, toColumnId: "done", author: "You" });
+  expect(sent).toEqual([]);
+  await post("/action/card-move", { cardId, toColumnId: "in-progress", author: "You" });
+  expect(sent.map((s) => s.sessionId)).toEqual([WORKER]);
+  expect(sent[0]!.text).toContain("reply expected");
+  server.stop(true);
+});
+
+test("send-task to a WORKING assignee is refused rather than clearing its context mid-task", async () => {
+  const { server, post, sent } = await notifyServer();
+  writeFileSync(join(dir, `${WORKER}.json`), valid({ sessionId: WORKER, name: "VOLT", state: "working" }));
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
+  await post("/action/card-assign", { cardId, sessionId: WORKER });
+  sent.length = 0;
+  const res = await post("/action/send-task", { cardId });
+  expect(res.status).toBe(409);
+  expect(((await res.json()) as any).error).toContain("working");
+  expect(sent).toEqual([]);
+  server.stop(true);
+});
+
+test("column-update sets and clears a column's stage", async () => {
+  const { server, post } = await notifyServer();
+  const { columnId } = (await (await post("/action/column-add", { name: "Merged" })).json()) as any;
+  await post("/action/column-update", { columnId, stage: "done" });
+  expect(readSnapshot(dir, Date.now()).board.columns.at(-1)!.stage).toBe("done");
+  await post("/action/column-update", { columnId, stage: null });
+  expect(readSnapshot(dir, Date.now()).board.columns.at(-1)!.stage).toBeUndefined();
+  expect((await post("/action/column-update", { columnId, stage: "bogus" })).status).toBe(400);
   server.stop(true);
 });
 

@@ -14,8 +14,11 @@
 // Environment:
 //   AGENT_WORKSHOP_URL     dashboard base URL (default http://localhost:4173)
 //   AGENT_WORKSHOP_AUTHOR  the name to sign comments and moves with (optional:
-//                          without it, the board codename of the agent running
-//                          in this folder is used)
+//                          without it, writes are signed by identity — as the
+//                          assignee of the card this session was spawned for,
+//                          else as the session running in this folder)
+//   AGENT_CARD             the card this session was spawned for (set by the
+//                          dashboard's spawn)
 import { handleMessage, type Api, type Ctx } from "./lib/mcp";
 
 const url = (process.env.AGENT_WORKSHOP_URL ?? "http://localhost:4173").replace(/\/+$/, "");
@@ -38,7 +41,11 @@ const api: Api = {
   },
 };
 
-const ctx: Ctx = { api, url, author, cwd: process.cwd() };
+// The card this session was spawned for, if any — inherited from the launch
+// env the same way the session's hooks inherit it.
+const card = process.env.AGENT_CARD?.trim() || undefined;
+
+const ctx: Ctx = { api, url, author, cwd: process.cwd(), card };
 
 // stdout carries the protocol and nothing else — anything we want to say goes
 // to stderr, or the client's parser breaks.

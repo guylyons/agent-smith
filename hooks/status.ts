@@ -122,6 +122,46 @@ function applyEventInner(prev: AgentStatus | null, e: HookEvent, now: number, pe
   }
 }
 
+// --- Stop: drain the board inbox -------------------------------------------
+
+/** What the hook answers Claude Code with on Stop, given the board events that
+ *  queued up while the session was busy. Nothing queued: null, the turn ends
+ *  as normal. Otherwise a block decision whose reason is the batch, so the
+ *  agent reads them as its next instruction — the same effect as a queued
+ *  message, without typing into the pty (which can't reach a session at a
+ *  dialog, and mangles anything non-ASCII). */
+export function stopDecision(items: string[]): { decision: "block"; reason: string } | null {
+  if (items.length === 0) return null;
+  const reason = [
+    "Board notifications arrived while you were working. Read them and act on",
+    "any that expect a reply; the ones marked no reply needed are FYI.",
+    "",
+    items.join("\n\n"),
+  ].join("\n");
+  return { decision: "block", reason };
+}
+
+/** Collect this session's queued board events from the dashboard. Best-effort
+ *  and quick: a dashboard that is down, slow, or answers badly yields nothing,
+ *  and the turn ends normally — the events are on the board regardless. */
+export async function drainInbox(base: string, sessionId: string, fetchFn: typeof fetch = fetch): Promise<string[]> {
+  try {
+    const res = await fetchFn(`${base}/action/inbox-drain`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionId }),
+      signal: AbortSignal.timeout(1500),
+    });
+    if (!res.ok) return [];
+    const body = (await res.json()) as { items?: unknown };
+    return Array.isArray(body.items) ? body.items.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+const DASHBOARD_URL = () => process.env.AGENT_WORKSHOP_URL || "http://localhost:4173";
+
 // --- I/O glue (not unit-tested; exercised in the integration smoke test) ---
 function resolveBranch(cwd: string): string | null {
   try {
@@ -169,8 +209,13 @@ async function main() {
       prev = null; // corrupt/partial prior status file; treat as fresh
     }
   }
-  const next = applyEvent(prev, e, Date.now(), process.env.AGENT_PERSONA);
+  let next = applyEvent(prev, e, Date.now(), process.env.AGENT_PERSONA);
   if (next === null) { rmSync(file, { force: true }); return; }
+  // A turn that is about to end may have board events waiting for it. Fetch
+  // them BEFORE writing the status, so a session that is sent back to work
+  // isn't recorded as idle in between.
+  const decision = e.hook_event_name === "Stop" ? stopDecision(await drainInbox(DASHBOARD_URL(), e.session_id)) : null;
+  if (decision) next = { ...next, state: "working", doing: "reading board notifications" };
   const { pid, tty } = resolveProcess();
   if (pid) next.pid = pid;
   if (tty) next.tty = tty;
@@ -194,6 +239,9 @@ async function main() {
   if (e.hook_event_name === "SessionStart" && process.env.AGENT_CARD) {
     await assignCardOnStart(process.env.AGENT_CARD, e.session_id);
   }
+  // Last, because stdout is the hook's answer: block the stop with the queued
+  // board events as the reason. Nothing printed means "carry on as normal".
+  if (decision) process.stdout.write(JSON.stringify(decision) + "\n");
 }
 
 /** POST the card-assign the dashboard couldn't do at spawn time. Fire-and-await
@@ -201,7 +249,7 @@ async function main() {
  *  throw — an unreachable dashboard just leaves the card unassigned, the same
  *  state as before. */
 async function assignCardOnStart(cardId: string, sessionId: string): Promise<void> {
-  const base = process.env.AGENT_WORKSHOP_URL || "http://localhost:4173";
+  const base = DASHBOARD_URL();
   // Retry a few times: a brand-new session can beat the dashboard to the punch
   // (server still starting, or our status file not yet surfaced). One swallowed
   // failure used to leave the card unassigned for the whole session — the

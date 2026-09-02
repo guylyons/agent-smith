@@ -546,6 +546,13 @@
   .col-name:hover{border-color:var(--bevel)}
   .col-name:focus{border-color:var(--gold);background:var(--night)}
   .col-name:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+  /* The stage picker: quiet until hovered, like the name beside it. */
+  .col-stage{
+    flex:0 0 auto;font-family:var(--mono);font-size:10px;letter-spacing:.5px;cursor:pointer;
+    color:var(--dim);background:transparent;border:2px solid transparent;padding:3px 2px;
+  }
+  .col-stage:hover{border-color:var(--bevel);color:var(--bone)}
+  .col-stage:focus{outline:none;border-color:var(--gold);background:var(--night);color:var(--bone)}
   /* Destructive, and previously a 17x15 target: sized to the 24px minimum so it
      can actually be hit. The focus ring comes from the shared :where(button…)
      rule in ROLLOVER — no need to repeat it here. */

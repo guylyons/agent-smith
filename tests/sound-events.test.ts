@@ -1,6 +1,7 @@
 import { test, expect } from "bun:test";
 import { soundTransitions, boardMoves, isCompletion } from "../src/ui/soundEvents";
 import type { AgentStatus } from "../src/schema";
+import { defaultBoard } from "../src/lib/board";
 import type { Board } from "../src/lib/board";
 
 const A = (o: Partial<AgentStatus>): AgentStatus => ({
@@ -124,6 +125,21 @@ test("a removed card is dropped from the carried-forward columns", () => {
 });
 
 test("isCompletion is true only for a move into the done column", () => {
-  expect(isCompletion({ cardId: "k", title: "t", from: "review", to: "done" })).toBe(true);
-  expect(isCompletion({ cardId: "k", title: "t", from: "backlog", to: "review" })).toBe(false);
+  const b = defaultBoard();
+  expect(isCompletion({ cardId: "k", title: "t", from: "review", to: "done" }, b)).toBe(true);
+  expect(isCompletion({ cardId: "k", title: "t", from: "backlog", to: "review" }, b)).toBe(false);
+});
+
+test("isCompletion keys off the column's stage, not the stock id", () => {
+  const b = {
+    columns: [
+      { id: "done", name: "Done", instruction: "", stage: "done" as const },
+      { id: "col_x", name: "Shipped", instruction: "", stage: "done" as const },
+      { id: "col_y", name: "Archived", instruction: "" },
+    ],
+    cards: [],
+  };
+  expect(isCompletion({ cardId: "k", title: "t", from: "a", to: "col_x" }, b)).toBe(true);
+  expect(isCompletion({ cardId: "k", title: "t", from: "a", to: "col_y" }, b)).toBe(false);
+  expect(isCompletion({ cardId: "k", title: "t", from: "a", to: "done" }, b)).toBe(true);
 });

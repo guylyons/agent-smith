@@ -8,7 +8,7 @@ import { matchChat } from "./lib/chatsearch";
 import type { ChatMessage } from "./lib/conversation";
 import { readOverrides, applyOverrides, setNameOverride, setSpriteOverride } from "./lib/overrides";
 import { loadPersonas, applyPersonas } from "./lib/personas";
-import { readBoard, writeBoard, sanitizeBoard, boardFile, addCard, moveCard, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, addColumn, renameColumn, setInstruction, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, sanitizeCard, sanitizeColumn, type Board, type Card, type Column } from "./lib/board";
+import { readBoard, writeBoard, sanitizeBoard, boardFile, addCard, moveCard, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, addColumn, renameColumn, setInstruction, setColumnStage, STAGES, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, sanitizeCard, sanitizeColumn, type Board, type Card, type Column, type Stage } from "./lib/board";
 import { ALLOWED_MODELS, ALLOWED_PERMISSION_MODES, focusSession, interruptSession, killAgent, sendPrompt, sendFreshPrompt, spawnAgent } from "./ghostty";
 import { readRepo } from "./repo";
 import { readMergeState, mergeWork } from "./lib/merge";
@@ -118,27 +118,118 @@ export function makeServer(
   } = opts;
   const dir = ensureStatusDir();
 
+  // ---- the inbox ----------------------------------------------------------
+  // Board events for a session that can't be typed at right now. Only an IDLE
+  // session is typed at: typing into a working one races its next permission
+  // prompt, and typing into a waiting one presses keys ON the dialog (a live
+  // run showed notifications auto-approving prompts, which cascaded into
+  // runaway spawns). Everything else queues here and is drained two ways: the
+  // session's Stop hook asks for it as the turn ends (POST /action/inbox-drain),
+  // and, for a session without hooks, the next snapshot that shows it idle
+  // types the backlog in. In memory only: the events are on the board anyway,
+  // so a restart loses nothing the agent can't re-read.
+  const inbox = new Map<string, string[]>();
+  const enqueue = (sessionId: string, text: string) => {
+    inbox.set(sessionId, [...(inbox.get(sessionId) ?? []), text]);
+  };
+  const drain = (sessionId: string): string[] => {
+    const items = inbox.get(sessionId) ?? [];
+    inbox.delete(sessionId);
+    return items;
+  };
+  /** The live view plus each session's queued count, so the human can see a
+   *  note is waiting to land rather than wondering whether it was heard. */
+  const snapshot = (): Snapshot => {
+    const snap = readSnapshot(dir, Date.now());
+    return {
+      ...snap,
+      agents: snap.agents.map((a) => {
+        const n = inbox.get(a.sessionId)?.length ?? 0;
+        return n ? { ...a, inbox: n } : a;
+      }),
+    };
+  };
+
+  type Delivery = { sessionId: string; name: string; via: "typed" | "queued" };
+  /** One notification to one session: typed now if it is idle (queued on a
+   *  failed type), queued otherwise. Never throws. */
+  async function deliverTo(target: AgentStatus, text: string): Promise<Delivery> {
+    if (target.state === "idle") {
+      const r = await deliver(target, text).catch(() => ({ ok: false }));
+      if (r.ok) return { sessionId: target.sessionId, name: target.name, via: "typed" };
+    }
+    enqueue(target.sessionId, text);
+    return { sessionId: target.sessionId, name: target.name, via: "queued" };
+  }
+
+  /** Flush queued items into any session that has since turned idle — the
+   *  no-hook fallback. Whatever fails to type stays queued for next time. */
+  async function flushIdle(agents: AgentStatus[]) {
+    for (const a of agents) {
+      if (a.state !== "idle") continue;
+      const items = drain(a.sessionId);
+      if (!items.length) continue;
+      const r = await deliver(a, items.join("\n\n")).catch(() => ({ ok: false }));
+      if (!r.ok) for (const t of items) enqueue(a.sessionId, t);
+    }
+  }
+
+  /** Who did a thing on the board: a display name, plus the session when it is
+   *  known — which is what lets the fan-out skip the actor reliably. */
+  type Actor = { name: string; sessionId?: string };
+
+  /** Resolve the signer of a card write. `as: "assignee"` is the card's own
+   *  assignee (its CURRENT desk name, so a rename shows), `sessionId` any live
+   *  session, and `author` a bare name the caller vouches for (the human's
+   *  "You", or an agent that knows its codename). Returns an error string for
+   *  a signature that can't be honoured. */
+  function resolveActor(card: Card, body: { as?: unknown; sessionId?: unknown; author?: unknown }): Actor | { error: string; status: number } {
+    if (body.as === "assignee") {
+      if (!card.assignee) return { error: "card has no assignee to sign as", status: 400 };
+      const fresh = resolveAssignee(dir, card.assignee.id);
+      return { name: fresh?.name ?? card.assignee.name, sessionId: card.assignee.id };
+    }
+    if (typeof body.sessionId === "string") {
+      if (!validSessionId(body.sessionId)) return { error: "bad sessionId", status: 400 };
+      const who = resolveAssignee(dir, body.sessionId);
+      return who ? { name: who.name, sessionId: who.id } : { error: "no session with that id", status: 404 };
+    }
+    const author = typeof body.author === "string" ? body.author.trim() : "";
+    return { name: author };
+  }
+
   // Wake the sessions that care about a card event, best-effort and without
-  // blocking the response. Recipients: the card's live assignee plus every live
-  // scrum-master session — minus whoever authored the event (matched by display
-  // name), so an agent is never woken by its own update. ASCII-only text: the
-  // pty path this rides is known to mangle anything else.
-  function notifyCardEvent(board: Board, cardId: string, author: string, text: string) {
+  // blocking the response. Recipients: the card's live assignee plus every
+  // live scrum-master session, minus the actor (matched by session id when
+  // known, by display name otherwise). Each recipient is told whether an answer
+  // is expected: the assignee is asked to reply to anything someone ELSE did
+  // to its card; a scrum master gets everything as FYI. A forward move by a
+  // non-assignee wakes nobody but the scrum master — there is nothing for the
+  // worker to do about its card being accepted. ASCII-only text: the pty path
+  // this may ride is known to mangle anything else.
+  async function notifyCardEvent(
+    board: Board, cardId: string, actor: Actor, text: string,
+    opts: { kind: "comment" | "move"; direction?: "forward" | "back" } = { kind: "comment" },
+  ): Promise<Delivery[]> {
     const card = board.cards.find((k) => k.id === cardId);
-    if (!card) return;
+    if (!card) return [];
     const { agents } = readSnapshot(dir, Date.now());
-    const targets = agents.filter(
-      (a) =>
-        a.name !== author &&
-        // NEVER deliver into a session that's waiting on a dialog (permission
-        // prompt, plan approval, question): typed input there presses keys on
-        // the dialog — a live run showed notifications auto-APPROVING pending
-        // permission prompts, which cascaded into runaway agent spawns. A
-        // missed notification is fine; the comment is on the board.
-        a.state !== "waiting" &&
-        (a.persona === "scrum-master" || (card.assignee && a.sessionId === card.assignee.id)),
-    );
-    for (const t of targets) void deliver(t, text).catch(() => { /* best-effort */ });
+    const isActor = (a: AgentStatus) => (actor.sessionId ? a.sessionId === actor.sessionId : a.name === actor.name);
+    const out: Delivery[] = [];
+    for (const a of agents) {
+      if (isActor(a)) continue;
+      const isAssignee = !!card.assignee && a.sessionId === card.assignee.id;
+      if (isAssignee) {
+        if (opts.kind === "move" && opts.direction !== "back") continue;
+        const ask = opts.kind === "move"
+          ? "(reply expected: this is rework -- pick the card back up and answer on it with a card-comment)"
+          : "(reply expected: answer on the card with a card-comment)";
+        out.push(await deliverTo(a, `${text}\n${ask}`));
+      } else if (a.persona === "scrum-master") {
+        out.push(await deliverTo(a, `${text}\n(FYI, no reply needed unless it raises a problem or asks you something)`));
+      }
+    }
+    return out;
   }
   const clients = new Set<(s: Snapshot) => void>();
 
@@ -158,7 +249,9 @@ export function makeServer(
 
   let timer: ReturnType<typeof setTimeout> | null = null;
   const push = () => {
-    const snap = readSnapshot(dir, Date.now());
+    const snap = snapshot();
+    // A session that just went idle may have notes waiting; type them in now.
+    if (inbox.size) void flushIdle(snap.agents).catch(() => {});
     for (const send of clients) {
       try {
         send(snap);
@@ -216,7 +309,7 @@ export function makeServer(
             const enc = new TextEncoder();
             send = (s) => ctrl.enqueue(enc.encode(`data: ${JSON.stringify(s)}\n\n`));
             addClient(send);
-            send(readSnapshot(dir, Date.now())); // initial
+            send(snapshot()); // initial
           },
           cancel() { dropClient(send); },
         });
@@ -256,10 +349,10 @@ export function makeServer(
       // the live sessions, with names/roles resolved the way the board shows
       // them — how an orchestrating agent discovers who it can assign to.
       if (url.pathname === "/agents") {
-        const { agents } = readSnapshot(dir, Date.now());
+        const { agents } = snapshot();
         return json({
-          agents: agents.map(({ sessionId, name, role, state, doing, persona, cwd, branch }) =>
-            ({ sessionId, name, role, state, doing, persona, cwd, branch })),
+          agents: agents.map(({ sessionId, name, role, state, doing, persona, cwd, branch, inbox }) =>
+            ({ sessionId, name, role, state, doing, persona, cwd, branch, ...(inbox ? { inbox } : {}) })),
         });
       }
 
@@ -308,7 +401,7 @@ export function makeServer(
           return json({ ok: false, error: "cross-site blocked" }, 403);
         }
         const action = url.pathname.slice("/action/".length);
-        let body: { sessionId?: string | null; name?: string; text?: string; cwd?: string; palette?: number; gear?: string; body?: string; model?: string; permissionMode?: string; worktree?: string; branch?: string; persona?: string; board?: unknown; type?: string; dataBase64?: string; cardId?: string; columnId?: string; toColumnId?: string; title?: string; description?: string; author?: string; instruction?: string; toIndex?: number; index?: number; column?: unknown; card?: unknown; cards?: unknown; commentId?: string };
+        let body: { sessionId?: string | null; name?: string; text?: string; cwd?: string; palette?: number; gear?: string; body?: string; model?: string; permissionMode?: string; worktree?: string; branch?: string; persona?: string; board?: unknown; type?: string; dataBase64?: string; cardId?: string; columnId?: string; toColumnId?: string; title?: string; description?: string; author?: string; instruction?: string; toIndex?: number; index?: number; column?: unknown; card?: unknown; cards?: unknown; commentId?: string; as?: string; stage?: string | null };
         try { body = await req.json(); } catch { return json({ ok: false, error: "bad body" }, 400); }
         // pick-folder opens the real macOS folder chooser on the user's screen and
         // hands back the path they picked. Browser-only on purpose: it puts a
@@ -380,10 +473,15 @@ export function makeServer(
           if (action === "column-update") {
             const hasName = typeof body.name === "string";
             const hasInstruction = typeof body.instruction === "string";
-            if (!hasName && !hasInstruction) return json({ ok: false, error: "name or instruction is required" }, 400);
+            const hasStage = body.stage !== undefined;
+            if (!hasName && !hasInstruction && !hasStage) return json({ ok: false, error: "name, instruction or stage is required" }, 400);
+            if (hasStage && body.stage !== null && !(STAGES as readonly string[]).includes(body.stage as string)) {
+              return json({ ok: false, error: `stage must be one of ${STAGES.join(", ")} or null` }, 400);
+            }
             let next = board;
             if (hasName) next = renameColumn(next, columnId, body.name as string);
             if (hasInstruction) next = setInstruction(next, columnId, body.instruction as string);
+            if (hasStage) next = setColumnStage(next, columnId, body.stage as Stage | null);
             writeBoard(dir, next);
             push();
             return json({ ok: true });
@@ -466,15 +564,19 @@ export function makeServer(
           if (action === "card-move") {
             const to = board.columns.find((c) => c.id === body.toColumnId);
             if (!to) return json({ ok: false, error: `unknown column: ${String(body.toColumnId)}` }, 400);
-            const author = typeof body.author === "string" && body.author.trim() ? body.author.trim() : "someone";
+            const actor = resolveActor(card, body);
+            if ("error" in actor) return json({ ok: false, error: actor.error }, actor.status);
+            if (!actor.name) actor.name = "someone";
             const toIndex = typeof body.toIndex === "number" && Number.isInteger(body.toIndex) ? body.toIndex : undefined;
+            const fromIndex = board.columns.findIndex((c) => c.id === card.columnId);
+            const direction = board.columns.indexOf(to) < fromIndex ? "back" : "forward";
             const next = moveCard(board, cardId, to.id, toIndex);
             writeBoard(dir, next);
             push();
             // The column id (not display name): unambiguous, and directly
             // reusable by the recipient in a card-move call of its own.
-            notifyCardEvent(next, cardId, author, `[THE LINE] ${author} moved "${title}" to "${to.id}".`);
-            return json({ ok: true });
+            const delivery = await notifyCardEvent(next, cardId, actor, `[THE LINE] ${actor.name} moved "${title}" to "${to.id}".`, { kind: "move", direction });
+            return json({ ok: true, delivery });
           }
           // card-update: edit a card's own text — its title, its description, or
           // both. Each field is applied only when present, so renaming a card
@@ -517,18 +619,19 @@ export function makeServer(
             const next = addComment(readBoard(dir), cardId, by, note);
             writeBoard(dir, next);
             push();
-            notifyCardEvent(next, cardId, by, `[THE LINE] ${by} merged "${title}" — ${note}`);
+            void notifyCardEvent(next, cardId, { name: by }, `[THE LINE] ${by} merged "${title}" -- ${note}`, { kind: "move", direction: "forward" });
             return json(r);
           }
           if (action === "card-comment") {
-            const author = typeof body.author === "string" ? body.author.trim() : "";
+            const actor = resolveActor(card, body);
+            if ("error" in actor) return json({ ok: false, error: actor.error }, actor.status);
             const text = typeof body.text === "string" ? body.text.trim() : "";
-            if (!author || !text) return json({ ok: false, error: "author and text are required" }, 400);
-            const next = addComment(board, cardId, author, text);
+            if (!actor.name || !text) return json({ ok: false, error: "a signature (author, sessionId or as: \"assignee\") and text are required" }, 400);
+            const next = addComment(board, cardId, actor.name, text);
             writeBoard(dir, next);
             push();
-            notifyCardEvent(next, cardId, author, `[THE LINE] ${author} commented on "${title}":\n${text}`);
-            return json({ ok: true });
+            const delivery = await notifyCardEvent(next, cardId, actor, `[THE LINE] ${actor.name} commented on "${title}":\n${text}`, { kind: "comment" });
+            return json({ ok: true, delivery });
           }
           // send-task: compose the full protocol prompt server-side and type it
           // into the assigned live session's terminal. The curl targets in the
@@ -542,6 +645,10 @@ export function makeServer(
             // keystrokes ON the dialog (Enter approves it) — refuse instead.
             if (agent.state === "waiting") {
               return json({ ok: false, error: `${agent.name} is waiting on a prompt in its terminal — answer that first, then resend` }, 409);
+            }
+            // And a working one would have its context cleared mid-task.
+            if (agent.state === "working") {
+              return json({ ok: false, error: `${agent.name} is still working — wait for it to go idle (or pause it), then resend` }, 409);
             }
             const prompt = cardTaskPrompt(board, cardId, url.origin, agent.name);
             if (!prompt.trim()) return json({ ok: false, error: "card has no task text to send" }, 400);
@@ -580,6 +687,14 @@ export function makeServer(
           return json(r, r.ok ? 200 : 400);
         }
         if (!validSessionId(body.sessionId)) return json({ ok: false, error: "bad sessionId" }, 400);
+        // inbox-drain: a session's Stop hook collecting the board events that
+        // arrived while it was busy. Hands them over once; the hook feeds them
+        // back to the agent as the reason its turn should continue.
+        if (action === "inbox-drain") {
+          const items = drain(body.sessionId);
+          if (items.length) push();
+          return json({ ok: true, items });
+        }
         if (action === "rename") {
           // name must be a string (or absent = clear); a non-string would throw
           // inside setNameOverride (.trim()) and 500 the handler.

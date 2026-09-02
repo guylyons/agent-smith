@@ -85,7 +85,9 @@ session in *every* project reports. The installer:
 
 - backs up your existing settings to `~/.claude/settings.json.agentworkshop.bak`,
 - adds the five events (`SessionStart`, `PreToolUse`, `Notification`, `Stop`,
-  `SessionEnd`) only if they aren't already present (non-destructive, idempotent),
+  `SessionEnd`) only if they aren't already present (non-destructive, idempotent).
+  `Stop` also collects the session's queued board notifications (see
+  [the card API](#the-card-api-how-agents-drive-their-own-tickets)),
 - uses absolute paths to `bun` and this repo's `hooks/status.ts`.
 
 Undo any time with `bun run uninstall-hooks` (removes only this repo's hook
@@ -125,7 +127,11 @@ read and act on.
 - **Columns** — click a name to rename it, drag the `⠿` grip to reorder, `✕` to
   delete (with its cards), `+ COLUMN` to add one. Each column has an instruction
   field, e.g. _"Once done, ensure the worktree is clean and committed, then share
-  a report in the ticket."_
+  a report in the ticket."_ — and a **stage** picker beside the name: `TODO`
+  (new work waits here), `DOING` (an agent is on it), `REVIEW` (finished work,
+  for you to accept), `DONE`, or `-` for a column that is just a place (Merged,
+  Archived). The agent protocol keys off stages, not column order, so you can
+  add or reorder columns freely.
 - **Cards** — type in `+ add card` to add one, drag a card to any column, `✕` to
   delete. **Click a card** to open its detail modal: edit the title and a fuller
   description, set an assignee, and hold a comment thread.
@@ -157,19 +163,43 @@ protocol footer every sent task carries teaches the agent to use it:
   whole-board write or another agent. `card-update` edits a card's own text
   (title, description); fields you leave out are untouched.
 
-A worker follows the footer: move its card to the working column and comment
-before starting, comment as it learns things, comment and move it on when done.
-Every agent-made move/comment also **wakes the sessions that care** — the card's
-assignee and any live scrum-master session (never the author itself) get a short
-`[THE LINE] …` note typed into their terminal, so supervision is event-driven,
-not polled. Human comments posted in a card's thread are likewise delivered to
-the assigned agent.
+A worker follows the footer: move its card to the `DOING` column and comment
+before starting (a task re-sent to a card already there just resumes), comment
+as it learns things, comment and move it to `REVIEW` (or `DONE` when there is no
+review stage) when finished.
+
+**Signing.** A worker's writes carry `"as": "assignee"` rather than a typed
+name: the server signs them with the card's assignee's *current* desk name, so
+a renamed desk or a persona whose codename differs from its desk can never
+mis-sign a comment, and the author is matched by session when deciding whom to
+wake. `"sessionId": "<uuid>"` signs as any live session; a bare `"author"` is
+the human's `You` or an orchestrator that knows its codename.
+
+**Waking.** Every move/comment **wakes the sessions that care** — the card's
+assignee and any live scrum-master session, never the actor itself — with a
+short `[THE LINE] …` note that says whether an answer is wanted: the assignee is
+asked to reply to anything someone *else* did to its card (a human comment, a
+card moved back for rework); a scrum master gets everything as FYI, no reply
+needed; a human moving a card forward wakes nobody but the scrum master. That is
+what stops worker and orchestrator acknowledging each other's acknowledgements.
+
+**Delivery.** Only an **idle** session is typed at. A working or waiting one
+gets the note queued in the server's inbox, and its `Stop` hook collects the
+batch as the turn ends and feeds it back as the reason to keep going — so a
+note can't press keys on a permission dialog, can't collide with a tool call,
+and isn't limited to ASCII. (Without hooks, the next snapshot that shows the
+session idle types the backlog in.) The card modal says which happened —
+"Notified", or "Queued … lands when its turn ends" — and shows how many notes
+a busy assignee has waiting. **SEND TASK** is only offered for an idle assignee:
+a fresh task clears the agent's context first, so sending one mid-work would
+wipe what it was doing.
 
 **Orchestration**: launch a session with the `scrum-master` persona and hand it
 work — it sizes and splits the work into cards, spawns a fresh worker per card
-(persona-matched, in an isolated worktree, `acceptEdits`), assigns and sends
-tasks, reacts to board notifications, verifies a column's instruction before
-advancing a card, and nudges stalled ones. A fresh worktree is seeded with a
+(persona-matched, in an isolated worktree, `acceptEdits`, with the card id so
+the worker assigns itself as it starts), stays quiet on routine updates,
+comments only when something is off, verifies the doing column's instruction
+when a card reaches review, and nudges stalled ones. A fresh worktree is seeded with a
 `.claude/settings.local.json` allowlisting exactly the board `curl`s and local
 git verbs, so a worker updates its ticket without stalling on permission
 prompts (spawn/kill/prompt endpoints and `git push` still require a human).
@@ -203,10 +233,13 @@ write is exactly as safe as the `curl` it replaces: applied against a fresh read
 and pushed straight to the open UI. **The dashboard has to be running** — if it
 isn't, every tool says so and tells you to start it.
 
-Comments and moves are signed automatically. `AGENT_WORKSHOP_AUTHOR` names the
-author if you set it; otherwise the server asks the dashboard which live agent is
-working in this folder and signs with that codename, falling back to a generic
-one when the folder is ambiguous.
+Comments and moves are signed automatically, by identity. On the card a session
+was spawned for (it inherits `AGENT_CARD` from the dashboard's launch) it signs
+as that card's assignee; elsewhere it asks the dashboard which live session is
+running in this folder and signs by that session id — either way the server
+puts the current desk name on the note, so a rename can't mis-sign it. It falls
+back to a generic name when the folder is ambiguous. `AGENT_WORKSHOP_AUTHOR`
+overrides all of that with a fixed name.
 
 Remove it with `claude mcp remove --scope user the-line`.
 

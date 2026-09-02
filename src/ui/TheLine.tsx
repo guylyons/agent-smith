@@ -1,13 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { DragEvent, RefObject } from "react";
 import type { AgentStatus } from "../schema";
-import type { Board, Column, Card } from "../lib/board";
+import type { Board, Column, Card, Stage } from "../lib/board";
 import {
-  renameColumn, setInstruction, deleteColumn, reorderColumn,
-  deleteCard, restoreCard, moveCard, restoreColumn, cardMoveTarget,
+  renameColumn, setInstruction, setColumnStage, deleteColumn, reorderColumn,
+  deleteCard, restoreCard, moveCard, restoreColumn, cardMoveTarget, STAGES,
 } from "../lib/board";
 import {
-  addColumnAction, renameColumnAction, setInstructionAction, deleteColumnAction,
+  addColumnAction, renameColumnAction, setInstructionAction, setColumnStageAction, deleteColumnAction,
   reorderColumnAction, restoreColumnAction, addCardAction, moveCardAction,
   deleteCardAction, restoreCardAction,
 } from "./actions";
@@ -199,6 +199,24 @@ function ColumnView({
             onNamed();
           }}
         />
+        {/* What this column MEANS to an agent's protocol: where new work waits,
+            where it is worked, where it lands for review, where it is finished.
+            The task footer keys off these, not the column order, so a Triage
+            or Merged column can sit anywhere without confusing anyone. */}
+        <select
+          className="col-stage"
+          value={column.stage ?? ""}
+          title="Stage: what this column means to an agent (todo, doing, review, done)"
+          aria-label={`Stage of column "${column.name || "Untitled"}"`}
+          onChange={(e) => {
+            const v = e.target.value;
+            const stage = (STAGES as readonly string[]).includes(v) ? (v as Stage) : null;
+            mutate((b) => setColumnStage(b, column.id, stage), () => setColumnStageAction(column.id, stage));
+          }}
+        >
+          <option value="">-</option>
+          {STAGES.map((st) => <option key={st} value={st}>{st.toUpperCase()}</option>)}
+        </select>
         <button
           className="col-del"
           title="Delete column"

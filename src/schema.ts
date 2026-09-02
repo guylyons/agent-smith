@@ -50,6 +50,9 @@ export const AgentStatusSchema = z.object({
   // the head is unreadable. Sessions without markers carry no usage at all.
   // Feeds the header's usage meter.
   usage: z.object({ budgetLeft: z.number(), budgetTotal: z.number().optional() }).optional(),
+  // Board notifications waiting for this session's turn to end (see the
+  // server's inbox). Decorated onto the snapshot by the server; never persisted.
+  inbox: z.number().optional(),
 });
 
 export type AgentStatus = z.infer<typeof AgentStatusSchema>;

@@ -79,7 +79,7 @@ test("composePrompt teaches the board protocol to every persona", () => {
   const out = composePrompt(p);
   expect(out).toContain("-- THE LINE --");
   expect(out).toContain("[THE LINE]");
-  expect(out).toContain(`codename on the team board is ${p.name}`);
+  expect(out).toContain(`the team board knows you as ${p.name}`);
   expect(out).toContain("AGENT_WORKSHOP_URL");
 });
 
@@ -164,4 +164,13 @@ test("PERSONA_ID_RE does not drift between src/lib/personas.ts and hooks/status.
 
   // Also ensure no flags were accidentally added on either side.
   expect(PERSONA_ID_RE.flags).toBe("");
+});
+
+test("composePrompt tells every persona when a board notification wants a reply and when it does not", () => {
+  const p = parsePersona("---\nid: x\nname: X\nrole: R\nsprite: { body: worker, palette: 0 }\n---\nBody.", "x")!;
+  const out = composePrompt(p);
+  expect(out).toContain("reply expected");
+  expect(out).toContain("no reply needed");
+  expect(out).not.toContain("respond on that card via card-comment rather than");
+  expect(/^[\x00-\x7f]*$/.test(out)).toBe(true);
 });

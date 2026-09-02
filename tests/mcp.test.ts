@@ -198,8 +198,9 @@ test("agents_list says so when nothing is running", async () => {
 
 // --- who a comment is signed by -------------------------------------------
 // A session can't know its own board codename, and one env var can't name
-// every session, so an unset author is resolved from the live agent running in
-// this very folder.
+// every session, so an unset author is resolved to the live agent running in
+// this very folder — by SESSION id, and the server puts the current desk name
+// on it, so a rename or a persona can never mis-sign the note.
 
 test("an unset author resolves to the live agent working in this folder", async () => {
   const agents = [
@@ -212,7 +213,7 @@ test("an unset author resolves to the live agent working in this folder", async 
     { api, url: "http://localhost:4173", cwd: "/w/two" },
   ) as any;
   expect(res.result.isError).toBeUndefined();
-  expect((calls.find((c) => c.path === "/action/card-comment")!.body as any).author).toBe("ANVIL");
+  expect((calls.find((c) => c.path === "/action/card-comment")!.body as any).sessionId).toBe("s2");
 });
 
 test("an ambiguous folder falls back to a generic author rather than guessing", async () => {
@@ -236,4 +237,50 @@ test("the resolved author is looked up once, not on every call", async () => {
   await handleMessage(msg(1), c);
   await handleMessage(msg(2), c);
   expect(calls.filter((x) => x.path === "/agents").length).toBe(1);
+});
+
+// --- signing as the card's assignee ----------------------------------------
+// A session spawned for a card inherits AGENT_CARD; on that card it signs
+// `as: "assignee"` and the server resolves the name — no guessing from cwd,
+// no persona name that disagrees with a renamed desk.
+
+test("a session spawned for a card signs writes on THAT card as its assignee", async () => {
+  const { api, calls } = fakeApi();
+  const c: Ctx = { api, url: "http://localhost:4173", cwd: "/w/one", card: "card_1" };
+  await handleMessage({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "card_comment", arguments: { cardId: "card_1", text: "hi" } } }, c);
+  await handleMessage({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "card_move", arguments: { cardId: "card_1", toColumnId: "review" } } }, c);
+  const comment = calls.find((x) => x.path === "/action/card-comment")!.body as any;
+  const move = calls.find((x) => x.path === "/action/card-move")!.body as any;
+  expect(comment.as).toBe("assignee");
+  expect(comment.author).toBeUndefined();
+  expect(move.as).toBe("assignee");
+  expect(calls.some((x) => x.path === "/agents")).toBe(false); // nothing to look up
+});
+
+test("on another card the same session falls back to its own identity", async () => {
+  const agents = [{ sessionId: "s1", name: "VOLT", role: "r", state: "working", doing: "x", cwd: "/w/one" }];
+  const { api, calls } = fakeApi({ "/agents": { status: 200, body: { agents } } });
+  const c: Ctx = { api, url: "http://localhost:4173", cwd: "/w/one", card: "card_1" };
+  await handleMessage({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "card_comment", arguments: { cardId: "card_2", text: "hi" } } }, c);
+  const comment = calls.find((x) => x.path === "/action/card-comment")!.body as any;
+  expect(comment.as).toBeUndefined();
+  expect(comment.sessionId).toBe("s1"); // by session, so a rename can't mis-sign it
+});
+
+test("a lone session in its folder signs by session id, an explicit author still wins", async () => {
+  const agents = [{ sessionId: "s1", name: "VOLT", role: "r", state: "working", doing: "x", cwd: "/w/one" }];
+  const { api, calls } = fakeApi({ "/agents": { status: 200, body: { agents } } });
+  await handleMessage(
+    { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "card_comment", arguments: { cardId: "card_1", text: "hi" } } },
+    { api, url: "http://localhost:4173", cwd: "/w/one" },
+  );
+  await handleMessage(
+    { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "card_comment", arguments: { cardId: "card_1", text: "hi", author: "CADENCE" } } },
+    { api, url: "http://localhost:4173", cwd: "/w/one" },
+  );
+  const [first, second] = calls.filter((x) => x.path === "/action/card-comment").map((x) => x.body as any);
+  expect(first.sessionId).toBe("s1");
+  expect(first.author).toBeUndefined();
+  expect(second.author).toBe("CADENCE");
+  expect(second.sessionId).toBeUndefined();
 });
