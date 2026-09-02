@@ -25,7 +25,7 @@ type Entry = { matcher?: string; hooks?: { type?: string; command?: string }[] }
 const single = (): Entry[] => [{ hooks: [{ type: "command", command }] }];
 const withMatcher = (): Entry[] => [{ matcher: "*", hooks: [{ type: "command", command }] }];
 
-const OURS = { SessionStart: single, PreToolUse: withMatcher, Notification: single, Stop: single, SessionEnd: single };
+const OURS = { SessionStart: single, UserPromptSubmit: single, PreToolUse: withMatcher, Notification: single, Stop: single, SessionEnd: single };
 
 function main() {
   let settings: Record<string, unknown> = {};
@@ -56,7 +56,7 @@ function main() {
   if (added.length) {
     console.log(`Installed hooks for: ${added.join(", ")}`);
   } else {
-    console.log("Our hook command was already present on all five events — nothing changed.");
+    console.log("Our hook command was already present on all six events — nothing changed.");
   }
   console.log(`Hook command: ${command}`);
   console.log("\nNext:");

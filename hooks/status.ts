@@ -20,8 +20,21 @@ export type HookEvent = {
   branch: string | null;
   tool_name?: string;
   tool_input?: Record<string, unknown>;
+  /** Notification only: permission_prompt, idle_prompt, elicitation_dialog, ...
+   *  Absent on older Claude Code versions. */
+  notification_type?: string;
 };
 
+/** The notification types that mean the session is blocked on the user. The
+ *  rest (idle_prompt, auth_success, agent_completed, the quota ones...) are
+ *  FYI: idle_prompt in particular fires a minute after a turn ENDS, and used
+ *  to flip an idle desk to "needs permission" with nothing to answer. */
+const BLOCKING_NOTIFICATIONS = new Set(["permission_prompt", "elicitation_dialog", "elicitation_url_dialog"]);
+
+/** A fresh session is IDLE: it sits at an empty prompt until a prompt is
+ *  submitted (UserPromptSubmit flips it to working) or a task is typed into
+ *  it. Seeding it as working left a just-opened terminal, and every session
+ *  right after a /clear, reading WORKING while nothing was happening. */
 function seed(e: HookEvent, now: number, persona?: string, crew?: Crew): AgentStatus {
   const identified = identify(e.session_id, e.branch, e.cwd);
   // A crew member keeps its name across sessions (see src/lib/crew.ts); only a
@@ -31,8 +44,8 @@ function seed(e: HookEvent, now: number, persona?: string, crew?: Crew): AgentSt
   return {
     sessionId: e.session_id, name, role,
     ...(crew ? { crew } : {}),
-    ticket: parseTicket(e.branch), state: "working",
-    doing: "starting up", cwd: e.cwd, branch: e.branch, updatedAt: now,
+    ticket: parseTicket(e.branch), state: "idle",
+    doing: "ready", cwd: e.cwd, branch: e.branch, updatedAt: now,
     // Set at launch by the dashboard and inherited by this hook from the claude
     // process. Only the id is stored; the server resolves the rest.
     ...(persona && PERSONA_ID_RE.test(persona) ? { persona } : {}),
@@ -101,6 +114,10 @@ function applyEventInner(prev: AgentStatus | null, e: HookEvent, now: number, pe
   switch (e.hook_event_name) {
     case "SessionStart":
       return seed(e, now, persona, crew);
+    case "UserPromptSubmit":
+      // The turn has begun; the first PreToolUse will say what it is doing.
+      return { ...base, state: "working", waitingReason: undefined, pendingQuestion: undefined,
+        doing: "thinking", updatedAt: now };
     case "PreToolUse": {
       // These tools BLOCK on the user. PreToolUse fires the instant they begin,
       // which is the earliest any signal exists — the transcript scanner would
@@ -117,6 +134,12 @@ function applyEventInner(prev: AgentStatus | null, e: HookEvent, now: number, pe
         doing: humanizeTool(e.tool_name ?? "", e.tool_input), updatedAt: now };
     }
     case "Notification":
+      // Only a blocking dialog is a wait; a typed notification we don't know,
+      // or an FYI one, just touches the timestamp. No type at all is an older
+      // Claude Code, where Notification meant a permission prompt.
+      if (e.notification_type !== undefined && !BLOCKING_NOTIFICATIONS.has(e.notification_type)) {
+        return { ...base, updatedAt: now };
+      }
       // Also set `doing`: without it the card strands the previous tool's line
       // ("running rm -rf build") while the session actually sits on a prompt.
       return { ...base, state: "waiting", waitingReason: "permission",

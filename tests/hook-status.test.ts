@@ -7,9 +7,10 @@ const start = {
   cwd: "/repo", branch: "feature/4412-card-component",
 };
 
-test("SessionStart seeds a working agent with ticket+role", () => {
+test("SessionStart seeds an IDLE agent with ticket+role: nothing is happening until a prompt arrives", () => {
   const s = applyEvent(null, start as any, 1000)!;
-  expect(s.state).toBe("working");
+  expect(s.state).toBe("idle");
+  expect(s.doing).toBe("ready");
   expect(s.ticket).toBe("#4412");
   expect(s.name).toBe("FORGE");
   expect(s.sessionId).toBe("s1");
@@ -25,11 +26,42 @@ test("PreToolUse updates the doing line", () => {
   expect(s1.updatedAt).toBe(2000);
 });
 
-test("Notification -> waiting/permission", () => {
+test("Notification -> waiting/permission (no type: an older Claude Code, treated as a permission prompt)", () => {
   const s0 = applyEvent(null, start as any, 1000)!;
   const s = applyEvent(s0, { hook_event_name: "Notification", session_id: "s1", cwd: "/repo", branch: start.branch } as any, 3000)!;
   expect(s.state).toBe("waiting");
   expect(s.waitingReason).toBe("permission");
+});
+
+test("a permission_prompt or an MCP elicitation dialog is a wait on the user", () => {
+  const s0 = applyEvent(null, start as any, 1000)!;
+  for (const t of ["permission_prompt", "elicitation_dialog", "elicitation_url_dialog"]) {
+    const s = applyEvent(s0, { hook_event_name: "Notification", notification_type: t, session_id: "s1", cwd: "/repo", branch: start.branch } as any, 3000)!;
+    expect(s.state).toBe("waiting");
+    expect(s.waitingReason).toBe("permission");
+  }
+});
+
+test("idle_prompt and the other notification types leave the state alone", () => {
+  const working = applyEvent(applyEvent(null, start as any, 1000), {
+    hook_event_name: "PreToolUse", session_id: "s1", cwd: "/repo", branch: start.branch, tool_name: "Read", tool_input: { file_path: "/a" },
+  } as any, 2000)!;
+  for (const t of ["idle_prompt", "auth_success", "agent_completed", "quota_auto_resume_fired"]) {
+    const s = applyEvent(working, { hook_event_name: "Notification", notification_type: t, session_id: "s1", cwd: "/repo", branch: start.branch } as any, 3000)!;
+    expect(s.state).toBe("working");
+    expect(s.waitingReason).toBeUndefined();
+    expect(s.doing).toBe("reading a");
+    expect(s.updatedAt).toBe(3000);
+  }
+});
+
+test("UserPromptSubmit -> working/thinking: the turn has begun", () => {
+  const s0 = applyEvent(null, start as any, 1000)!;
+  const s = applyEvent(s0, { hook_event_name: "UserPromptSubmit", prompt: "build the card", session_id: "s1", cwd: "/repo", branch: start.branch } as any, 1500)!;
+  expect(s.state).toBe("working");
+  expect(s.doing).toBe("thinking");
+  expect(s.waitingReason).toBeUndefined();
+  expect(s.stateSince).toBe(1500);
 });
 
 test("Stop -> idle even if the final message ends with '?' (a prose '?' is not a reliable question; real AskUserQuestion is scanner-detected)", () => {
@@ -188,11 +220,13 @@ test("stateSince is stamped on seed and carried while the state holds", () => {
   const start = { hook_event_name: "SessionStart", session_id: "s1", cwd: "/x", branch: null };
   const tool = { hook_event_name: "PreToolUse", session_id: "s1", cwd: "/x", branch: null, tool_name: "Bash", tool_input: {} };
   const a = applyEvent(null, start as any, 1000)!;
-  expect(a.stateSince).toBe(1000); // working begins
+  expect(a.stateSince).toBe(1000); // idle, at an empty prompt
   const b = applyEvent(a, tool as any, 5000)!;
-  expect(b.stateSince).toBe(1000); // still working — carried
+  expect(b.stateSince).toBe(5000); // idle -> working resets
+  const b2 = applyEvent(b, tool as any, 7000)!;
+  expect(b2.stateSince).toBe(5000); // still working — carried
   const stop = { hook_event_name: "Stop", session_id: "s1", cwd: "/x", branch: null };
-  const c = applyEvent(b, stop as any, 9000)!;
+  const c = applyEvent(b2, stop as any, 9000)!;
   expect(c.stateSince).toBe(9000); // working -> idle resets
 });
 

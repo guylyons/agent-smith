@@ -1,6 +1,7 @@
 {
   "hooks": {
     "SessionStart": [{ "hooks": [{ "type": "command", "command": "bun run \"$CLAUDE_PROJECT_DIR/hooks/status.ts\"" }]}],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "bun run \"$CLAUDE_PROJECT_DIR/hooks/status.ts\"" }]}],
     "PreToolUse":   [{ "matcher": "*", "hooks": [{ "type": "command", "command": "bun run \"$CLAUDE_PROJECT_DIR/hooks/status.ts\"" }]}],
     "Notification": [{ "hooks": [{ "type": "command", "command": "bun run \"$CLAUDE_PROJECT_DIR/hooks/status.ts\"" }]}],
     "Stop":         [{ "hooks": [{ "type": "command", "command": "bun run \"$CLAUDE_PROJECT_DIR/hooks/status.ts\"" }]}],

@@ -124,3 +124,41 @@ test("a session without budget markers carries no usage at all", () => {
   ];
   expect(deriveStatusFromTranscript(lines, 1)!.usage).toBeUndefined();
 });
+
+// --- an interrupted turn is over: the session sits at its prompt -----------
+
+test("an interrupted turn derives idle, not 'thinking'", () => {
+  const lines = [
+    L({ type: "user", sessionId: "s1", cwd: "/repo", gitBranch: "b", message: { content: [{ type: "text", text: "do the thing" }] } }),
+    L({ type: "assistant", sessionId: "s1", cwd: "/repo", gitBranch: "b", message: { content: [{ type: "thinking", thinking: "..." }] } }),
+    L({ type: "user", sessionId: "s1", cwd: "/repo", gitBranch: "b", message: { content: [{ type: "text", text: "[Request interrupted by user]" }] } }),
+  ];
+  const s = deriveStatusFromTranscript(lines, 1)!;
+  expect(s.state).toBe("idle");
+  expect(s.doing).toBe("idle");
+});
+
+test("an interrupted tool call derives idle too", () => {
+  const lines = [
+    L({ type: "assistant", sessionId: "s1", cwd: "/repo", gitBranch: "b", message: { content: [{ type: "tool_use", name: "Bash", input: { command: "bun test" } }] } }),
+    L({ type: "user", sessionId: "s1", cwd: "/repo", gitBranch: "b", message: { content: [{ type: "text", text: "[Request interrupted by user for tool use]" }] } }),
+  ];
+  expect(deriveStatusFromTranscript(lines, 1)!.state).toBe("idle");
+});
+
+test("a prompt after an interrupt is active again", () => {
+  const lines = [
+    L({ type: "user", sessionId: "s1", cwd: "/repo", gitBranch: "b", message: { content: [{ type: "text", text: "[Request interrupted by user]" }] } }),
+    L({ type: "user", sessionId: "s1", cwd: "/repo", gitBranch: "b", message: { content: [{ type: "text", text: "try again" }] } }),
+  ];
+  expect(deriveStatusFromTranscript(lines, 1)!.state).toBe("working");
+});
+
+test("a local slash command entry does not make an idle session look busy", () => {
+  const lines = [
+    L({ type: "assistant", sessionId: "s1", cwd: "/repo", gitBranch: "b", message: { content: [{ type: "text", text: "Done." }] } }),
+    L({ type: "user", sessionId: "s1", cwd: "/repo", gitBranch: "b", message: { content: [{ type: "text", text: "<command-name>/clear</command-name>\n<command-message>clear</command-message>" }] } }),
+    L({ type: "user", sessionId: "s1", cwd: "/repo", gitBranch: "b", message: { content: [{ type: "text", text: "<local-command-stdout></local-command-stdout>" }] } }),
+  ];
+  expect(deriveStatusFromTranscript(lines, 1)!.state).toBe("idle");
+});

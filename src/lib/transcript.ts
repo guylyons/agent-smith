@@ -37,6 +37,24 @@ function contentArray(entry: Record<string, unknown>): Content[] {
  * usable session. `updatedAt` is set by the caller (freshness), not the
  * transcript timestamp, so an open session stays alive on the dashboard.
  */
+/** The text of a user entry, "" when its content is not text (a tool_result). */
+function userText(e: Record<string, unknown>): string {
+  const content = (e.message as { content?: unknown } | undefined)?.content;
+  if (typeof content === "string") return content;
+  return contentArray(e).map((c) => (c.type === "text" && typeof c.text === "string" ? c.text : "")).join("");
+}
+
+/** Claude Code records an interrupted turn as a user entry with this text
+ *  (or the "for tool use" variant when a tool was cut off). */
+function isInterrupt(text: string): boolean {
+  return /^\[Request interrupted by user/.test(text.trim());
+}
+
+/** A local slash command's own entries: the command line, and its stdout. */
+function isLocalCommand(text: string): boolean {
+  return text.includes("<command-name>") || text.includes("<local-command-stdout>");
+}
+
 export function deriveStatusFromTranscript(lines: string[], updatedAt: number): AgentStatus | null {
   let sessionId: string | null = null;
   let cwd = "";
@@ -79,8 +97,20 @@ export function deriveStatusFromTranscript(lines: string[], updatedAt: number): 
     } else if (type === "user") {
       // Both a real prompt and a tool_result arrive as user-type entries; either
       // way the assistant is now the one who should act next -> still active.
-      endedOnAssistantText = false;
-      thinkingLast = false;
+      // Two exceptions. An interrupt (Esc, the dashboard's PAUSE) is written
+      // as a user entry too, and no hook fires for it — but the turn is OVER
+      // and the session sits at its prompt, so it is idle, not "thinking".
+      // And a local slash command (/clear, /help) is handled by the CLI
+      // itself: it starts no turn, so it must not make an idle desk look busy.
+      const text = userText(e);
+      if (isInterrupt(text)) {
+        endedOnAssistantText = true;
+        thinkingLast = false;
+        lastToolUse = null;
+      } else if (!isLocalCommand(text)) {
+        endedOnAssistantText = false;
+        thinkingLast = false;
+      }
     }
   }
 

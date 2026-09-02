@@ -84,8 +84,11 @@ Installs the hooks at the **user level** (`~/.claude/settings.json`) so *every*
 session in *every* project reports. The installer:
 
 - backs up your existing settings to `~/.claude/settings.json.agentworkshop.bak`,
-- adds the five events (`SessionStart`, `PreToolUse`, `Notification`, `Stop`,
-  `SessionEnd`) only if they aren't already present (non-destructive, idempotent).
+- adds the six events (`SessionStart`, `UserPromptSubmit`, `PreToolUse`,
+  `Notification`, `Stop`, `SessionEnd`) only if they aren't already present
+  (non-destructive, idempotent). A session is idle until a prompt is submitted,
+  working from then until its turn ends, and idle again after an interrupt
+  (which fires no hook: the scanner reads the interrupt off the transcript).
   `Stop` also collects the session's queued board notifications (see
   [the card API](#the-card-api-how-agents-drive-their-own-tickets)),
 - uses absolute paths to `bun` and this repo's `hooks/status.ts`.
