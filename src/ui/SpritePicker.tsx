@@ -2,13 +2,13 @@ import { useState } from "react";
 import type { AgentStatus } from "../schema";
 import { Sprite } from "./Sprite";
 import { ModalBackdrop } from "./Backdrop";
-import { PALETTES, GEARS, BODIES, BODY_IDS, paletteFor } from "./sprite-data";
+import { PALETTES, GEARS, BODIES, BODY_IDS, paletteFor, hasFixedColors } from "./sprite-data";
 import { setSprite } from "./actions";
 
 /** Modal for choosing a custom sprite (character + palette + gear) for one agent,
  * overriding the deterministic default derived from sessionId+role. */
 export function SpritePicker({ agent, onClose }: { agent: AgentStatus; onClose: () => void }) {
-  const defaults = paletteFor(agent.sessionId, agent.role);
+  const defaults = paletteFor(agent.sessionId, agent.role, agent.name);
   // Seed from the agent's ACTUAL default palette (the deterministic hash pick),
   // not index 0 — otherwise the preview shows the wrong colors for every agent
   // whose hash palette isn't 0, and SAVE-without-changes recolors it to 0.
@@ -18,6 +18,9 @@ export function SpritePicker({ agent, onClose }: { agent: AgentStatus; onClose: 
   const [body, setBody] = useState(agent.sprite?.body ?? defaults.body);
 
   const hasGear = BODIES[body]?.gear ?? false;
+  // The Alien cast paints with its own colors; a palette row would show the
+  // same sprite five times, so it only appears for the recolorable bodies.
+  const hasPalette = !hasFixedColors(body);
 
   function save() {
     setSprite(agent.sessionId, palette, gear, body);
@@ -47,19 +50,23 @@ export function SpritePicker({ agent, onClose }: { agent: AgentStatus; onClose: 
           ))}
         </div>
 
-        <label className="pix spritepicker-label">PALETTE</label>
-        <div className="sprite-grid">
-          {PALETTES.map((_, i) => (
-            <button
-              key={i}
-              className={`sprite-option ${i === palette ? "selected" : ""}`}
-              title={`Palette ${i + 1}`}
-              onClick={() => setPalette(i)}
-            >
-              <Sprite sessionId={agent.sessionId} role={agent.role} state="idle" override={{ palette: i, gear, body }} />
-            </button>
-          ))}
-        </div>
+        {hasPalette && (
+          <>
+            <label className="pix spritepicker-label">PALETTE</label>
+            <div className="sprite-grid">
+              {PALETTES.map((_, i) => (
+                <button
+                  key={i}
+                  className={`sprite-option ${i === palette ? "selected" : ""}`}
+                  title={`Palette ${i + 1}`}
+                  onClick={() => setPalette(i)}
+                >
+                  <Sprite sessionId={agent.sessionId} role={agent.role} state="idle" override={{ palette: i, gear, body }} />
+                </button>
+              ))}
+            </div>
+          </>
+        )}
 
         {hasGear && (
           <>

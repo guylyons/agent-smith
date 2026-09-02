@@ -249,7 +249,7 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
         onDrop={onDrop}>
         <header className="drawer-head">
           <div className="drawer-sprite" title="Change sprite" style={{ cursor: "pointer" }} onClick={() => setPickSprite(true)}>
-            <Sprite sessionId={agent.sessionId} role={agent.role} state={agent.state} override={agent.sprite} />
+            <Sprite sessionId={agent.sessionId} role={agent.role} name={agent.name} state={agent.state} override={agent.sprite} />
           </div>
           <div className="drawer-id">
             {editingName ? (

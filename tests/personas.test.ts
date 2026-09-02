@@ -49,7 +49,7 @@ test("loadPersonas sorts by id and getPersona finds by id", () => {
   write("frontend-ux", GOOD);
   write("backend-dev", GOOD.replace("id: frontend-ux", "id: backend-dev").replace("body: engineer", "body: robot"));
   expect(loadPersonas(dir).map((p) => p.id)).toEqual(["backend-dev", "frontend-ux"]);
-  expect(getPersona("backend-dev", dir)!.sprite.body).toBe("robot");
+  expect(getPersona("backend-dev", dir)!.sprite?.body).toBe("robot");
   expect(getPersona("nope", dir)).toBeNull();
 });
 
@@ -216,4 +216,20 @@ test("composePrompt tells every persona when a board notification wants a reply 
   expect(out).toContain("no reply needed");
   expect(out).not.toContain("respond on that card via card-comment rather than");
   expect(/^[\x00-\x7f]*$/.test(out)).toBe(true);
+});
+
+test("a persona without a sprite is valid and leaves the desk's sprite alone", () => {
+  const p = parsePersona("---\nid: x\nrole: R\n---\nBody.", "x")!;
+  expect(p).not.toBeNull();
+  expect(p.sprite).toBeUndefined();
+  const input = [A({ persona: "x", sprite: { palette: 1, gear: "hood", body: "cat" } })];
+  const [a] = applyPersonas(input, [p]);
+  expect(a.role).toBe("R");
+  expect(a.sprite).toEqual({ palette: 1, gear: "hood", body: "cat" });
+  const [bare] = applyPersonas([A({ persona: "x" })], [p]);
+  expect(bare.sprite).toBeUndefined();
+});
+
+test("the shipped personas leave the sprite to the crew name", () => {
+  for (const p of loadPersonas()) expect(p.sprite, p.id).toBeUndefined();
 });

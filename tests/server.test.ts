@@ -181,7 +181,8 @@ test("readSnapshot resolves a persona onto the agent", () => {
   const [agent] = readSnapshot(dir, Date.now()).agents;
   expect(agent.name).toBe("NOVA"); // the shipped personas carry no name
   expect(agent.role).toBe("Backend Dev");
-  expect(agent.sprite!.body).toBe("robot");
+  // the shipped personas carry no sprite either: the look follows the crew name
+  expect(agent.sprite).toBeUndefined();
 });
 
 test("readSnapshot leaves a persona-less agent alone", () => {

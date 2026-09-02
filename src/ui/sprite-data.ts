@@ -4,6 +4,8 @@
 // in spriteRects, so the 5 PALETTES restyle every body; a handful of channels
 // (skin, white, pink, yellow) are fixed so faces read consistently.
 
+import { ALIEN_BODIES, bodyForName } from "./sprite-alien";
+
 // worker — human at a desk (accepts gear)
 const worker = [
   "................",
@@ -301,7 +303,11 @@ export const GEAR = {
 
 export interface SpritePalette { O: string; H: string; B: string; G: string; P: string; }
 
-export interface Body { label: string; gear: boolean; rows: string[]; }
+/** A character. `colors` is an optional legend of letter → hex that this body
+ *  draws with instead of the palette: the Alien cast keeps its own colors (a
+ *  xenomorph is black whatever palette the picker is on), the original bodies
+ *  recolor per palette. */
+export interface Body { label: string; gear: boolean; rows: string[]; colors?: Record<string, string>; }
 
 // Body registry. Order here is the order shown in the picker; `worker` first so
 // the default character leads.
@@ -312,6 +318,7 @@ export const BODIES: Record<string, Body> = {
   fox:      { label: "FOX",      gear: false, rows: fox },
   owl:      { label: "OWL",      gear: false, rows: owl },
   robot:    { label: "ROBOT",    gear: false, rows: robot },
+  ...ALIEN_BODIES,
 };
 export const BODY_IDS = Object.keys(BODIES);
 
@@ -322,6 +329,7 @@ export function spriteRects({ body = "worker", gear, palette }: { body?: string;
     N: "#e88b9a", Y: "#f2b134",
   };
   const def = BODIES[body] ?? BODIES.worker;
+  if (def.colors) Object.assign(pal, def.colors);
   const grid = def.rows.map((r) => [...r]);
   if (def.gear) {
     (GEAR[gear as keyof typeof GEAR] || []).forEach((layer) =>
@@ -365,9 +373,19 @@ function hash(s: string): number {
   return Math.abs(h);
 }
 
-export function paletteFor(sessionId: string, role: string) {
+/** Does this body draw with its own fixed colors (so the palette is moot)? */
+export function hasFixedColors(body: string | undefined): boolean {
+  return !!(body && BODIES[body]?.colors);
+}
+
+export function paletteFor(sessionId: string, role: string, name?: string) {
   const h = hash(sessionId);
-  // The default character stays `worker` so existing sprites never change shape;
-  // the new bodies are opt-in through the picker.
-  return { palette: PALETTES[h % PALETTES.length], gear: ROLE_GEAR[role] ?? DEFAULT_GEARS[h % DEFAULT_GEARS.length], body: "worker" };
+  // A crew name from the Alien roster wears its character (sprite-alien.ts);
+  // anything else stays the `worker`, so a sprite with no name never changes
+  // shape. Either way the picker can override it.
+  return {
+    palette: PALETTES[h % PALETTES.length],
+    gear: ROLE_GEAR[role] ?? DEFAULT_GEARS[h % DEFAULT_GEARS.length],
+    body: bodyForName(name) ?? "worker",
+  };
 }

@@ -159,7 +159,7 @@ const AgentCard = memo(function AgentCard({ a, onCard, unread, dying, onOpen }: 
         )}
       </div>
       <div className="sprite-wrap">
-        <Sprite sessionId={a.sessionId} role={a.role} state={a.state} override={a.sprite} />
+        <Sprite sessionId={a.sessionId} role={a.role} name={a.name} state={a.state} override={a.sprite} />
         {a.state === "waiting" && <div className="pix bubble">{a.waitingReason === "question" ? "?" : "!"}</div>}
         {!!a.subagents && a.subagents > 0 && (
           <div className="pix crew-badge" title={`${a.subagents} subagent${a.subagents > 1 ? "s" : ""} working`}>⊂{a.subagents}</div>
