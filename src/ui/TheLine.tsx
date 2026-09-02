@@ -9,13 +9,18 @@ import {
 import {
   addColumnAction, renameColumnAction, setInstructionAction, setColumnStageAction, deleteColumnAction,
   reorderColumnAction, restoreColumnAction, addCardAction, moveCardAction,
-  deleteCardAction, restoreCardAction,
+  deleteCardAction, restoreCardAction, ME,
 } from "./actions";
 import { toast } from "./toast";
 import { onOpenCard } from "./nav";
 import { CardModal } from "./CardModal";
 import { Sprite } from "./Sprite";
 import { stackMaxHeight } from "./stackCap";
+import { displayState } from "../lib/liveness";
+import {
+  canPrime, loadMarks, markCardRead, newestCommentAt, primeMarks, saveMarks,
+  unreadCommentCount,
+} from "./cardUnread";
 
 const CARD_MIME = "application/x-line-card";
 const COL_MIME = "application/x-line-column";
@@ -51,6 +56,14 @@ export function TheLine({
   // Open a card when the notification center asks (clicking a comment/move).
   useEffect(() => onOpenCard(setOpenCardId), []);
 
+  // Which comment threads you haven't read, and whether a baseline has ever
+  // been taken. A browser with no baseline takes one from the first REAL board
+  // it sees rather than flagging every card that was ever commented on — the
+  // same "don't badge the world on first paint" rule the desks' unread badges
+  // follow (src/ui/unread.ts). Not at mount: the board this first renders is
+  // the empty default, and a baseline taken from that silences nothing.
+  const [read, setRead] = useState(loadMarks);
+
   const mutate: Mutate = (fn, send) => {
     if (fn) setBoard((prev) => fn(prev));
     send();
@@ -65,6 +78,30 @@ export function TheLine({
   // SSE echoes) flow in. If it's deleted while open, the modal closes itself.
   const openCard = openCardId ? board.cards.find((c) => c.id === openCardId) ?? null : null;
   const openColumn = openCard ? board.columns.find((c) => c.id === openCard.columnId) : undefined;
+
+  useEffect(() => {
+    if (read.primed || !canPrime(board.cards)) return;
+    setRead({ marks: primeMarks(board.cards), primed: true });
+  }, [read.primed, board.cards]);
+
+  // Having the card open IS reading it: mark the thread as it stands now, and
+  // again whenever a comment lands while you're looking at it, so a card you
+  // are staring at never comes back unread the moment you close it. Guarded on
+  // the mark it would write, or setting state on every SSE echo would spin.
+  const openNewest = openCard ? newestCommentAt(openCard) : 0;
+  useEffect(() => {
+    if (!openCard) return;
+    setRead((r) => (r.marks[openCard.id] === openNewest ? r : { ...r, marks: markCardRead(r.marks, openCard) }));
+  }, [openCardId, openNewest]);
+
+  // Persist, dropping marks for cards that no longer exist. Only once a real
+  // baseline exists — storing the empty one would count as "primed" on the next
+  // load and light up the whole board.
+  useEffect(() => {
+    if (read.primed) saveMarks(read.marks, board.cards);
+  }, [read, board.cards]);
+
+  const unreadOn = (card: Card) => unreadCommentCount(card, read.marks, ME);
 
   return (
     <section className="win line">
@@ -83,6 +120,7 @@ export function TheLine({
             autoFocusName={addingCol && i === board.columns.length - 1}
             onNamed={() => setAddingCol(false)}
             onOpenCard={setOpenCardId}
+            unreadOn={unreadOn}
           />
         ))}
         <button className="pix add-col" onClick={onAddColumn} title="Add a column">+ COLUMN</button>
@@ -104,11 +142,13 @@ export function TheLine({
 }
 
 function ColumnView({
-  board, agents, mutate, column, index, rows, autoFocusName, onNamed, onOpenCard,
+  board, agents, mutate, column, index, rows, autoFocusName, onNamed, onOpenCard, unreadOn,
 }: {
   board: Board; agents: AgentStatus[]; mutate: Mutate; column: Column; index: number;
   rows: number; autoFocusName: boolean;
   onNamed: () => void; onOpenCard: (id: string) => void;
+  /** unread comments on a card — computed by TheLine, which owns the read marks */
+  unreadOn: (card: Card) => number;
 }) {
   const [dragOver, setDragOver] = useState(false);
   // Which slot a dropped card would take in this column: 0 = above the first
@@ -245,6 +285,7 @@ function ColumnView({
             onDragOverCard={(before) => setDropAt(before ? i : i + 1)}
             onMoveByKey={(dir) => moveByKey(card.id, dir)}
             onOpen={() => onOpenCard(card.id)}
+            unread={unreadOn(card)}
           />
         ))}
       </div>
@@ -308,13 +349,15 @@ function edgeScroll(e: DragEvent<HTMLDivElement>) {
 // with the assignee (its agent's sprite avatar, or initials when the session has
 // ended) and a comment count. Detail lives in the modal.
 function CardView({
-  agents, mutate, card, index, dropBefore, dropAfterLast, onDragOverCard, onMoveByKey, onOpen,
+  agents, mutate, card, index, dropBefore, dropAfterLast, onDragOverCard, onMoveByKey, onOpen, unread,
 }: {
   agents: AgentStatus[]; mutate: Mutate; card: Card; index: number;
   dropBefore: boolean; dropAfterLast: boolean;
   onDragOverCard: (before: boolean) => void;
   onMoveByKey: (dir: "left" | "right" | "up" | "down") => void;
   onOpen: () => void;
+  /** comments on this card you haven't read — 0 when there's nothing new */
+  unread: number;
 }) {
   const commentCount = card.comments?.length ?? 0;
   const hasMeta = !!card.assignee || commentCount > 0 || !!card.description;
@@ -323,6 +366,12 @@ function CardView({
   const assignedAgent = card.assignee
     ? agents.find((a) => a.sessionId === card.assignee!.id || (!!card.assignee!.crew && a.crew?.id === card.assignee!.crew))
     : undefined;
+  // The sprite bobs on "working", and on a card face that bob is the ONLY thing
+  // saying the agent is busy — so it has to be honest. A status file frozen
+  // mid-turn (killed session, crashed window, a Stop that never came back) still
+  // says "working" for the five minutes it takes to age off the board; ask
+  // liveness whether anything has refreshed it lately instead of trusting it.
+  const avatarState = assignedAgent ? displayState(assignedAgent, Date.now()) : "idle";
 
   // Deleting takes the card's whole comment thread with it, so it has to be
   // recoverable. Rather than a blocking confirm() in front of every delete
@@ -343,11 +392,13 @@ function CardView({
 
   return (
     <div
-      className={`card${dropBefore ? " drop-before" : ""}${dropAfterLast ? " drop-after" : ""}`}
+      className={`card${dropBefore ? " drop-before" : ""}${dropAfterLast ? " drop-after" : ""}${unread ? " has-unread" : ""}`}
       role="button"
       tabIndex={0}
       draggable
-      title="Enter opens · Alt+arrows move it"
+      title={unread
+        ? `${unread} unread comment${unread > 1 ? "s" : ""} · Enter opens · Alt+arrows move it`
+        : "Enter opens · Alt+arrows move it"}
       onClick={onOpen}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); return; }
@@ -380,12 +431,21 @@ function CardView({
             {card.assignee && (
               assignedAgent
                 ? <span className="card-avatar" title={card.assignee.name}>
-                    <Sprite sessionId={assignedAgent.sessionId} role={assignedAgent.role} state={assignedAgent.state} override={assignedAgent.sprite} />
+                    <Sprite sessionId={assignedAgent.sessionId} role={assignedAgent.role} state={avatarState} override={assignedAgent.sprite} />
                   </span>
                 : <span className="card-assignee" title={`${card.assignee.name} (session ended)`}>{initials(card.assignee.name)}</span>
             )}
             {card.description && <span className="card-flag" title="Has a description">≡</span>}
-            {commentCount > 0 && <span className="card-flag" title={`${commentCount} comment${commentCount > 1 ? "s" : ""}`}>💬 {commentCount}</span>}
+            {/* Unread turns the count into "N NEW" and colours it, so a thread
+                you've already read never looks the same as one that's moved on. */}
+            {commentCount > 0 && (
+              unread
+                ? <span className="card-flag card-flag-unread" role="status"
+                        title={`${unread} unread of ${commentCount} comment${commentCount > 1 ? "s" : ""}`}>
+                    💬 {unread} NEW
+                  </span>
+                : <span className="card-flag" title={`${commentCount} comment${commentCount > 1 ? "s" : ""}`}>💬 {commentCount}</span>
+            )}
           </div>
         )}
       </div>

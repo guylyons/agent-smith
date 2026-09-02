@@ -1346,6 +1346,20 @@ body{background:transparent}
 .desk.has-unread:hover{box-shadow:var(--win-shadow-hover),0 0 0 2px var(--clay)}
 @media (prefers-reduced-motion:reduce){.desk-unread{animation:none}}
 
+/* ---- a board card carrying a comment you haven't read ----------------------
+   The card face used to print "💬 3" whether you read that thread a minute ago
+   or an agent added two more since, so a board of commented cards said nothing
+   about which ones wanted your eyes. Unread borrows the desks' language — clay
+   — and takes the BORDER rather than the box-shadow, which the drag-and-drop
+   drop-line already owns; :hover and :focus still take the border gold, so
+   pointing at a card doesn't fight its highlight. No animation: these sit in a
+   stack of up to six, and six things pulsing at once is noise, not a signal. */
+.card.has-unread{border-color:var(--clay)}
+.card-flag.card-flag-unread{
+  color:var(--on-danger);background:var(--clay);
+  padding:2px 4px;letter-spacing:.5px;
+}
+
 /* ---- tube death: STOP takes the agent's window out like a CRT ---------------
    Ending a session used to blink its window out between one frame and the next
    — the most destructive button on screen with the least to show for it. Now it
