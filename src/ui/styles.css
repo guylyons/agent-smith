@@ -830,6 +830,38 @@ body{background:transparent}
   background-size:52px 52px;
   animation:bg-rain .7s linear infinite;
 }
+/* NOSTROMO — the ship's interior: hundreds of amber panel lights blinking on a
+   warm-dark ground. The ground layer (seams + vignette + a dim baseline lattice)
+   is static; two dot lattices on ::before/::after carry the blink. They share the
+   13px grid but ::after is offset half a cell and runs counter-phase (see the two
+   keyframes), so different physical lights wink up and down out of sync rather
+   than the whole field pulsing as one. Reduced-motion freezes both (global rule
+   below), leaving a lit, static panel. Amber is the theme's own --gold #ffb000. */
+:root[data-bg="nostromo"] .artbg{
+  background:
+    radial-gradient(circle, rgba(255,150,40,.26) 0 .8px, transparent 1.6px) 0 0/13px 13px,
+    repeating-linear-gradient(0deg, rgba(0,0,0,.32) 0 1px, transparent 1px 66px),
+    repeating-linear-gradient(90deg, rgba(0,0,0,.32) 0 1px, transparent 1px 66px),
+    radial-gradient(120% 95% at 50% 38%, #1c1209 0%, #0b0705 58%, #040302 100%);
+}
+:root[data-bg="nostromo"] .artbg::before{
+  content:"";position:absolute;inset:0;
+  background:
+    radial-gradient(circle, rgba(255,190,70,.95) 0 1px, transparent 1.8px) 0 0/13px 13px,
+    radial-gradient(circle at 30% 30%, rgba(255,225,150,1) 0 1.2px, transparent 2.4px) 0 0/52px 39px;
+  animation:bg-nostromo-a 6.5s ease-in-out infinite;
+}
+:root[data-bg="nostromo"] .artbg::after{
+  content:"";position:absolute;inset:0;
+  background:
+    radial-gradient(circle, rgba(255,176,0,.9) 0 1px, transparent 1.8px) 6px 6px/13px 13px,
+    radial-gradient(circle at 60% 70%, rgba(255,120,40,.85) 0 1px, transparent 2.2px) 0 0/61px 47px;
+  animation:bg-nostromo-b 8s ease-in-out infinite;
+  animation-delay:-3s;
+}
+@keyframes bg-nostromo-a{0%,100%{opacity:.35}50%{opacity:1}}
+@keyframes bg-nostromo-b{0%,100%{opacity:.9}50%{opacity:.3}}
+
 /* ---- very subtle idle animation for the art layer ----
    Long durations + tiny deltas so it reads as "alive", never busy. All of it is
    disabled under prefers-reduced-motion. */
