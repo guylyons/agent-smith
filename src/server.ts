@@ -9,7 +9,7 @@ import type { ChatMessage } from "./lib/conversation";
 import { readOverrides, applyOverrides, setNameOverride, setSpriteOverride } from "./lib/overrides";
 import { loadPersonas, applyPersonas } from "./lib/personas";
 import { applyCrew, pickName, mintCrewId, findAssigneeSession, isAssigneeSession, addNote, CREW_ID_RE } from "./lib/crew";
-import { readBoard, writeBoard, sanitizeBoard, boardFile, addCard, moveCard, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, addColumn, renameColumn, setInstruction, setColumnStage, STAGES, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, sanitizeCard, sanitizeColumn, type Board, type Card, type Column, type Stage } from "./lib/board";
+import { readBoard, writeBoard, sanitizeBoard, boardFile, addCard, moveCard, progressCard, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, addColumn, renameColumn, setInstruction, setColumnStage, STAGES, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, sanitizeCard, sanitizeColumn, type Board, type Card, type Column, type Stage } from "./lib/board";
 import { ALLOWED_MODELS, ALLOWED_PERMISSION_MODES, focusSession, interruptSession, killAgent, sendPrompt, sendFreshPrompt, spawnAgent } from "./ghostty";
 import { readRepo } from "./repo";
 import { readMergeState, mergeWork } from "./lib/merge";
@@ -690,14 +690,21 @@ export function makeServer(
             // before: its context is about to be cleared, so the footer sends
             // it back to its own notes on the card first.
             const workedBefore = (card.comments ?? []).some((c) => c.author === agent.name);
-            const prompt = cardTaskPrompt(board, cardId, url.origin, agent.name, { workedBefore });
+            // Server-authoritative in-progress: put the card where work happens
+            // ourselves, then compose the prompt from THAT board — so the card
+            // reaches in-progress even if the agent skips STEP 1, and the prompt
+            // correctly tells it the card is already there (leave it, pick it up).
+            const progressed = progressCard(board, cardId);
+            const prompt = cardTaskPrompt(progressed, cardId, url.origin, agent.name, { workedBefore });
             if (!prompt.trim()) return json({ ok: false, error: "card has no task text to send" }, 400);
             // Fresh delivery: clear the agent's context before the new task so
             // the previous ticket doesn't bleed into this one.
             const r = await deliverFresh(agent, prompt);
-            if (!r.ok) return json(r, 502);
+            if (!r.ok) return json(r, 502); // delivery failed: leave the card where it was
             const by = typeof body.author === "string" && body.author.trim() ? body.author.trim() : "You";
-            writeBoard(dir, addComment(readBoard(dir), cardId, by, `Sent task to ${agent.name}.`));
+            // Re-read after the await, then apply the move + the send record as one
+            // write (progressCard is a no-op if it already landed in-progress).
+            writeBoard(dir, addComment(progressCard(readBoard(dir), cardId), cardId, by, `Sent task to ${agent.name}.`));
             push();
             return json({ ok: true });
           }
