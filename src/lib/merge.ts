@@ -7,6 +7,7 @@
 // so the rules are unit-tested without a repo, and the git-touching functions
 // only gather facts and run the one command.
 import { dirname, resolve } from "node:path";
+import { runExclusive, pending } from "./merge-queue";
 
 /** The trunk we merge into, first one that exists. */
 const BASES = ["main", "master"] as const;
@@ -35,6 +36,9 @@ export type MergeState = MergeFacts & {
   ready: boolean;
   /** why it isn't ready, short enough for a tooltip; "" when it is */
   blocked: string;
+  /** a merge is already running (or queued) for this trunk — the key holds
+   *  until it drains, so two cards never land on the checkout at once */
+  merging: boolean;
 };
 
 /**
@@ -72,8 +76,10 @@ async function git(cwd: string, args: string[]): Promise<{ code: number; stdout:
 }
 
 /** The MAIN checkout's root, so a call from inside a linked worktree still
- *  resolves the repo everything hangs off. null when `cwd` isn't a repo. */
-async function repoRoot(cwd: string): Promise<string | null> {
+ *  resolves the repo everything hangs off. null when `cwd` isn't a repo. Also
+ *  the merge queue's key: every worktree of one repo resolves to the same root,
+ *  so they all queue against the one shared checkout. */
+export async function repoRoot(cwd: string): Promise<string | null> {
   const common = await git(cwd, ["rev-parse", "--git-common-dir"]);
   if (common.code !== 0) return null;
   return dirname(resolve(cwd, common.stdout));
@@ -101,16 +107,13 @@ async function pickBase(root: string): Promise<string> {
 
 const NOT_A_REPO: MergeState = {
   repo: false, branch: "", base: "", ahead: 0, dirty: false, rootBranch: "", rootDirty: false,
-  committed: false, ready: false, blocked: "not a git repository",
+  committed: false, ready: false, blocked: "not a git repository", merging: false,
 };
 
-/** Everything the card needs to know about landing this work. Best-effort: a
- *  non-git directory (or no git at all) reads as "nothing to merge". */
-export async function readMergeState(cwd: string): Promise<MergeState> {
-  if (!cwd) return NOT_A_REPO;
-  const root = await repoRoot(cwd);
-  if (!root) return NOT_A_REPO;
-
+/** Gather the facts a merge decision hangs on, from a worktree and its root.
+ *  Pure of any verdict — the rules (mergeVerdict) and the queue (merging) are
+ *  applied on top by the callers. */
+async function factsFor(cwd: string, root: string): Promise<MergeFacts> {
   const [branch, base, dirty, rootBranch, rootDirty] = await Promise.all([
     currentBranch(cwd), pickBase(root), isDirty(cwd, true), currentBranch(root), isDirty(root, false),
   ]);
@@ -121,8 +124,26 @@ export async function readMergeState(cwd: string): Promise<MergeState> {
     ahead = count.code === 0 ? Number.parseInt(count.stdout, 10) || 0 : 0;
   }
 
-  const facts: MergeFacts = { repo: true, branch, base, ahead, dirty, rootBranch, rootDirty };
-  return { ...facts, ...mergeVerdict(facts) };
+  return { repo: true, branch, base, ahead, dirty, rootBranch, rootDirty };
+}
+
+/** Everything the card needs to know about landing this work. Best-effort: a
+ *  non-git directory (or no git at all) reads as "nothing to merge". */
+export async function readMergeState(cwd: string): Promise<MergeState> {
+  if (!cwd) return NOT_A_REPO;
+  const root = await repoRoot(cwd);
+  if (!root) return NOT_A_REPO;
+
+  const facts = await factsFor(cwd, root);
+  const verdict = mergeVerdict(facts);
+  const merging = pending(root) > 0;
+
+  // A merge already running on this trunk holds the key: don't offer to land
+  // work onto a checkout mid-merge — wait for it to drain, then re-arm.
+  if (merging && verdict.committed) {
+    return { ...facts, ...verdict, ready: false, blocked: "a merge is in progress — try again in a moment", merging };
+  }
+  return { ...facts, ...verdict, merging };
 }
 
 export type MergeResult = { ok: boolean; branch?: string; base?: string; error?: string };
@@ -135,16 +156,26 @@ export type MergeResult = { ok: boolean; branch?: string; base?: string; error?:
  * by a button press.
  */
 export async function mergeWork(cwd: string): Promise<MergeResult> {
-  const state = await readMergeState(cwd);
-  if (!state.ready) return { ok: false, error: state.blocked || "nothing to merge" };
   const root = await repoRoot(cwd);
   if (!root) return { ok: false, error: "not a git repository" };
 
-  const merge = await git(root, ["merge", "--no-ff", "--no-edit", state.branch]);
-  if (merge.code !== 0) {
-    await git(root, ["merge", "--abort"]);
-    const why = (merge.stdout || merge.stderr).split("\n").find((l) => l.trim()) ?? "";
-    return { ok: false, error: `could not merge ${state.branch} into ${state.base} — ${why || "merge it by hand"}` };
-  }
-  return { ok: true, branch: state.branch, base: state.base };
+  // Take our turn in the queue for this trunk. Everything that touches the
+  // shared checkout happens inside here, so two cards can never be mid-merge on
+  // it at once.
+  return runExclusive(root, async () => {
+    // Re-check with the pure rules now that it's our turn — NOT readMergeState,
+    // which would count our own queue slot as "a merge in progress" and refuse.
+    // The facts are current, so whatever landed ahead of us is already seen.
+    const facts = await factsFor(cwd, root);
+    const verdict = mergeVerdict(facts);
+    if (!verdict.ready) return { ok: false, error: verdict.blocked || "nothing to merge" };
+
+    const merge = await git(root, ["merge", "--no-ff", "--no-edit", facts.branch]);
+    if (merge.code !== 0) {
+      await git(root, ["merge", "--abort"]);
+      const why = (merge.stdout || merge.stderr).split("\n").find((l) => l.trim()) ?? "";
+      return { ok: false, error: `could not merge ${facts.branch} into ${facts.base} — ${why || "merge it by hand"}` };
+    }
+    return { ok: true, branch: facts.branch, base: facts.base };
+  });
 }
