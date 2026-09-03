@@ -1,7 +1,8 @@
 import { test, expect } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { mergeVerdict, readMergeState, mergeWork, type MergeFacts } from "../src/lib/merge";
+import { mergeVerdict, readMergeState, mergeWork, repoRoot, type MergeFacts } from "../src/lib/merge";
+import { runExclusive } from "../src/lib/merge-queue";
 
 // --- the rules, without a repo ---------------------------------------------
 
@@ -144,4 +145,44 @@ test("mergeWork refuses when the main checkout is busy", async () => {
   const r = await mergeWork(wt);
   expect(r.ok).toBe(false);
   expect(r.error).toMatch(/uncommitted/);
+});
+
+// --- the queue: two merges into one checkout must not race -------------------
+
+test("two branches merging at once both land, one after the other", async () => {
+  const root = await freshRepo();
+  const wt1 = await workOn(root, "ag-q1", "one.txt", "one\n");
+  const wt2 = await workOn(root, "ag-q2", "two.txt", "two\n");
+
+  // Fire both without awaiting between them — the serialization has to be the
+  // queue's job, not the caller's. Without it these collide on the shared
+  // checkout (index.lock, or a half-done merge poisoning the other's re-check).
+  const [r1, r2] = await Promise.all([mergeWork(wt1), mergeWork(wt2)]);
+
+  expect(r1.ok).toBe(true);
+  expect(r2.ok).toBe(true);
+  expect(existsSync(join(root, "one.txt"))).toBe(true);
+  expect(existsSync(join(root, "two.txt"))).toBe(true);
+});
+
+test("readMergeState reports a merge in progress on the same root and holds the key", async () => {
+  const root = await freshRepo();
+  const wt = await workOn(root, "ag-inflight", "feature.txt", "hello\n");
+  const key = (await repoRoot(wt))!;
+
+  // Occupy the queue for this root, as an in-flight merge would.
+  let release!: () => void;
+  const held = runExclusive(key, () => new Promise<void>((res) => { release = res; }));
+
+  const during = await readMergeState(wt);
+  expect(during.merging).toBe(true);
+  expect(during.ready).toBe(false);
+  expect(during.blocked).toMatch(/in progress/);
+
+  release();
+  await held;
+
+  const after = await readMergeState(wt);
+  expect(after.merging).toBe(false);
+  expect(after.ready).toBe(true);
 });
