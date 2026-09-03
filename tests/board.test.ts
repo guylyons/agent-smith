@@ -16,6 +16,7 @@ import {
   deleteCard,
   restoreCard,
   moveCard,
+  progressCard,
   cardMoveTarget,
   setCardDescription,
   assignCard,
@@ -159,6 +160,28 @@ test("moveCard can insert at a specific index within the target column", () => {
   const c = b.cards.find((x) => x.title === "c")!.id;
   b = moveCard(b, c, col, 0);
   expect(b.cards.filter((x) => x.columnId === col).map((x) => x.title)).toEqual(["c", "a", "b"]);
+});
+
+test("progressCard moves a card into the board's work (doing) column", () => {
+  let b = defaultBoard();
+  const backlog = b.columns[0]!.id;
+  b = addCard(b, backlog, "task");
+  const id = b.cards[0]!.id;
+  b = progressCard(b, id);
+  expect(b.cards[0]!.columnId).toBe(stageColumn(b, "doing")!.id);
+});
+
+test("progressCard is a no-op (same board) for a card already in its work column", () => {
+  let b = defaultBoard();
+  const doing = stageColumn(b, "doing")!.id;
+  b = addCard(b, doing, "task");
+  const id = b.cards[0]!.id;
+  expect(progressCard(b, id)).toBe(b);
+});
+
+test("progressCard is a no-op (same board) for an unknown card", () => {
+  const b = defaultBoard();
+  expect(progressCard(b, "card_nope")).toBe(b);
 });
 
 test("moveCard to an unknown column is a no-op", () => {

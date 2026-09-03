@@ -366,7 +366,7 @@ test("card-assign binds a just-spawned session even before it enters the live vi
 const WORKER = "502d0e8c-8790-4804-b767-0549edfc959c";
 const SCRUM = "9a1b2c3d-1111-4222-8333-444455556666";
 
-async function notifyServer(opts: { deliverOk?: boolean } = {}) {
+async function notifyServer(opts: { deliverOk?: boolean; deliverFreshOk?: boolean } = {}) {
   reset();
   process.env.AGENT_STATUS_DIR = dir;
   const sent: { sessionId: string; text: string; fresh: boolean }[] = [];
@@ -376,7 +376,10 @@ async function notifyServer(opts: { deliverOk?: boolean } = {}) {
       if (opts.deliverOk === false) return { ok: false, error: "no terminal" };
       sent.push({ sessionId: target.sessionId, text, fresh: false }); return { ok: true };
     },
-    deliverFresh: async (target: any, text: string) => { sent.push({ sessionId: target.sessionId, text, fresh: true }); return { ok: true }; },
+    deliverFresh: async (target: any, text: string) => {
+      if (opts.deliverFreshOk === false) return { ok: false, error: "no terminal" };
+      sent.push({ sessionId: target.sessionId, text, fresh: true }); return { ok: true };
+    },
   });
   const base = `http://localhost:${server.port}`;
   const post = (path: string, body: object) =>
@@ -400,12 +403,38 @@ test("send-task delivers the protocol prompt to the assigned live session", asyn
   expect(sent[0]!.fresh).toBe(true); // a new task clears the agent's context first
   expect(sent[0]!.text).toContain("Fix bug");
   expect(sent[0]!.text).toContain(cardId);
-  expect(sent[0]!.text).toContain(`${base}/action/card-move`); // curl target is this server
+  expect(sent[0]!.text).toContain(`${base}/action/card-comment`); // curl target is this server
   expect(sent[0]!.text).toContain('"as":"assignee"');
   expect(sent[0]!.text).toContain("assigned agent on this card, VOLT");
   // and the thread records the send
   const card = readSnapshot(dir, Date.now()).board.cards[0]!;
   expect(card.comments!.some((c) => c.text.includes("Sent task to VOLT"))).toBe(true);
+  server.stop(true);
+});
+
+test("send-task moves the card into in-progress server-side, not left to the agent", async () => {
+  const { server, post, sent } = await notifyServer();
+  writeFileSync(join(dir, `${WORKER}.json`), valid({ sessionId: WORKER, name: "VOLT", state: "idle" }));
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "Fix bug" })).json()) as any;
+  await post("/action/card-assign", { cardId, sessionId: WORKER });
+  await post("/action/send-task", { cardId });
+  // The server put the card in the work column itself — no dependence on STEP 1.
+  const card = readSnapshot(dir, Date.now()).board.cards.find((c) => c.id === cardId)!;
+  expect(card.columnId).toBe("in-progress");
+  // And because it's already there, the prompt tells the agent to leave it.
+  expect(sent[0]!.text).toContain('already in "in-progress"');
+  server.stop(true);
+});
+
+test("send-task does NOT move the card when delivery fails", async () => {
+  const { server, post } = await notifyServer({ deliverFreshOk: false });
+  writeFileSync(join(dir, `${WORKER}.json`), valid({ sessionId: WORKER, name: "VOLT", state: "idle" }));
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "Fix bug" })).json()) as any;
+  await post("/action/card-assign", { cardId, sessionId: WORKER });
+  const res = await post("/action/send-task", { cardId });
+  expect(res.status).toBe(502);
+  const card = readSnapshot(dir, Date.now()).board.cards.find((c) => c.id === cardId)!;
+  expect(card.columnId).toBe("backlog"); // unchanged: no half-done transition
   server.stop(true);
 });
 

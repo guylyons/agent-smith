@@ -34,6 +34,41 @@ test("agents are sorted by name", () => {
   expect(snap.agents.map((a) => a.name)).toEqual(["ALPHA", "ZULU"]);
 });
 
+test("two status files sharing a crew id collapse to the freshest (the /clear ghost)", () => {
+  // /clear starts a new session id in the SAME process without a SessionEnd, so
+  // the old session's status file lingers. Both share the crew id that outlives
+  // the /clear; only the live (freshest) one should show.
+  const snap = buildSnapshot([
+    A({ sessionId: "old1", name: "LAMBERT", updatedAt: 900, crew: { id: "lambert-6fdc", name: "LAMBERT" } }),
+    A({ sessionId: "new2", name: "LAMBERT", updatedAt: 990, crew: { id: "lambert-6fdc", name: "LAMBERT" } }),
+  ], 1000);
+  expect(snap.agents.length).toBe(1);
+  expect(snap.agents[0]!.sessionId).toBe("new2");
+});
+
+test("agents without a crew id are never collapsed together", () => {
+  const snap = buildSnapshot([
+    A({ sessionId: "aaaa1111", name: "SABLE", updatedAt: 900 }),
+    A({ sessionId: "bbbb2222", name: "MAKO", updatedAt: 990 }),
+  ], 1000);
+  expect(snap.agents.length).toBe(2);
+});
+
+test("a working agent nothing has refreshed lately shows as idle (the frozen-WORKING ghost)", () => {
+  const now = 1_000_000;
+  const snap = buildSnapshot([A({ state: "working", doing: "thinking", updatedAt: now - 120_000 })], now);
+  expect(snap.agents.length).toBe(1); // still within the 5-min existence window
+  expect(snap.agents[0]!.state).toBe("idle");
+  expect(snap.agents[0]!.doing).toBe("idle");
+});
+
+test("a genuinely-working agent keeps its working state", () => {
+  const now = 1_000_000;
+  const snap = buildSnapshot([A({ state: "working", doing: "thinking", updatedAt: now - 5_000 })], now);
+  expect(snap.agents[0]!.state).toBe("working");
+  expect(snap.agents[0]!.doing).toBe("thinking");
+});
+
 test("the board is passed through unchanged", () => {
   const board = addColumn(defaultBoard(), "Blocked");
   const snap = buildSnapshot([A({})], 1000, { board });
