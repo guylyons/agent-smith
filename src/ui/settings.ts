@@ -48,6 +48,7 @@ export const BACKGROUNDS = [
   { id: "synth", label: "SYNTH" },
   { id: "grid", label: "GRID" },
   { id: "dusk", label: "DUSK" },
+  { id: "nostromo", label: "NOSTROMO" },
 ] as const;
 
 /** The id used when the background is the user's own uploaded image. */
