@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { isDictatable, micPosition, spliceTranscript, MIC_SIZE, MIC_GAP } from "../lib/dictation";
-import { toast } from "./toast";
+import { toastError } from "./toast";
 
 // Click-to-talk for every text field in the app, from one place.
 //
@@ -141,7 +141,7 @@ export function Dictation() {
     rec.onerror = (e) => {
       // Silence on the mic isn't a failure worth a toast — it just times out.
       if (e.error === "no-speech" || e.error === "aborted") return;
-      toast(e.error === "not-allowed"
+      toastError(e.error === "not-allowed"
         ? "Microphone blocked — allow it for this site in your browser settings"
         : `Dictation stopped: ${e.error}`);
     };
@@ -152,7 +152,7 @@ export function Dictation() {
       rec.start();
       setListening(true);
     } catch {
-      toast("Could not start dictation");
+      toastError("Could not start dictation");
       recRef.current = null;
     }
   }, [target]);

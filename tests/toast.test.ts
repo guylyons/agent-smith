@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { toast, subscribeToasts } from "../src/ui/toast";
+import { toast, toastError, subscribeToasts } from "../src/ui/toast";
 
 test("a toast carries an optional action its subscriber can run", () => {
   const seen: { text: string; label?: string }[] = [];
@@ -25,5 +25,19 @@ test("running a toast's action invokes the callback exactly once per toast", () 
   captured?.();
 
   expect(ran).toBe(1);
+  off();
+});
+
+test("toastError marks the toast as kind: \"error\"; a plain toast carries no kind", () => {
+  const seen: { text: string; kind?: string }[] = [];
+  const off = subscribeToasts((t) => seen.push({ text: t.text, kind: t.kind }));
+
+  toastError("upload failed");
+  toast("plain");
+
+  expect(seen).toEqual([
+    { text: "upload failed", kind: "error" },
+    { text: "plain", kind: undefined },
+  ]);
   off();
 });

@@ -19,7 +19,13 @@ export function Toaster() {
   return (
     <div className="toaster">
       {toasts.map((t) => (
-        <div key={t.id} className="pix toast">
+        <div
+          key={t.id}
+          className="pix toast"
+          role={t.kind === "error" ? "alert" : "status"}
+          aria-live={t.kind === "error" ? "assertive" : "polite"}
+          aria-atomic="true"
+        >
           <span className="toast-text">{t.text}</span>
           {t.action && (
             <button
