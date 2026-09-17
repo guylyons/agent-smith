@@ -72,6 +72,12 @@ export function NewAgentModal({
   }, []);
 
   const [folder, setFolder] = useState(initialFolder ?? loadRecentFolders()[0] ?? liveFolders[0] ?? "");
+  // Only an explicit initialFolder (e.g. "new agent for this card") is a
+  // deliberate default. A recent- or live-folder fallback is a guess pulled
+  // from unrelated past activity — mark it "remembered" until the user
+  // types, browses, or picks a chip, so it never reads as something typed.
+  const [folderTouched, setFolderTouched] = useState(!!initialFolder);
+  const folderRemembered = !folderTouched && !!folder;
   const [task, setTask] = useState(initialTask);
   const [model, setModel] = useState("");
   const [permissionMode, setPermissionMode] = useState("");
@@ -102,7 +108,7 @@ export function NewAgentModal({
     // this one" is a couple of clicks rather than a walk from home.
     const chosen = await pickFolder(folder.trim() || undefined);
     setPicking(false);
-    if (chosen) setFolder(chosen);
+    if (chosen) { setFolder(chosen); setFolderTouched(true); }
   }
 
   function forget(path: string) {
@@ -135,8 +141,10 @@ export function NewAgentModal({
 
         <label className="pix newagent-label" htmlFor="na-folder">FOLDER</label>
         <div className="newagent-folder">
-          <input id="na-folder" className="reply-input" placeholder="/Users/you/project" autoFocus
-            value={folder} onChange={(e) => setFolder(e.target.value)} />
+          <input id="na-folder" className={`reply-input ${folderRemembered ? "remembered" : ""}`}
+            placeholder="/Users/you/project" autoFocus
+            aria-describedby={folderRemembered ? "na-folder-remembered" : undefined}
+            value={folder} onChange={(e) => { setFolderTouched(true); setFolder(e.target.value); }} />
           <button type="button" className="deskbtn newagent-browse" disabled={picking}
             title="Browse for a folder" aria-label="Browse for a folder"
             onClick={() => void browse()}>
@@ -145,11 +153,17 @@ export function NewAgentModal({
             </svg>
           </button>
         </div>
+        {folderRemembered && (
+          <div id="na-folder-remembered" className="pix newagent-folder-hint">
+            ↳ Remembered from a past launch — may not be this project. Edit, browse, or pick below to confirm.
+          </div>
+        )}
         {recent.length > 0 && (
           <div className="newagent-recent">
             {recent.map((f, i) => (
               <span key={f} className={`newagent-chip ${f === folder ? "on" : ""}`}>
-                <button type="button" className={`deskbtn ${f === folder ? "on" : ""}`} title={f} onClick={() => setFolder(f)}>{labels[i]}</button>
+                <button type="button" className={`deskbtn ${f === folder ? "on" : ""}`} title={f}
+                  onClick={() => { setFolder(f); setFolderTouched(true); }}>{labels[i]}</button>
                 {/* Only where it does something you can see: a folder an agent is
                     running in stays on the row regardless, so offering to forget
                     it would look like a dead button. */}
