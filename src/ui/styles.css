@@ -1135,9 +1135,23 @@ body{background:transparent}
   border:2px solid var(--bevel);background:var(--box-lo);color:var(--bone);
 }
 .cardmodal-send{background:var(--gold);color:var(--on-accent);border-color:var(--bone)}
-.cardmodal-send:disabled{opacity:.4;cursor:not-allowed}
 .cardmodal-spawn{color:var(--dim);border-style:dashed}
 .cardmodal-spawn:not(:disabled):hover{color:var(--gold);border-color:var(--gold)}
+/* Blocked, and visibly so. Both of these switch off on their own -- SEND when
+   the assignee is missing or busy, NEW AGENT when a file claim stands in the
+   way -- and the title says which, but a tooltip is not a state: it arrives
+   after the pointer, and only for a pointer.
+   Fading SEND was not enough on its own. It is the one filled button here, and
+   a gold fill at 40% is still a filled button: it went on out-shouting the
+   live outline button beside it. So a blocked action gives up the accent and
+   drops back to the panel's own ground before it fades -- an inert slab, not a
+   dimmed key. NEW AGENT had no disabled state at all and now shares this one,
+   keeping its dashed edge so it is still recognisably itself. */
+.cardmodal-send:disabled,
+.cardmodal-spawn:disabled{
+  background:var(--box-lo);color:var(--bone);border-color:var(--bevel);
+  opacity:.5;cursor:not-allowed;
+}
 
 /* ---- the MERGE key -------------------------------------------------------
    A physical key bolted onto the ticket, and the one control in the app that
