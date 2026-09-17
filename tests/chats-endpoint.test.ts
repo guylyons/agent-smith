@@ -1,10 +1,11 @@
 import { test, expect } from "bun:test";
+import { fixtureDir } from "./fixtures";
 import { searchChats } from "../src/server";
 import type { ChatMessage } from "../src/lib/conversation";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
-const dir = "/tmp/aw-chats-test";
+const dir = fixtureDir("chats-test");
 function reset() { rmSync(dir, { recursive: true, force: true }); mkdirSync(dir, { recursive: true }); }
 const valid = (o: object) => JSON.stringify({
   sessionId: "s", name: "A", role: "r", ticket: null, state: "working",
@@ -42,7 +43,7 @@ test("GET /search returns chat hits from live sessions", async () => {
   process.env.AGENT_STATUS_DIR = dir;
   writeFileSync(join(dir, "ccc.json"), valid({ sessionId: "ccc", name: "SABLE" }));
   // point the projects dir at a fixture with one transcript for session ccc
-  const proj = "/tmp/aw-chats-projects";
+  const proj = fixtureDir("chats-projects");
   rmSync(proj, { recursive: true, force: true });
   mkdirSync(join(proj, "someproj"), { recursive: true });
   writeFileSync(

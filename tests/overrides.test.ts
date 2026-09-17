@@ -1,9 +1,10 @@
 import { test, expect } from "bun:test";
+import { fixtureDir } from "./fixtures";
 import { readOverrides, setNameOverride, setSpriteOverride, applyOverrides } from "../src/lib/overrides";
 import type { AgentStatus } from "../src/schema";
 import { mkdirSync, rmSync } from "node:fs";
 
-const dir = "/tmp/aw-overrides-test";
+const dir = fixtureDir("overrides-test");
 function reset() { rmSync(dir, { recursive: true, force: true }); mkdirSync(dir, { recursive: true }); }
 
 const A = (o: Partial<AgentStatus>): AgentStatus => ({

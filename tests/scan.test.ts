@@ -1,10 +1,11 @@
 import { test, expect } from "bun:test";
+import { fixtureDir } from "./fixtures";
 import { mergeForWrite, scanLiveSessions, freshTranscripts, chooseLive, isEphemeralCwd, readConversation, budgetTotalOf, isClaudeComm, isSessionHostComm, parseProcessTable, processInfoOk, type GhosttyTerminal } from "../src/scan";
 import type { AgentStatus } from "../src/schema";
 import { mkdirSync, writeFileSync, rmSync, readFileSync, utimesSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
-const base = "/tmp/aw-scan-test";
+const base = fixtureDir("scan-test");
 const projects = join(base, "projects");
 const status = join(base, "status");
 

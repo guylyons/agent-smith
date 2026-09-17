@@ -1,11 +1,12 @@
 // tests/server.test.ts
 import { test, expect } from "bun:test";
+import { fixtureDir } from "./fixtures";
 import { readSnapshot } from "../src/server";
 import { setNameOverride } from "../src/lib/overrides";
 import { mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const dir = "/tmp/aw-server-test";
+const dir = fixtureDir("server-test");
 
 function reset() { rmSync(dir, { recursive: true, force: true }); mkdirSync(dir, { recursive: true }); }
 
@@ -87,8 +88,9 @@ test("POST /action/board sanitizes a malformed board before storing", async () =
 test("POST /action/upload saves an image and returns its path", async () => {
   reset();
   process.env.AGENT_STATUS_DIR = dir;
-  process.env.AGENT_UPLOAD_DIR = "/tmp/aw-server-upload-test";
-  rmSync("/tmp/aw-server-upload-test", { recursive: true, force: true });
+  const uploads = fixtureDir("server-upload-test");
+  process.env.AGENT_UPLOAD_DIR = uploads;
+  rmSync(uploads, { recursive: true, force: true });
   const { makeServer } = await import("../src/server");
   const server = makeServer(0);
   const res = await fetch(`http://localhost:${server.port}/action/upload`, {
@@ -98,7 +100,7 @@ test("POST /action/upload saves an image and returns its path", async () => {
   });
   const out = (await res.json()) as { ok: boolean; path?: string };
   expect(out.ok).toBe(true);
-  expect(out.path!.startsWith("/tmp/aw-server-upload-test/")).toBe(true);
+  expect(out.path!.startsWith(`${uploads}/`)).toBe(true);
   expect(readFileSync(out.path!, "utf8")).toBe("PNG");
   server.stop(true);
 });
@@ -106,8 +108,9 @@ test("POST /action/upload saves an image and returns its path", async () => {
 test("GET /uploads serves a saved image back, and refuses a traversal", async () => {
   reset();
   process.env.AGENT_STATUS_DIR = dir;
-  process.env.AGENT_UPLOAD_DIR = "/tmp/aw-server-upload-serve-test";
-  rmSync("/tmp/aw-server-upload-serve-test", { recursive: true, force: true });
+  const uploads = fixtureDir("server-upload-serve-test");
+  process.env.AGENT_UPLOAD_DIR = uploads;
+  rmSync(uploads, { recursive: true, force: true });
   const { makeServer } = await import("../src/server");
   const server = makeServer(0);
   const saved = await fetch(`http://localhost:${server.port}/action/upload`, {
@@ -205,12 +208,12 @@ test("scan:true runs a pass and stop() cleans up without leaking a timer", async
   // Its OWN status dir: a scan pass (ps, lsof, osascript) can outlive stop(),
   // and its cleanup deletes pid-less status files — which would wipe the agents
   // a later test writes into the shared dir, minutes of confusion later.
-  const scanDir = "/tmp/aw-server-test-scan";
+  const scanDir = fixtureDir("server-test-scan");
   rmSync(scanDir, { recursive: true, force: true });
   mkdirSync(scanDir, { recursive: true });
   process.env.AGENT_STATUS_DIR = scanDir;
   // point the scanner at an empty projects dir so it doesn't touch ~/.claude
-  const empty = "/tmp/aw-server-test-empty-projects";
+  const empty = fixtureDir("server-test-empty-projects");
   rmSync(empty, { recursive: true, force: true });
   mkdirSync(empty, { recursive: true });
   process.env.AGENT_PROJECTS_DIR = empty;
@@ -860,7 +863,7 @@ test("a card-scoped UI edit no longer erases a comment posted since the browser'
 // these check the whole resolution: card -> assignee -> working dir -> git.
 
 const MERGE_SESSION = "7c1e2f30-aaaa-4bbb-8ccc-ddddeeeeffff";
-const mergeRepo = "/tmp/aw-server-merge-repo";
+const mergeRepo = fixtureDir("server-merge-repo");
 
 async function git(cwd: string, ...args: string[]): Promise<void> {
   const p = Bun.spawn(["git", "-C", cwd, ...args], { stdout: "ignore", stderr: "ignore" });

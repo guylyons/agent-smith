@@ -1,4 +1,5 @@
 import { test, expect } from "bun:test";
+import { fixtureDir } from "./fixtures";
 import { mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { mergeVerdict, readMergeState, mergeWork, repoRoot, type MergeFacts } from "../src/lib/merge";
@@ -45,7 +46,7 @@ test("a main checkout that is busy holds the key, and says how", () => {
 
 // --- against throwaway repos ------------------------------------------------
 
-const base = "/tmp/aw-merge-test";
+const base = fixtureDir("merge-test");
 rmSync(base, { recursive: true, force: true });
 mkdirSync(base, { recursive: true });
 let seq = 0;

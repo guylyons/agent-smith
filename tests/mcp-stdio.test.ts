@@ -3,10 +3,11 @@
 // dashboard server, writing a real board file. This is the part unit tests
 // can't prove: that a client can actually handshake with us and get replies.
 import { test, expect, beforeAll, afterAll } from "bun:test";
+import { fixtureDir } from "./fixtures";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
-const dir = "/tmp/aw-mcp-stdio-test";
+const dir = fixtureDir("mcp-stdio-test");
 
 let server: ReturnType<typeof import("../src/server").makeServer>;
 let child: Bun.Subprocess<"pipe", "pipe", "pipe">;
