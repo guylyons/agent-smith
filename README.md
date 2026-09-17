@@ -183,7 +183,10 @@ a renamed desk can never mis-sign a comment, and the author is matched by
 session when deciding whom to wake. `"sessionId": "<uuid>"` signs as any live
 session; a bare `"author"` is the human's `You` or an orchestrator that knows
 its own name. An assignee is remembered by crew id as well as session id, so a
-card stays with its agent through the `/clear` a new task starts with.
+card stays with its agent through the `/clear` a new task starts with. These —
+plus `"crew": "<id>"`, which names a crew member outright for its notes — are
+resolved in one place and mean the same thing on every write path: move,
+comment, merge, crew note.
 
 **Waking.** Every move/comment **wakes the sessions that care** — the card's
 assignee and any live scrum-master session, never the actor itself — with a
