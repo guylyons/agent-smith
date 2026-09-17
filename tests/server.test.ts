@@ -566,12 +566,15 @@ test("a queued item is typed as soon as the session turns idle (no-hook fallback
   expect(sent).toEqual([]);
   writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", crew: { id: "cadence-0001", name: "CADENCE" }, state: "idle" }));
   // the fs watcher (debounced) notices the file and the next push flushes
-  for (let i = 0; i < 40 && sent.length === 0; i++) await new Promise((r) => setTimeout(r, 50));
+  // Generous budget, not a guess at how long the watcher takes: the loop stops
+  // the moment the push lands, and only a machine busy with another test run
+  // ever gets near the end of it.
+  for (let i = 0; i < 240 && sent.length === 0; i++) await new Promise((r) => setTimeout(r, 50));
   expect(sent.map((s) => s.sessionId)).toEqual([SCRUM]);
   expect(sent[0]!.text).toContain("note");
   expect(((await (await post("/action/inbox-drain", { sessionId: SCRUM })).json()) as any).items).toEqual([]);
   server.stop(true);
-});
+}, 30_000);
 
 // ---- identity: a write is signed by WHO the session is, not a typed name ---
 // Personas hardcode a name, desks get renamed, and the MCP fallback signs as
@@ -863,7 +866,10 @@ test("a card-scoped UI edit no longer erases a comment posted since the browser'
 // these check the whole resolution: card -> assignee -> working dir -> git.
 
 const MERGE_SESSION = "7c1e2f30-aaaa-4bbb-8ccc-ddddeeeeffff";
-const mergeRepo = fixtureDir("server-merge-repo");
+const mergeBase = fixtureDir("server-merge-repo");
+let mergeSeq = 0;
+/** The repo the latest mergeFixture() built; the assertions below read its log. */
+let mergeRepo = "";
 
 async function git(cwd: string, ...args: string[]): Promise<void> {
   const p = Bun.spawn(["git", "-C", cwd, ...args], { stdout: "ignore", stderr: "ignore" });
@@ -874,7 +880,10 @@ async function git(cwd: string, ...args: string[]): Promise<void> {
  *  status file pointing a session at that worktree. Returns the card id of a
  *  card assigned to it. */
 async function mergeFixture(post: (p: string, b: object) => Promise<Response>): Promise<string> {
-  rmSync(mergeRepo, { recursive: true, force: true });
+  // A repo of its OWN per call. Re-initialising one path raced with git's
+  // background housekeeping from the previous fixture: the setup commit failed
+  // silently and the endpoint under test answered "nothing committed yet".
+  mergeRepo = join(mergeBase, `r${mergeSeq++}`);
   mkdirSync(mergeRepo, { recursive: true });
   await git(mergeRepo, "init", "-q", "-b", "main");
   await git(mergeRepo, "config", "user.email", "t@t");
