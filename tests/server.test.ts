@@ -925,6 +925,56 @@ test("POST /action/card-merge lands the branch and records it on the card", asyn
   server.stop(true);
 });
 
+// card-merge signs its "Merged X into Y" comment through the same resolver as
+// card-move/card-comment, so the three conventions mean the same thing on every
+// write path. Reachable from the dashboard only (the 403 above), but a merge
+// pressed on someone else's card should still be able to say whose work landed.
+const mergePost = (base: string, body: object) =>
+  fetch(`${base}/action/card-merge`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "sec-fetch-site": "same-origin" },
+    body: JSON.stringify(body),
+  });
+
+const mergeComment = async (base: string) => {
+  const { board } = (await (await fetch(`${base}/board`)).json()) as any;
+  return board.cards[0].comments.find((c: any) => c.text.startsWith("Merged "));
+};
+
+test("card-merge signs as: \"assignee\" like every other card write", async () => {
+  const { server, base, post } = await cardApiServer();
+  const cardId = await mergeFixture(post);
+  expect(await (await mergePost(base, { cardId, as: "assignee" })).json()).toMatchObject({ ok: true });
+  expect((await mergeComment(base)).author).toBe("VOLT");
+  server.stop(true);
+});
+
+test("card-merge signs by sessionId, and still falls back to You unsigned", async () => {
+  const { server, base, post } = await cardApiServer();
+  let cardId = await mergeFixture(post);
+  expect(await (await mergePost(base, { cardId, sessionId: MERGE_SESSION })).json()).toMatchObject({ ok: true });
+  expect((await mergeComment(base)).author).toBe("VOLT");
+  server.stop(true);
+
+  const second = await cardApiServer();
+  cardId = await mergeFixture(second.post);
+  expect(await (await mergePost(second.base, { cardId })).json()).toMatchObject({ ok: true });
+  expect((await mergeComment(second.base)).author).toBe("You");
+  second.server.stop(true);
+});
+
+// The signature is checked before the merge runs: a rejected one must not leave
+// the trunk moved with nothing on the card to say who moved it.
+test("card-merge rejects a signature it cannot honour without merging", async () => {
+  const { server, base, post } = await cardApiServer();
+  const cardId = await mergeFixture(post);
+  const res = await mergePost(base, { cardId, sessionId: "11111111-2222-4333-8444-555555555555" });
+  expect(res.status).toBe(404);
+  const log = Bun.spawnSync(["git", "-C", mergeRepo, "log", "-1", "--pretty=%s"]).stdout.toString();
+  expect(log).not.toContain("Merge branch");
+  server.stop(true);
+});
+
 test("card-merge is browser-only — an agent cannot land its own work", async () => {
   const { server, base, post } = await cardApiServer();
   const cardId = await mergeFixture(post);

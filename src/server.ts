@@ -180,51 +180,75 @@ export function makeServer(
    *  known — which is what lets the fan-out skip the actor reliably. */
   type Actor = { name: string; sessionId?: string };
 
-  /** Resolve the signer of a card write. `as: "assignee"` is the card's own
-   *  assignee (its CURRENT desk name, so a rename shows), `sessionId` any live
-   *  session, and `author` a bare name the caller vouches for (the human's
-   *  "You", or an agent that knows its codename). Returns an error string for
-   *  a signature that can't be honoured. */
-  function resolveActor(card: Card, body: { as?: unknown; sessionId?: unknown; author?: unknown }): Actor | { error: string; status: number } {
+  type Unsignable = { error: string; status: number };
+
+  /** A signature read off a card write, before anyone asks it for anything in
+   *  particular. Every write path — move, comment, merge, crew-note — takes the
+   *  same four conventions, tried in this order:
+   *    as: "assignee"  the card's own assignee, at its CURRENT desk name and
+   *                    session (a /clear moves both; the crew id does not, so a
+   *                    rename shows and we never sign with a stale session)
+   *    sessionId       any session, live or on disk
+   *    crew            a crew member named outright, by the id its SessionStart
+   *                    context handed it
+   *    author          a bare display name the caller vouches for — the human's
+   *                    "You", or an agent that knows its codename
+   *  Which fields a convention can fill differs, and that is the whole reason
+   *  this returns a record rather than one value: `crew` knows an id but no
+   *  name, `author` a name but no id. `resolveActor` and `resolveCrewId` below
+   *  ask for one or the other and say plainly when the signature given cannot
+   *  supply it — `via` is what lets them name the right reason.
+   *  `card` is the card being written to when the caller already has it; a
+   *  caller that doesn't (crew-note) passes `cardId` in the body instead. */
+  type Signer = { via: "assignee" | "session" | "crew" | "author"; name?: string; sessionId?: string; crew?: string };
+
+  function resolveSigner(
+    body: { as?: unknown; sessionId?: unknown; crew?: unknown; cardId?: unknown; author?: unknown },
+    card?: Card,
+  ): Signer | Unsignable {
     if (body.as === "assignee") {
-      if (!card.assignee) return { error: "card has no assignee to sign as", status: 400 };
-      // The assignee's CURRENT session: after a /clear it is a new id under the
-      // same crew, and signing with the stale id would wake the actor itself.
-      const live = findAssigneeSession(readSnapshot(dir, Date.now()).agents, card.assignee);
-      const fresh = live ?? resolveAssignee(dir, card.assignee.id);
-      return { name: fresh?.name ?? card.assignee.name, sessionId: live?.sessionId ?? card.assignee.id };
+      const k = card ?? readBoard(dir).cards.find((c) => c.id === body.cardId);
+      if (!k) return { error: `unknown card: ${typeof body.cardId === "string" ? body.cardId : ""}`, status: 404 };
+      if (!k.assignee) return { error: "card has no assignee to sign as", status: 400 };
+      const live = findAssigneeSession(readSnapshot(dir, Date.now()).agents, k.assignee);
+      const fresh = live ?? resolveAssignee(dir, k.assignee.id);
+      return {
+        via: "assignee",
+        name: fresh?.name ?? k.assignee.name,
+        sessionId: live?.sessionId ?? k.assignee.id,
+        crew: live?.crew?.id ?? k.assignee.crew,
+      };
     }
     if (typeof body.sessionId === "string") {
       if (!validSessionId(body.sessionId)) return { error: "bad sessionId", status: 400 };
       const who = resolveAssignee(dir, body.sessionId);
-      return who ? { name: who.name, sessionId: who.id } : { error: "no session with that id", status: 404 };
+      return who ? { via: "session", name: who.name, sessionId: who.id, crew: who.crew } : { error: "no session with that id", status: 404 };
     }
-    const author = typeof body.author === "string" ? body.author.trim() : "";
-    return { name: author };
+    if (typeof body.crew === "string") {
+      return CREW_ID_RE.test(body.crew) ? { via: "crew", crew: body.crew } : { error: "bad crew id", status: 400 };
+    }
+    return { via: "author", name: typeof body.author === "string" ? body.author.trim() : "" };
   }
 
-  /** Whose notes a crew-note write is for. `crew` names the member outright;
-   *  `sessionId` is a live session that has one; `cardId` + `as: "assignee"`
-   *  is the card's assignee. A session without a crew (no hooks) has nowhere
-   *  to keep notes, and says so. */
-  function resolveCrewId(body: { crew?: unknown; sessionId?: unknown; cardId?: unknown; as?: unknown }): { id: string } | { error: string; status: number } {
-    if (typeof body.crew === "string") {
-      return CREW_ID_RE.test(body.crew) ? { id: body.crew } : { error: "bad crew id", status: 400 };
-    }
-    if (typeof body.sessionId === "string") {
-      if (!validSessionId(body.sessionId)) return { error: "bad sessionId", status: 400 };
-      const st = loadStatus(dir, body.sessionId);
-      if (!st) return { error: "no session with that id", status: 404 };
-      return st.crew ? { id: st.crew.id } : { error: "that session has no crew id (hooks not installed?)", status: 400 };
-    }
-    if (body.as === "assignee" && typeof body.cardId === "string") {
-      const card = readBoard(dir).cards.find((k) => k.id === body.cardId);
-      if (!card) return { error: `unknown card: ${body.cardId}`, status: 404 };
-      if (!card.assignee) return { error: "card has no assignee", status: 400 };
-      const live = findAssigneeSession(readSnapshot(dir, Date.now()).agents, card.assignee);
-      const id = live?.crew?.id ?? card.assignee.crew;
-      return id ? { id } : { error: "the card's assignee has no crew id", status: 400 };
-    }
+  /** The signer as a display name. Never fails: a signature that names nobody
+   *  yields an empty name, and each write path decides what that means for it
+   *  (a move says "someone", a merge "You", a comment refuses). */
+  function resolveActor(card: Card, body: { as?: unknown; sessionId?: unknown; crew?: unknown; author?: unknown }): Actor | Unsignable {
+    const signer = resolveSigner(body, card);
+    return "error" in signer ? signer : { name: signer.name ?? "", sessionId: signer.sessionId };
+  }
+
+  /** Whose notes a crew-note write is for. Notes belong to a crew member, so
+   *  unlike a comment this needs an id and not just a name — a signature that
+   *  can only offer a name is turned away with the reason its own convention
+   *  couldn't produce one. A session without a crew (no hooks) has nowhere to
+   *  keep notes, and says so. */
+  function resolveCrewId(body: { crew?: unknown; sessionId?: unknown; cardId?: unknown; as?: unknown }): { id: string } | Unsignable {
+    const signer = resolveSigner(body);
+    if ("error" in signer) return signer;
+    if (signer.crew) return { id: signer.crew };
+    if (signer.via === "session") return { error: "that session has no crew id (hooks not installed?)", status: 400 };
+    if (signer.via === "assignee") return { error: "the card's assignee has no crew id", status: 400 };
     return { error: "a crew id, sessionId, or cardId with as: \"assignee\" is required", status: 400 };
   }
 
@@ -663,14 +687,20 @@ export function makeServer(
             }
             const where = cardWorkDir(cardId);
             if ("error" in where) return json({ ok: false, error: where.error }, where.status);
+            // Signed like any other card write, and resolved BEFORE the merge:
+            // a signature we can't honour should cost nothing, not leave the
+            // trunk moved with no record on the card of who moved it. The
+            // browser sends author: "You"; unsigned falls back to the same.
+            const actor = resolveActor(card, body);
+            if ("error" in actor) return json({ ok: false, error: actor.error }, actor.status);
+            const by = actor.name || "You";
             const r = await mergeWork(where.cwd);
             if (!r.ok) return json(r, 409);
-            const by = typeof body.author === "string" && body.author.trim() ? body.author.trim() : "You";
             const note = `Merged ${r.branch} into ${r.base}.`;
             const next = addComment(readBoard(dir), cardId, by, note);
             writeBoard(dir, next);
             push();
-            void notifyCardEvent(next, cardId, { name: by }, `[THE LINE] ${by} merged "${title}" -- ${note}`, { kind: "move", direction: "forward" });
+            void notifyCardEvent(next, cardId, { ...actor, name: by }, `[THE LINE] ${by} merged "${title}" -- ${note}`, { kind: "move", direction: "forward" });
             return json(r);
           }
           if (action === "card-comment") {
