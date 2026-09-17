@@ -1,6 +1,6 @@
 // Send a command to the server about a real session. Errors surface as toasts,
 // never blocking dialogs. Confirmation/rename UX lives in the components.
-import { toast } from "./toast";
+import { toastError } from "./toast";
 import { flashSend } from "./flash";
 import { signalDying } from "./dying";
 import { playSubmit } from "./sounds";
@@ -32,7 +32,7 @@ async function post(action: string, body: object): Promise<Result> {
 
 async function act(action: string, body: object): Promise<boolean> {
   const r = await post(action, body);
-  if (!r.ok) toast(r.error ?? `${action} failed`);
+  if (!r.ok) toastError(r.error ?? `${action} failed`);
   return r.ok;
 }
 
@@ -94,7 +94,7 @@ export function assignCardAction(cardId: string, sessionId: string | null): void
  *  so the modal can toast "Notified" vs "Queued" truthfully. */
 export async function addCommentAction(cardId: string, text: string): Promise<Delivery[]> {
   const r = await post("card-comment", { cardId, author: ME, text });
-  if (!r.ok) { toast(r.error ?? "card-comment failed"); return []; }
+  if (!r.ok) { toastError(r.error ?? "card-comment failed"); return []; }
   return r.delivery ?? [];
 }
 export function deleteCommentAction(cardId: string, commentId: string): void { void act("comment-delete", { cardId, commentId }); }
@@ -139,10 +139,10 @@ export async function uploadImage(file: File): Promise<Upload | null> {
       bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
     }
     const r = await post("upload", { name: file.name || "image", type: file.type, dataBase64: btoa(bin) });
-    if (!r.ok || !r.path || !r.url) { toast(r.error ?? "upload failed"); return null; }
+    if (!r.ok || !r.path || !r.url) { toastError(r.error ?? "upload failed"); return null; }
     return { path: r.path, url: r.url };
   } catch (e) {
-    toast(`upload failed: ${String(e)}`);
+    toastError(`upload failed: ${String(e)}`);
     return null;
   }
 }
@@ -153,7 +153,7 @@ export async function uploadImage(file: File): Promise<Upload | null> {
 export async function spawnAgent(cwd: string, task: string, opts?: { model?: string; permissionMode?: string; worktree?: string; branch?: string; persona?: string; cardId?: string }): Promise<boolean> {
   playSubmit();
   const r = await post("spawn", { cwd, text: task, model: opts?.model, permissionMode: opts?.permissionMode, worktree: opts?.worktree, branch: opts?.branch, persona: opts?.persona, cardId: opts?.cardId });
-  if (!r.ok) toast(r.error ?? "could not launch");
+  if (!r.ok) toastError(r.error ?? "could not launch");
   return r.ok;
 }
 
@@ -164,7 +164,7 @@ export async function spawnAgent(cwd: string, task: string, opts?: { model?: str
 export async function pickFolder(startIn?: string): Promise<string | null> {
   const r = await post("pick-folder", { cwd: startIn });
   if (r.ok && r.path) return r.path;
-  if (!r.cancelled) toast(r.error ?? "could not open the folder picker");
+  if (!r.cancelled) toastError(r.error ?? "could not open the folder picker");
   return null;
 }
 
@@ -231,6 +231,6 @@ export async function fetchMergeState(cardId: string): Promise<MergeState | null
  *  cleanly, so a failure here is a toast, never a half-finished merge. */
 export async function mergeCard(cardId: string): Promise<MergeResult> {
   const r = await post("card-merge", { cardId, author: ME });
-  if (!r.ok) toast(r.error ?? "could not merge");
+  if (!r.ok) toastError(r.error ?? "could not merge");
   return r as MergeResult;
 }
