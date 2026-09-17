@@ -61,6 +61,23 @@ export const LINE_ROWS_MAX = 12;
 export const LINE_ROWS_OFF = 0;
 export const LINE_ROWS_DEFAULT = 6;
 
+/** The conversation drawer's width in px, and the size of its transcript text.
+ *  Both are dragged/clicked from inside the drawer itself rather than the
+ *  Settings panel, because that is where you feel the need for them — so they
+ *  live outside `Display` and are read and written one at a time.
+ *
+ *  Width has a hard max as well as the `94vw` ceiling in CSS: on a very wide
+ *  monitor a drawer can be dragged out to fill the screen, and there is no way
+ *  back if the handle ends up off the edge. */
+export const DRAWER_W_MIN = 360;
+export const DRAWER_W_MAX = 1400;
+export const DRAWER_W_DEFAULT = 560;
+
+export const DRAWER_FONT_MIN = 12;
+export const DRAWER_FONT_MAX = 24;
+export const DRAWER_FONT_DEFAULT = 14;
+export const DRAWER_FONT_STEP = 1;
+
 export const KEYS = {
   theme: "aw-theme",
   crt: "aw-crt",
@@ -71,6 +88,8 @@ export const KEYS = {
   alerts: "aw-alerts",
   lineRows: "aw-line-rows",
   face: "aw-face",
+  drawerWidth: "aw-drawer-w",
+  drawerFont: "aw-drawer-font",
   // JSON array of repo folders, most recent first — see recentFolders.ts.
   recentFolders: "aw-recent-folders",
 } as const;
@@ -110,6 +129,46 @@ export function applyBgImage(url: string): void {
 export function applyBgDim(pct: number): void {
   const clamped = Math.min(100, Math.max(0, Number.isFinite(pct) ? pct : 0));
   root().style.setProperty("--bg-dim", String(clamped / 100));
+}
+
+/** Clamp a drawer width to the range the handle can drag, so a value that
+ *  round-tripped through localStorage (or a drag that ran off the screen)
+ *  can never leave the drawer unusably narrow or wider than the reset. */
+export function clampDrawerWidth(px: number): number {
+  if (!Number.isFinite(px)) return DRAWER_W_DEFAULT;
+  return Math.round(Math.min(DRAWER_W_MAX, Math.max(DRAWER_W_MIN, px)));
+}
+
+/** Clamp a transcript font size to the offered range. */
+export function clampDrawerFont(px: number): number {
+  if (!Number.isFinite(px)) return DRAWER_FONT_DEFAULT;
+  return Math.round(Math.min(DRAWER_FONT_MAX, Math.max(DRAWER_FONT_MIN, px)));
+}
+
+/** The drawer width lives on <html> as a custom property, not in React state,
+ *  so a drag writes one CSS value per frame instead of re-rendering a long
+ *  transcript. CSS still caps it at 94vw for small windows. */
+export function applyDrawerWidth(px: number): void {
+  root().style.setProperty("--drawer-w", `${clampDrawerWidth(px)}px`);
+}
+
+export function applyDrawerFont(px: number): void {
+  root().style.setProperty("--drawer-font", `${clampDrawerFont(px)}px`);
+}
+
+/** An empty stored value reads as 0 through Number(), which would clamp to the
+ *  narrowest drawer rather than the default — so blank is treated as unset. */
+function storedNumber(key: string, fallback: number): number {
+  const raw = loadSetting(key, "").trim();
+  return raw ? Number(raw) : fallback;
+}
+
+export function loadDrawerWidth(): number {
+  return clampDrawerWidth(storedNumber(KEYS.drawerWidth, DRAWER_W_DEFAULT));
+}
+
+export function loadDrawerFont(): number {
+  return clampDrawerFont(storedNumber(KEYS.drawerFont, DRAWER_FONT_DEFAULT));
 }
 
 /** The stored CRT mode, migrating the pre-theme `aw-tube` class value
@@ -153,6 +212,8 @@ export function applyAllSettings(): void {
   applyBg(loadSetting(KEYS.bg, "night"));
   applyBgImage(loadSetting(KEYS.bgImage, ""));
   applyBgDim(loadBgDim());
+  applyDrawerWidth(loadDrawerWidth());
+  applyDrawerFont(loadDrawerFont());
 }
 
 /** Everything the display controls own, in one object so App can hold a single

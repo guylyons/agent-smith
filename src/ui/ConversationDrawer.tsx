@@ -3,6 +3,8 @@ import type { AgentStatus } from "../schema";
 import { Sprite } from "./Sprite";
 import { ModalBackdrop } from "./Backdrop";
 import { SpritePicker } from "./SpritePicker";
+import { DrawerResizer, DrawerZoom } from "./DrawerSize";
+import { loadDrawerFont } from "./settings";
 import { renderMarkdown } from "./markdown";
 import { toast } from "./toast";
 import { dyingMs } from "./dying";
@@ -32,6 +34,9 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [dragOver, setDragOver] = useState(false);
+  // Mirrors the drawer's own text size (DrawerZoom owns it); held here only so
+  // the composer remeasures when it changes.
+  const [fontPx, setFontPx] = useState(loadDrawerFont);
   const [busy, setBusy] = useState(false);
   const attachSeq = useRef(0);
   const [loaded, setLoaded] = useState(false);
@@ -53,10 +58,13 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
   const sendingRef = useRef(false); // synchronous re-entrancy guard; `busy` state lags a render
 
   // Auto-grow the message textarea (up to a cap) as the user types multi-line.
+  // The cap follows the text size — a fixed 160px that held seven lines at 14px
+  // holds four at 24px — and the measure has to re-run when that size changes,
+  // because the height it writes is an explicit px value.
   useEffect(() => {
     const t = taRef.current;
-    if (t) { t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight, 160) + "px"; }
-  }, [text]);
+    if (t) { t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight, fontPx * 11) + "px"; }
+  }, [text, fontPx]);
 
   // Load + poll the conversation and subagents while open.
   useEffect(() => {
@@ -247,6 +255,7 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
         onDragOver={(e) => { if (e.dataTransfer?.types.includes("Files")) { e.preventDefault(); setDragOver(true); } }}
         onDragLeave={(e) => { if (e.currentTarget === e.target) setDragOver(false); }}
         onDrop={onDrop}>
+        <DrawerResizer />
         <header className="drawer-head">
           <div className="drawer-sprite" title="Change sprite" style={{ cursor: "pointer" }} onClick={() => setPickSprite(true)}>
             <Sprite sessionId={agent.sessionId} role={agent.role} name={agent.name} state={agent.state} override={agent.sprite} />
@@ -296,6 +305,7 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
         <div className="drawer-tabs">
           <button className={`tab ${tab === "chat" ? "on" : ""}`} onClick={() => setTab("chat")}>CHAT</button>
           <button className={`tab ${tab === "info" ? "on" : ""}`} onClick={() => setTab("info")}>INFO</button>
+          <DrawerZoom onChange={setFontPx} />
         </div>
 
         {tab === "chat" ? (

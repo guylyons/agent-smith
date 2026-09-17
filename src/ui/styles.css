@@ -929,19 +929,19 @@ body{background:transparent}
 
 /* INFO tab */
 .drawer-body.info{gap:6px}
-.info-row{display:flex;gap:10px;font-size:14px;align-items:baseline}
-.info-k{flex:0 0 60px;font-family:var(--mono);font-size:12px;color:var(--dim)}
+.info-row{display:flex;gap:10px;font-size:var(--msg,14px);align-items:baseline}
+.info-k{flex:0 0 60px;font-family:var(--mono);font-size:calc(var(--msg,14px) - 2px);color:var(--dim)}
 .info-v{flex:1;min-width:0;color:var(--bone);word-break:break-all}
 .info-sec{font-size:12px;letter-spacing:.5px;color:var(--gold);margin-top:12px;border-top:2px solid var(--bevel);padding-top:9px}
-.info-file{font-size:14px;color:var(--bone);display:flex;gap:8px}
+.info-file{font-size:var(--msg,14px);color:var(--bone);display:flex;gap:8px}
 .info-code{color:var(--clay);flex:0 0 22px;font-family:ui-monospace,monospace}
-.info-commit{font-size:14px;color:var(--bone);display:flex;gap:9px;line-height:1.5}
+.info-commit{font-size:var(--msg,14px);color:var(--bone);display:flex;gap:9px;line-height:1.5}
 .info-hash{color:var(--leaf);flex:0 0 auto;font-family:ui-monospace,monospace}
 
 /* subagents strip in the conversation drawer */
 .subagents{border-bottom:var(--rule);padding:10px 14px;display:flex;flex-direction:column;gap:7px;max-height:34%;overflow-y:auto}
 .subagents-head{font-size:12px;letter-spacing:.5px;color:var(--dim)}
-.subagent{display:flex;align-items:center;gap:8px;font-size:14px}
+.subagent{display:flex;align-items:center;gap:8px;font-size:var(--msg,14px)}
 .subagent .lamp{flex:0 0 auto}
 .subagent-desc{flex:0 0 auto;max-width:52%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--bone)}
 .subagent-doing{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dim)}
@@ -950,7 +950,13 @@ body{background:transparent}
 
 /* conversation drawer */
 .drawer-backdrop{position:fixed;inset:0;z-index:80;background:rgba(4,8,18,.55);display:flex;justify-content:flex-end}
-.drawer{width:min(560px,94vw);height:100%;display:flex;flex-direction:column;background:var(--box);padding:0;overflow:hidden}
+/* Width is dragged from the left edge (DrawerResizer) and kept on <html> as
+   --drawer-w; 94vw still caps it so a narrow window never loses the board
+   behind it. --msg is the transcript text size (DrawerZoom), scoped here so
+   only the drawer scales — card comments share those markdown rules. A few of
+   these classes (.msg-empty) also appear outside the drawer, so every read of
+   --msg carries the shipped 14px as its fallback. */
+.drawer{position:relative;width:min(var(--drawer-w,560px),94vw);height:100%;display:flex;flex-direction:column;background:var(--box);padding:0;overflow:hidden;--msg:var(--drawer-font,14px)}
 .drawer-head{display:flex;align-items:center;gap:12px;padding:14px;border-bottom:var(--rule)}
 .drawer-sprite{width:40px;flex:0 0 auto}
 .drawer-sprite .sprite{width:40px;height:60px}
@@ -960,25 +966,54 @@ body{background:transparent}
 .drawer-id .state{font-size:13px;margin-top:6px}
 .drawer-btns{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end}
 .drawer-body{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:12px}
-.msg{display:flex;flex-direction:column;gap:4px;font-size:14px;line-height:1.5}
-.msg-who{font-family:var(--mono);font-size:12px;letter-spacing:.5px;color:var(--dim)}
+.msg{display:flex;flex-direction:column;gap:4px;font-size:var(--msg,14px);line-height:1.5}
+.msg-who{font-family:var(--mono);font-size:calc(var(--msg,14px) - 2px);letter-spacing:.5px;color:var(--dim)}
 .msg-text{white-space:pre-wrap;word-break:break-word}
 .msg-user{align-items:flex-end}
 .msg-user .msg-text{background:var(--box-lo);border:2px solid var(--bevel);padding:7px 9px;max-width:88%}
 .msg-user .msg-who{color:var(--gold)}
 .msg-assistant .msg-text{border-left:3px solid var(--leaf);padding-left:9px}
 .msg-tool{opacity:.7}
-.msg-tool .msg-text{font-size:14px;color:var(--dim)}
+.msg-tool .msg-text{font-size:var(--msg,14px);color:var(--dim)}
 .msg-tool .msg-text::before{content:"⚙ "}
-.msg-empty{color:var(--dim);font-size:14px;text-align:center;margin:auto}
+.msg-empty{color:var(--dim);font-size:var(--msg,14px);text-align:center;margin:auto}
 .drawer-foot{display:flex;gap:6px;padding:12px 14px;border-top:var(--rule);align-items:flex-end}
-.reply-textarea{resize:none;overflow-y:auto;line-height:1.5;min-height:36px;font-family:var(--mono)}
+/* min-height has to follow the text size, or a one-line placeholder is clipped
+   at the bigger end of the A+ range before a keystroke has been typed. */
+.reply-textarea{resize:none;overflow-y:auto;line-height:1.5;min-height:calc(var(--msg,14px) * 1.5 + 15px);font-family:var(--mono);font-size:var(--msg,14px)}
 /* image attachments dropped/pasted into the composer */
 .attach-row{display:flex;flex-wrap:wrap;gap:6px;padding:8px 14px 0}
 .attach-chip{display:inline-flex;align-items:center;gap:6px;background:var(--box-lo);border:2px solid var(--bevel);color:var(--bone);font-size:13px;padding:3px 4px 3px 7px;max-width:220px}
 .attach-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .attach-x{font-family:var(--mono);font-size:13px;background:none;border:none;color:var(--dim);cursor:pointer;padding:0 2px;line-height:1}
 .attach-x:hover{color:var(--clay)}
+/* Drag handle on the drawer's left edge. The hit area is 10px so it is easy to
+   catch; the line it draws is one pixel-unit, and grows and turns gold on hover
+   or focus so it reads as a handle rather than a border. */
+.drawer-resizer{
+  position:absolute;left:0;top:0;bottom:0;width:10px;z-index:3;
+  display:flex;align-items:center;justify-content:center;
+  cursor:col-resize;touch-action:none}
+.drawer-grip{width:var(--px);height:40px;background:var(--bevel);transition:background .1s,height .1s}
+.drawer-resizer:hover .drawer-grip,
+.drawer-resizer:focus-visible .drawer-grip,
+.drawer-resizer.is-dragging .drawer-grip{background:var(--gold);height:76px}
+.drawer-resizer:focus-visible{outline:3px solid var(--gold);outline-offset:-3px}
+/* Once the drag is live the pointer is long gone from that 10px strip, so the
+   resize cursor and the no-select have to cover the whole window. */
+:root.is-resizing,:root.is-resizing *{cursor:col-resize!important;user-select:none!important}
+
+/* A− [14] A+ — the transcript text size, parked at the right of the tab row so
+   it sits with the drawer's own controls and not the agent's. */
+.drawer-zoom{display:flex;align-items:stretch;gap:4px;flex:0 0 auto}
+.zoombtn{
+  font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:.5px;
+  min-width:30px;padding:0 6px;cursor:pointer;
+  background:var(--box-lo);color:var(--dim);border:2px solid var(--bevel)}
+.zoombtn:not(:disabled):hover{color:var(--gold);border-color:var(--gold)}
+.zoombtn:disabled{opacity:.4;cursor:default}
+.zoomval{color:var(--bone);font-variant-numeric:tabular-nums}
+
 /* drop target highlight while dragging an image over the drawer */
 .drawer.drag-over{box-shadow:inset 0 0 0 var(--px) var(--bevel),inset 0 var(--px) 0 calc(var(--px)*2) rgba(255,255,255,.10),0 var(--px) 0 0 rgba(0,0,0,.55),inset 0 0 0 999px rgba(242,177,52,.10);border-color:var(--gold)}
 /* "thinking" pill — shown while the agent is working */
@@ -990,7 +1025,7 @@ body{background:transparent}
 .qpanel{padding:12px 14px;border-top:var(--px) solid var(--gold);background:var(--box-lo);display:flex;flex-direction:column;gap:10px;max-height:40%;overflow-y:auto}
 .qblock{display:flex;flex-direction:column;gap:6px}
 .qheader{font-size:12px;color:var(--gold);letter-spacing:.5px}
-.qtext{font-size:14px;color:var(--bone);line-height:1.5}
+.qtext{font-size:var(--msg,14px);color:var(--bone);line-height:1.5}
 .qoptions{display:flex;flex-wrap:wrap;gap:6px}
 .qactions{display:flex;flex-wrap:wrap;gap:6px}
 .qactions .deskbtn[disabled]{opacity:.6;cursor:default}
@@ -1031,6 +1066,11 @@ body{background:transparent}
 :is(.msg-text,.comment-text,.cardmodal-descview) table{border-collapse:collapse;font-size:14px}
 :is(.msg-text,.comment-text,.cardmodal-descview) :is(th,td){border:1px solid var(--bevel);padding:4px 8px;text-align:left}
 :is(.msg-text,.comment-text,.cardmodal-descview) th{background:var(--box-lo);color:var(--gold)}
+/* Code blocks and tables carry their own 14px above, which would stay put while
+   the words around them grew. Inside the drawer they follow --msg instead; card
+   comments and card descriptions keep the fixed size. */
+.drawer .msg-text pre.md-code{font-size:var(--msg,14px)}
+.drawer .msg-text table{font-size:var(--msg,14px)}
 
 /* toasts */
 .toaster{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:120;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}
@@ -1620,7 +1660,8 @@ body{background:transparent}
 :root[data-theme="alien"] .bubble{border-width:1px;border-color:var(--bevel)}
 :root[data-theme="alien"] .card{box-shadow:none}
 :root[data-theme="alien"] .usage{box-shadow:var(--win-shadow)}
-:root[data-theme="alien"] .drawer-tabs .tab{box-shadow:none}
+:root[data-theme="alien"] .drawer-tabs .tab,
+:root[data-theme="alien"] .zoombtn{box-shadow:none;border-width:1px}
 :root[data-theme="alien"] .drawer-tabs .tab.on{box-shadow:inset 0 0 14px rgba(255,176,0,.16)}
 /* the ship talks in capitals */
 :root[data-theme="alien"] .name,
@@ -1688,6 +1729,8 @@ body{background:transparent}
    the header became three purple buttons in a row. */
 :root[data-theme="material"] .quiet-btn{border-color:var(--bevel)}
 :root[data-theme="material"] .drawer-tabs .tab{box-shadow:none;border-radius:var(--radius-sm) var(--radius-sm) 0 0}
+/* the zoom buttons sit in that same row, so they take the theme's corners too */
+:root[data-theme="material"] .zoombtn{border-radius:var(--radius-sm)}
 :root[data-theme="material"] .drawer-tabs .tab.on{box-shadow:inset 0 -3px 0 var(--gold);transform:none}
 :root[data-theme="material"] .drawer-tabs .tab:active{transform:none}
 :root[data-theme="material"] .title{text-shadow:none;font-weight:500;letter-spacing:.2px}
@@ -1786,7 +1829,7 @@ body{background:transparent}
 /* The two rollovers that predate this section carry their own transition, so
    the guard above can't reach them. Switch them off by hand. */
 @media (prefers-reduced-motion:reduce){
-  .drawer-tabs .tab,.desk-actions{transition:none}
+  .drawer-tabs .tab,.desk-actions,.drawer-grip{transition:none}
 }
 
 /* ---- keyboard parity ----
