@@ -9,7 +9,7 @@ import type { ChatMessage } from "./lib/conversation";
 import { readOverrides, applyOverrides, setNameOverride, setSpriteOverride } from "./lib/overrides";
 import { loadPersonas, applyPersonas } from "./lib/personas";
 import { applyCrew, pickName, mintCrewId, findAssigneeSession, isAssigneeSession, addNote, CREW_ID_RE } from "./lib/crew";
-import { readBoard, writeBoard, sanitizeBoard, boardFile, addCard, moveCard, progressCard, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, addColumn, renameColumn, setInstruction, setColumnStage, STAGES, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, sanitizeCard, sanitizeColumn, type Board, type Card, type Column, type Stage } from "./lib/board";
+import { readBoard, writeBoard, sanitizeBoard, boardFile, addCard, moveCard, progressCard, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, addColumn, renameColumn, setInstruction, setColumnStage, STAGES, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, sanitizeCard, sanitizeColumn, setCardTouches, claimBlockReason, type Board, type Card, type Column, type Stage } from "./lib/board";
 import { ALLOWED_MODELS, ALLOWED_PERMISSION_MODES, focusSession, interruptSession, killAgent, sendPrompt, sendFreshPrompt, spawnAgent } from "./ghostty";
 import { readRepo } from "./repo";
 import { readMergeState, mergeWork } from "./lib/merge";
@@ -433,7 +433,7 @@ export function makeServer(
           return json({ ok: false, error: "cross-site blocked" }, 403);
         }
         const action = url.pathname.slice("/action/".length);
-        let body: { sessionId?: string | null; name?: string; text?: string; cwd?: string; palette?: number; gear?: string; body?: string; model?: string; permissionMode?: string; worktree?: string; branch?: string; persona?: string; board?: unknown; type?: string; dataBase64?: string; cardId?: string; columnId?: string; toColumnId?: string; title?: string; description?: string; author?: string; instruction?: string; toIndex?: number; index?: number; column?: unknown; card?: unknown; cards?: unknown; commentId?: string; as?: string; stage?: string | null; crew?: string; replace?: boolean };
+        let body: { sessionId?: string | null; name?: string; text?: string; cwd?: string; palette?: number; gear?: string; body?: string; model?: string; permissionMode?: string; worktree?: string; branch?: string; persona?: string; board?: unknown; type?: string; dataBase64?: string; cardId?: string; columnId?: string; toColumnId?: string; title?: string; description?: string; author?: string; instruction?: string; toIndex?: number; index?: number; column?: unknown; card?: unknown; cards?: unknown; commentId?: string; as?: string; stage?: string | null; crew?: string; replace?: boolean; touches?: unknown; force?: boolean };
         try { body = await req.json(); } catch { return json({ ok: false, error: "bad body" }, 400); }
         // pick-folder opens the real macOS folder chooser on the user's screen and
         // hands back the path they picked. Browser-only on purpose: it puts a
@@ -452,6 +452,18 @@ export function makeServer(
           const cwd = typeof body.cwd === "string" ? body.cwd : "";
           const task = typeof body.text === "string" ? body.text : "";
           if (!cwd || !task.trim()) return json({ ok: false, error: "folder and task are required" }, 400);
+          // The card this agent is being spawned for, if any: rides into the
+          // session env so its SessionStart hook self-assigns the card once the
+          // real session id exists.
+          const cardId = typeof body.cardId === "string" && body.cardId.trim() ? body.cardId.trim() : undefined;
+          // File-claim gate. Staffing a card whose `touches` overlap those of
+          // another active, unmerged card is what puts two agents on a collision
+          // course, so it is refused here — before a worktree, a branch or a
+          // terminal exists. `force` is the human's override.
+          if (cardId && body.force !== true) {
+            const blocked = claimBlockReason(readBoard(dir), cardId);
+            if (blocked) return json({ ok: false, error: blocked }, 409);
+          }
           try { if (!statSync(cwd).isDirectory()) throw 0; } catch { return json({ ok: false, error: `folder not found: ${cwd}` }, 400); }
           const model = typeof body.model === "string" && ALLOWED_MODELS.has(body.model) ? body.model : undefined;
           const permissionMode = typeof body.permissionMode === "string" && ALLOWED_PERMISSION_MODES.has(body.permissionMode) ? body.permissionMode : undefined;
@@ -463,10 +475,6 @@ export function makeServer(
           // names that worktree's branch (see prepareLaunch).
           const branch = typeof body.branch === "string" && body.branch.trim() ? body.branch.trim() : undefined;
           const persona = typeof body.persona === "string" && body.persona.trim() ? body.persona.trim() : undefined;
-          // The card this agent is being spawned for, if any: rides into the
-          // session env so its SessionStart hook self-assigns the card once the
-          // real session id exists.
-          const cardId = typeof body.cardId === "string" && body.cardId.trim() ? body.cardId.trim() : undefined;
           // Loop-breaker: an agent (curl sends no sec-fetch-site) may spawn
           // workers but never another orchestrator. A live run showed confused
           // scrum-masters spawning scrum-masters exponentially; only a human in
@@ -622,12 +630,19 @@ export function makeServer(
           if (action === "card-update") {
             const hasTitle = typeof body.title === "string";
             const hasDescription = typeof body.description === "string";
-            if (!hasTitle && !hasDescription) return json({ ok: false, error: "title or description is required" }, 400);
+            const hasTouches = body.touches !== undefined;
+            if (!hasTitle && !hasDescription && !hasTouches) return json({ ok: false, error: "title, description or touches is required" }, 400);
             // A blank title would leave the card unidentifiable on the board.
             if (hasTitle && !body.title!.trim()) return json({ ok: false, error: "title cannot be blank" }, 400);
+            // touches is the card's file claim: a list of paths/globs. An empty
+            // list is how you clear it; anything else is a malformed edit.
+            if (hasTouches && (!Array.isArray(body.touches) || body.touches.some((t: unknown) => typeof t !== "string"))) {
+              return json({ ok: false, error: "touches must be a list of file paths or globs" }, 400);
+            }
             let next = board;
             if (hasTitle) next = renameCard(next, cardId, body.title!.trim());
             if (hasDescription) next = setCardDescription(next, cardId, body.description!);
+            if (hasTouches) next = setCardTouches(next, cardId, body.touches as string[]);
             writeBoard(dir, next);
             push();
             return json({ ok: true });
@@ -716,6 +731,13 @@ export function makeServer(
             return json({ ok: true });
           }
           if (!validSessionId(body.sessionId)) return json({ ok: false, error: "bad sessionId" }, 400);
+          // The same file-claim gate as spawn: binding an agent to this card is
+          // staffing it. Unassigning (handled above) is never blocked — it is
+          // how you get OUT of a conflict.
+          if (body.force !== true) {
+            const blocked = claimBlockReason(board, cardId);
+            if (blocked) return json({ ok: false, error: blocked }, 409);
+          }
           const resolved = resolveAssignee(dir, body.sessionId);
           if (!resolved) return json({ ok: false, error: "no session with that id" }, 404);
           writeBoard(dir, assignCard(board, cardId, resolved));

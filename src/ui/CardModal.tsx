@@ -2,10 +2,10 @@ import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from
 import type { AgentStatus } from "../schema";
 import type { Board, Card } from "../lib/board";
 import type { Assignee } from "../lib/board";
-import { renameCard, setCardDescription, assignCard, addComment, deleteComment, moveCard, cardTaskPrompt } from "../lib/board";
+import { renameCard, setCardDescription, setCardTouches, assignCard, addComment, deleteComment, moveCard, cardTaskPrompt, claimBlockReason } from "../lib/board";
 import {
   sendCardTask, uploadImage, ME,
-  renameCardAction, setCardDescriptionAction, assignCardAction,
+  renameCardAction, setCardDescriptionAction, setCardTouchesAction, assignCardAction,
   addCommentAction, deleteCommentAction, moveCardAction, type Delivery,
 } from "./actions";
 import { ModalBackdrop } from "./Backdrop";
@@ -58,6 +58,27 @@ export function sendTaskGate(assigned: Assignee | null | undefined, agents: Agen
   return { enabled: true, reason: "Send this card's task to the assigned agent" };
 }
 
+/** The TOUCHES field is a plain textarea, one path or glob per line — the
+ *  shape an orchestrator can paste a file list straight into. Blank lines and
+ *  surrounding whitespace are not part of a path. */
+export function parseTouches(text: string): string[] {
+  return text.split("\n").map((l) => l.trim()).filter(Boolean);
+}
+
+/** The stored claim, back as field text. */
+export function touchesText(touches: string[] | undefined): string {
+  return (touches ?? []).join("\n");
+}
+
+/** Whether this card can be STAFFED at all, and if not, why — the file-claim
+ *  half of the gate, on top of sendTaskGate's "is the agent ready" half. The
+ *  server refuses the same thing; showing it here means the button explains
+ *  itself instead of failing into a toast. */
+export function staffingGate(board: Board, cardId: string): { enabled: boolean; reason: string } {
+  const blocked = claimBlockReason(board, cardId);
+  return blocked ? { enabled: false, reason: blocked } : { enabled: true, reason: "" };
+}
+
 /** One line on where a posted comment went, from the server's delivery report. */
 export function deliveryToast(delivery: Delivery[]): string {
   const typed = delivery.filter((d) => d.via === "typed").map((d) => d.name);
@@ -90,11 +111,17 @@ export function CardModal({
     : undefined;
   const assignedIsLive = !!assignedAgent;
   const gate = sendTaskGate(assigned, agents);
+  // Two independent reasons a task can't go out: the agent isn't ready
+  // (sendTaskGate), or another active card already claims these files.
+  const claim = staffingGate(board, card.id);
+  const sendReason = claim.enabled ? gate.reason : claim.reason;
 
   // Both editable texts live here rather than in the fields, so an image dropped
   // anywhere on the modal can be appended to whichever one is active.
   const [desc, setDesc] = useState(card.description ?? "");
   const [editingDesc, setEditingDesc] = useState(false);
+  const [touches, setTouches] = useState(touchesText(card.touches));
+  const [editingTouches, setEditingTouches] = useState(false);
   const [comment, setComment] = useState("");
   // A comment's images are held aside until POST rather than pasted into the
   // draft as markdown: an upload path is long enough to bury the sentence you're
@@ -109,6 +136,16 @@ export function CardModal({
   // A live snapshot echo must never yank the description out from under the
   // cursor, so only re-sync it while the field is idle.
   useEffect(() => { if (!editingDesc) setDesc(card.description ?? ""); }, [card.description, editingDesc]);
+  // Same rule for the claim: a live echo must not rewrite the list mid-edit.
+  useEffect(() => { if (!editingTouches) setTouches(touchesText(card.touches)); }, [card.touches, editingTouches]);
+
+  function commitTouches(next: string) {
+    const list = parseTouches(next);
+    setTouches(list.join("\n"));
+    if (list.join("\n") !== touchesText(card.touches)) {
+      mutate((b) => setCardTouches(b, card.id, list), () => setCardTouchesAction(card.id, list));
+    }
+  }
 
   function commitDesc(next: string) {
     setDesc(next);
@@ -247,6 +284,10 @@ export function CardModal({
               value={assignedAgent?.sessionId ?? assigned?.id ?? ""}
               onChange={(e) => {
                 const a = agents.find((x) => x.sessionId === e.target.value);
+                // Binding an agent IS staffing the card, so it takes the claim
+                // gate; clearing the assignee is how you get out of a conflict
+                // and is never blocked.
+                if (a && !claim.enabled) { toast(claim.reason); return; }
                 mutate(
                   (b) => assignCard(b, card.id, a ? { id: a.sessionId, name: a.name, ...(a.crew ? { crew: a.crew.id } : {}) } : null),
                   () => assignCardAction(card.id, a ? a.sessionId : null),
@@ -265,6 +306,9 @@ export function CardModal({
               ))}
             </select>
             {!agents.length && <p className="cardmodal-empty">No agents are running right now.</p>}
+            {/* The file claim standing in the way, spelled out once here rather
+                than only as a tooltip on each disabled button. */}
+            {!claim.enabled && <p className="cardmodal-blocked">{claim.reason}</p>}
             {/* Notes for a busy agent wait in the server's inbox until its turn
                 ends; say so, or a comment looks unanswered for no reason. */}
             {assignedAgent?.inbox ? (
@@ -273,13 +317,14 @@ export function CardModal({
             <div className="cardmodal-assign-actions">
               <button
                 className="pix cardmodal-send"
-                disabled={!gate.enabled}
-                title={gate.reason}
+                disabled={!gate.enabled || !claim.enabled}
+                title={sendReason}
                 onClick={sendToAssigned}
               >▸ SEND TASK</button>
               <button
                 className="pix cardmodal-spawn"
-                title="Launch a new agent seeded with this card's task"
+                disabled={!claim.enabled}
+                title={claim.enabled ? "Launch a new agent seeded with this card's task" : claim.reason}
                 onClick={spawnForCard}
               >+ NEW AGENT FOR THIS CARD</button>
             </div>
@@ -330,6 +375,23 @@ export function CardModal({
               </div>
             )}
             <AttachButton busy={uploading} onFiles={(f) => void attach(f, "desc")} />
+          </div>
+
+          {/* The card's file claim. Plain text, one path per line, so a list can
+              be pasted straight in. While this card is staffed and unmerged, no
+              other card touching the same files can be staffed (see
+              overlappingClaims in lib/board). */}
+          <div className="cardmodal-row">
+            <label className="pix cardmodal-label" htmlFor="cardmodal-touches">TOUCHES</label>
+            <textarea
+              id="cardmodal-touches"
+              className="cardmodal-touches"
+              value={touches}
+              placeholder={"Files this card will change, one per line…\nsrc/ui/CardModal.tsx\nsrc/lib/**"}
+              onFocus={() => setEditingTouches(true)}
+              onChange={(e) => setTouches(e.target.value)}
+              onBlur={() => { setEditingTouches(false); commitTouches(touches); }}
+            />
           </div>
 
           <div className="cardmodal-row">

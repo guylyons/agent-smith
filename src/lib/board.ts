@@ -30,6 +30,12 @@ export type Card = {
   description?: string;
   assignee?: Assignee | null;
   comments?: Comment[];
+  // The files this card is expected to change — literal paths or globs, relative
+  // to the repo root (added in VERSION 4). Its FILE CLAIM: while the card is
+  // staffed and unmerged, no second card touching the same files may be staffed
+  // (see overlappingClaims). Opt-in: absent on cards nobody has filled it in for,
+  // and a card with none is never blocked and never blocks.
+  touches?: string[];
 };
 /** What a column MEANS to the protocol, independent of where it sits. `todo`
  *  is where new cards wait, `doing` is where an agent works, `review` is where
@@ -48,7 +54,7 @@ export const DONE_COLUMN_ID = "done";
  *  existed. Only the four ids defaultBoard mints are recognised. */
 const LEGACY_STAGE: Record<string, Stage> = { backlog: "todo", "in-progress": "doing", review: "review", done: "done" };
 
-const VERSION = 3;
+const VERSION = 4;
 
 function genId(prefix: string): string {
   return `${prefix}_${crypto.randomUUID().slice(0, 8)}`;
@@ -180,6 +186,31 @@ function mapCard(board: Board, id: string, fn: (card: Card) => Card): Board {
 
 export function setCardDescription(board: Board, id: string, description: string): Board {
   return mapCard(board, id, (k) => ({ ...k, description }));
+}
+
+/** Replace the card's file claim — the paths/globs it is expected to change.
+ *  Entries are trimmed and de-duplicated, blanks dropped; an empty result drops
+ *  the field entirely rather than storing `[]`, so a card nobody has filled in
+ *  stays bare on disk (and is never blocked -- see overlappingClaims). */
+export function setCardTouches(board: Board, id: string, touches: string[]): Board {
+  const clean = cleanTouches(touches);
+  return mapCard(board, id, (k) => {
+    const { touches: _old, ...rest } = k;
+    return clean.length ? { ...rest, touches: clean } : rest;
+  });
+}
+
+/** Trim, drop blanks, de-duplicate — shared by setCardTouches and sanitizeCard
+ *  so a hand-edited board file and a UI edit end up with the same list. */
+function cleanTouches(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  const out: string[] = [];
+  for (const raw of v) {
+    if (typeof raw !== "string") continue;
+    const t = raw.trim();
+    if (t && !out.includes(t)) out.push(t);
+  }
+  return out;
 }
 
 /** Assign the card to a live agent session, or clear it with `null`. */
@@ -400,6 +431,115 @@ export function cardMoveTarget(
   return { toColumnId: toCol.id, toIndex: Math.min(row, target) };
 }
 
+// ---- file claims ----------------------------------------------------------
+//
+// The staffing-time half of the collision guard. `src/lib/merge-queue.ts`
+// serializes two branches landing on the same repo; this stops the two branches
+// from being created in the first place, by refusing to staff a card whose
+// `touches` set overlaps one an active, unmerged card already claims.
+//
+// No new persisted state: a claim is just a card's own `touches` plus where it
+// sits on the board.
+
+/** One other card standing in the way, and which of its paths overlap. */
+export type Claim = { cardId: string; title: string; columnId: string; stage?: Stage; paths: string[] };
+
+/** Normalize a path/glob for comparison: trimmed, with a leading `./` or `/`
+ *  dropped (the same file written two ways is the same file) and a trailing `/`
+ *  read as "this whole directory". Empty for a blank entry. */
+function normalizeTouch(p: string): string {
+  const t = p.trim().replace(/^\.\//, "").replace(/^\/+/, "");
+  if (!t) return "";
+  return t.endsWith("/") ? t + "**" : t;
+}
+
+/** A glob as a regex. `*` stops at a separator, `**` crosses them, `**\/` also
+ *  matches zero directories, `?` is one non-separator character; everything else
+ *  is literal. Deliberately small — this is a path claim, not a shell. */
+function globToRegExp(pattern: string): RegExp {
+  let out = "";
+  for (let i = 0; i < pattern.length; i++) {
+    const c = pattern[i]!;
+    if (c === "*") {
+      if (pattern[i + 1] === "*") {
+        i++;
+        if (pattern[i + 1] === "/") { i++; out += "(?:.*/)?"; } else { out += ".*"; }
+      } else {
+        out += "[^/]*";
+      }
+    } else if (c === "?") {
+      out += "[^/]";
+    } else {
+      out += c.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+    }
+  }
+  return new RegExp(`^${out}$`);
+}
+
+/** Could these two entries ever name the same file? True when they are equal,
+ *  or when either one matches the other read as a path. That catches every case
+ *  a claim is written for in practice (a glob against the literal file it
+ *  covers, a broad `src/**` against anything under it). Two DIFFERENT globs that
+ *  merely intersect (`src/*\/a.ts` vs `src/ui/*.ts`) are not detected — full
+ *  glob intersection is a different problem, and this errs toward letting work
+ *  start rather than blocking it on a guess. */
+export function globsOverlap(a: string, b: string): boolean {
+  const x = normalizeTouch(a);
+  const y = normalizeTouch(b);
+  if (!x || !y) return false;
+  if (x === y) return true;
+  return globToRegExp(x).test(y) || globToRegExp(y).test(x);
+}
+
+/** Is this card holding its claim right now? Two things have to be true: it has
+ *  been STAFFED (an agent is bound to it, or it sits where work happens or waits
+ *  for review), and it has not landed yet (its column is not a `done` stage).
+ *  A card merely planned in the backlog claims nothing — otherwise a groomed
+ *  backlog would block its own cards from ever being picked up. */
+function isClaiming(board: Board, card: Card): boolean {
+  if (!card.touches?.length) return false;
+  const stage = columnStage(board.columns.find((c) => c.id === card.columnId) ?? { id: card.columnId, name: "", instruction: "" });
+  if (stage === "done") return false;
+  return !!card.assignee || stage === "doing" || stage === "review";
+}
+
+/** Every other card actively claiming a file this card also touches. Empty when
+ *  the card is unknown, has no `touches`, or nothing overlaps — so a card with
+ *  no claim set is never blocked. Pure: the board is the only input. */
+export function overlappingClaims(board: Board, cardId: string): Claim[] {
+  const card = board.cards.find((k) => k.id === cardId);
+  const mine = card?.touches ?? [];
+  if (!mine.length) return [];
+  const out: Claim[] = [];
+  for (const other of board.cards) {
+    if (other.id === card!.id || !isClaiming(board, other)) continue;
+    const paths = (other.touches ?? []).filter((p) => mine.some((m) => globsOverlap(m, p)));
+    if (!paths.length) continue;
+    const col = board.columns.find((c) => c.id === other.columnId);
+    out.push({
+      cardId: other.id,
+      title: other.title,
+      columnId: other.columnId,
+      ...(col && columnStage(col) ? { stage: columnStage(col) } : {}),
+      paths,
+    });
+  }
+  return out;
+}
+
+/** One line saying why this card cannot be staffed, or null when it can. Pure
+ *  ASCII: it is shown in the UI, returned from the HTTP actions, and read back
+ *  by an agent through a pty that mangles anything else. */
+export function claimBlockReason(board: Board, cardId: string): string | null {
+  const claims = overlappingClaims(board, cardId);
+  if (!claims.length) return null;
+  const held = claims
+    .map((c) => `${c.cardId} already claims ${c.paths.join(", ")} (in ${c.stage ?? c.columnId})`)
+    .join(", ");
+  const them = claims.length === 1 ? "it" : "them";
+  return `${held} - wait for ${them} to merge, or edit touches to remove the overlap`;
+}
+
 // ---- validation & persistence --------------------------------------------
 
 function str(v: unknown): string | null {
@@ -482,6 +622,8 @@ export function sanitizeCard(v: unknown): Card | null {
   if (assignee) card.assignee = assignee;
   const comments = sanitizeComments(o.comments);
   if (comments.length) card.comments = comments;
+  const touches = cleanTouches(o.touches);
+  if (touches.length) card.touches = touches;
   return card;
 }
 

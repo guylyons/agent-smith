@@ -1289,6 +1289,22 @@ body{background:transparent}
 }
 .cardmodal-desc:focus{outline:none;border-color:var(--gold)}
 .cardmodal-desc::placeholder,.comment-input::placeholder{color:var(--dim)}
+/* The card's file claim: a short path list, so it sits lower than the
+   description and uses the code face — these are file paths, not prose. */
+.cardmodal-touches{
+  width:100%;box-sizing:border-box;resize:vertical;min-height:52px;
+  font-family:var(--code);font-size:13px;line-height:1.5;
+  color:var(--bone);background:var(--night);border:2px solid var(--bevel);padding:7px 9px;
+  white-space:pre;
+}
+.cardmodal-touches:focus{outline:none;border-color:var(--gold)}
+.cardmodal-touches::placeholder{color:var(--dim)}
+/* Why staffing is refused: another card already claims these files. Louder than
+   .cardmodal-empty -- it is the reason a button next to it is dead. */
+.cardmodal-blocked{
+  font-size:13px;line-height:1.45;color:var(--clay);
+  border-left:3px solid var(--clay);padding:2px 0 2px 8px;
+}
 .cardmodal-comments{display:flex;flex-direction:column;gap:9px}
 .cardmodal-empty{font-size:13px;color:var(--dim);font-style:italic}
 .comment{background:var(--box-lo);border:2px solid var(--bevel);padding:8px 10px;display:flex;flex-direction:column;gap:5px}
