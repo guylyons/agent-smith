@@ -1061,6 +1061,7 @@ body{background:transparent}
 :is(.msg-text,.comment-text,.cardmodal-descview) ol.md-list{padding-left:2.4em}
 :is(.msg-text,.comment-text,.cardmodal-descview) .md-list:last-child{margin-bottom:0}
 :is(.msg-text,.comment-text,.cardmodal-descview) .md-list li{margin:2px 0}
+:is(.msg-text,.comment-text,.cardmodal-descview) .md-list-cont{margin:4px 0 0}
 :is(.msg-text,.comment-text,.cardmodal-descview) .md-table-wrap{display:block;overflow-x:auto;margin:6px 0;max-width:100%}
 :is(.msg-text,.comment-text,.cardmodal-descview) .md-table-wrap:last-child{margin-bottom:0}
 :is(.msg-text,.comment-text,.cardmodal-descview) table{border-collapse:collapse;font-size:14px}

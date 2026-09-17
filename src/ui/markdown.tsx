@@ -122,14 +122,28 @@ function isListLine(line: string): boolean {
   return /^\s*([-*+]|\d+\.)\s+/.test(line);
 }
 
-function renderListBlock(lines: string[]): ReactNode {
-  const ordered = /^\s*\d+\.\s+/.test(lines[0] ?? "");
+interface ListItem {
+  markerLine: string;
+  contLines: string[];
+}
+
+function renderListBlock(items: ListItem[]): ReactNode {
+  const ordered = /^\s*\d+\.\s+/.test(items[0]?.markerLine ?? "");
   const Tag = ordered ? "ol" : "ul";
   return (
     <Tag className="md-list" key={nextKey()}>
-      {lines.map((line) => {
-        const content = line.replace(/^\s*([-*+]|\d+\.)\s+/, "");
-        return <li key={nextKey()}>{renderInline(content)}</li>;
+      {items.map(({ markerLine, contLines }) => {
+        const content = markerLine.replace(/^\s*([-*+]|\d+\.)\s+/, "");
+        return (
+          <li key={nextKey()}>
+            {renderInline(content)}
+            {contLines.map((cl) => (
+              <p key={nextKey()} className="md-list-cont">
+                {renderInline(cl)}
+              </p>
+            ))}
+          </li>
+        );
       })}
     </Tag>
   );
@@ -196,14 +210,43 @@ export function renderMarkdown(text: string): ReactNode {
       continue;
     }
 
-    // List block
+    // List block. A list stays open across a blank line followed by an
+    // indented continuation paragraph (a "loose list" item), or across a
+    // blank line straight into the next marker — both are common when a
+    // list item has extra body text. Anything else after a blank line ends
+    // the list.
     if (isListLine(line)) {
-      const listLines: string[] = [];
-      while (i < lines.length && isListLine(lines[i]!)) {
-        listLines.push(lines[i]!);
+      const isContinuation = (l: string) => /^\s+\S/.test(l) && !isListLine(l);
+      const items: ListItem[] = [];
+      while (i < lines.length) {
+        if (lines[i]!.trim() === "") {
+          let j = i;
+          while (j < lines.length && lines[j]!.trim() === "") j++;
+          if (j < lines.length && isListLine(lines[j]!)) {
+            i = j;
+            continue;
+          }
+          if (j < lines.length && isContinuation(lines[j]!) && items.length > 0) {
+            i = j;
+            while (i < lines.length && isContinuation(lines[i]!)) {
+              items[items.length - 1]!.contLines.push(lines[i]!.trim());
+              i++;
+            }
+            continue;
+          }
+          break;
+        }
+        if (!isListLine(lines[i]!)) break;
+        const markerLine = lines[i]!;
         i++;
+        const contLines: string[] = [];
+        while (i < lines.length && isContinuation(lines[i]!)) {
+          contLines.push(lines[i]!.trim());
+          i++;
+        }
+        items.push({ markerLine, contLines });
       }
-      blocks.push(renderListBlock(listLines));
+      blocks.push(renderListBlock(items));
       continue;
     }
 
