@@ -83,6 +83,9 @@ export function restoreColumnAction(column: Column, index: number, cards: Card[]
 export function addCardAction(columnId: string, title: string): void { void act("card-add", { columnId, title }); }
 export function renameCardAction(cardId: string, title: string): void { void act("card-update", { cardId, title }); }
 export function setCardDescriptionAction(cardId: string, description: string): void { void act("card-update", { cardId, description }); }
+/** Replace the card's file claim — the paths/globs it is expected to change.
+ *  An empty list clears it. */
+export function setCardTouchesAction(cardId: string, touches: string[]): void { void act("card-update", { cardId, touches }); }
 export function moveCardAction(cardId: string, toColumnId: string, toIndex?: number): void {
   void act("card-move", { cardId, toColumnId, author: ME, ...(toIndex === undefined ? {} : { toIndex }) });
 }

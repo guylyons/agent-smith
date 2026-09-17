@@ -265,7 +265,7 @@ test("writeBoard persists a version field on disk", () => {
   const dir = tmp();
   writeBoard(dir, defaultBoard());
   const raw = JSON.parse(readFileSync(join(dir, ".line.json"), "utf8")) as { version?: number };
-  expect(raw.version).toBe(3);
+  expect(raw.version).toBe(4);
 });
 
 // ---- card detail: description, assignee, comments -------------------------

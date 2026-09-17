@@ -117,6 +117,16 @@ function optionalStr(args: Args, key: string): string | undefined {
   return typeof v === "string" ? v : undefined;
 }
 
+/** An optional list-of-strings argument. Absent stays absent (the field is left
+ *  alone); an empty list is a real value (it clears the field). A non-list, or a
+ *  list with a non-string in it, is the agent's mistake and fails here. */
+function optionalStrList(args: Args, key: string): string[] | undefined {
+  const v = args[key];
+  if (v === undefined || v === null) return undefined;
+  if (!Array.isArray(v) || v.some((x) => typeof x !== "string")) throw new Error(`${key} must be a list of strings`);
+  return v as string[];
+}
+
 // ---- rendering ------------------------------------------------------------
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -156,6 +166,9 @@ export function formatCard(board: Board, cardId: string): string {
   ];
   const instr = col?.instruction.trim();
   if (instr) out.push(`column instruction: ${instr}`);
+  // The card's file claim (see overlappingClaims in lib/board): what it is
+  // expected to change, and therefore what it blocks others from being staffed on.
+  out.push(`touches: ${card.touches?.length ? card.touches.join(", ") : "(none)"}`);
   const description = (card.description ?? "").trim();
   out.push("", "description:", description || "(none)");
   const comments = card.comments ?? [];
@@ -226,13 +239,19 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "card_update",
-    description: "Rename a card, rewrite its description, or both. Fields you leave out are untouched. This does not notify the assignee — comment if they need to know.",
+    description: "Rename a card, rewrite its description, or set the files it touches. Fields you leave out are untouched. This does not notify the assignee — comment if they need to know.",
     inputSchema: {
       type: "object",
       properties: {
         cardId: CARD_ID,
         title: { type: "string", description: "New title. Omit to leave it alone." },
         description: { type: "string", description: "New description, replacing the old one. Omit to leave it alone." },
+        touches: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "The files this card is expected to change: paths or globs from the repo root (e.g. src/ui/CardModal.tsx, src/lib/**). This is the card's FILE CLAIM — while it is staffed and unmerged, no other card touching the same files can be staffed. Replaces the whole list; pass [] to clear it.",
+        },
       },
       required: ["cardId"],
     },
@@ -240,9 +259,13 @@ export const TOOLS: Tool[] = [
       const body: Args = { cardId: str(args, "cardId") };
       const title = optionalStr(args, "title");
       const description = optionalStr(args, "description");
+      const touches = optionalStrList(args, "touches");
       if (title !== undefined) body.title = title;
       if (description !== undefined) body.description = description;
-      if (title === undefined && description === undefined) throw new Error("title or description is required");
+      if (touches !== undefined) body.touches = touches;
+      if (title === undefined && description === undefined && touches === undefined) {
+        throw new Error("title, description or touches is required");
+      }
       await request(ctx, "POST", "/action/card-update", body);
       return `Updated ${body.cardId}.`;
     },
@@ -287,12 +310,13 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "card_assign",
-    description: "Assign a card to a LIVE agent session (see agents_list), or pass sessionId: null to unassign. Assigning only binds the card; use card_send_task to actually hand the work over.",
+    description: "Assign a card to a LIVE agent session (see agents_list), or pass sessionId: null to unassign. Assigning only binds the card; use card_send_task to actually hand the work over. Refused when the card's `touches` overlap those of another active, unmerged card — staffing both would put two agents on the same files.",
     inputSchema: {
       type: "object",
       properties: {
         cardId: CARD_ID,
         sessionId: { type: ["string", "null"], description: "A live session id from agents_list, or null to unassign." },
+        force: { type: "boolean", description: "Assign anyway when another active card already claims some of the same files. Only for a human who has decided the collision risk is acceptable." },
       },
       required: ["cardId", "sessionId"],
     },
@@ -300,7 +324,9 @@ export const TOOLS: Tool[] = [
       const cardId = str(args, "cardId");
       const sessionId = args.sessionId;
       if (sessionId !== null && typeof sessionId !== "string") throw new Error("sessionId is required (a live session id, or null to unassign)");
-      await request(ctx, "POST", "/action/card-assign", { cardId, sessionId });
+      const body: Args = { cardId, sessionId };
+      if (args.force === true) body.force = true;
+      await request(ctx, "POST", "/action/card-assign", body);
       return sessionId === null ? `Unassigned ${cardId}.` : `Assigned ${cardId} to ${sessionId}.`;
     },
   },

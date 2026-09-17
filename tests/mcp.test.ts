@@ -1,7 +1,7 @@
 // tests/mcp.test.ts — the board MCP server's protocol + tool layer. The HTTP
 // side is injected, so every case runs without a dashboard or a subprocess.
 import { test, expect } from "bun:test";
-import { handleMessage, TOOLS, formatBoard, type Api, type Ctx } from "../src/lib/mcp";
+import { handleMessage, TOOLS, formatBoard, formatCard, type Api, type Ctx } from "../src/lib/mcp";
 
 const board = {
   columns: [
@@ -318,4 +318,52 @@ test("crew_note is a tool error when nobody can tell whose notes they are", asyn
     { api, url: "http://localhost:4173", cwd: "/w/none" }) as any;
   expect(res.result.isError).toBe(true);
   expect(res.result.content[0].text).toContain("AGENT_CREW");
+});
+
+// ---- file claims ----------------------------------------------------------
+
+test("card_update sends a touches list through to the board", async () => {
+  const { api, calls } = fakeApi();
+  await call("card_update", { cardId: "card_1", touches: ["src/lib/board.ts", "src/ui/*.tsx"] }, api);
+  expect(calls[0]!.body).toEqual({ cardId: "card_1", touches: ["src/lib/board.ts", "src/ui/*.tsx"] });
+});
+
+test("card_update accepts an empty touches list (that is how a claim is cleared)", async () => {
+  const { api, calls } = fakeApi();
+  await call("card_update", { cardId: "card_1", touches: [] }, api);
+  expect(calls[0]!.body).toEqual({ cardId: "card_1", touches: [] });
+});
+
+test("card_update still refuses a call with no field to change", async () => {
+  const { api } = fakeApi();
+  const res = await call("card_update", { cardId: "card_1" }, api);
+  expect(res.result.isError).toBe(true);
+  expect(res.result.content[0].text).toContain("touches");
+});
+
+test("card_assign passes force through so a human can override a file claim", async () => {
+  const { api, calls } = fakeApi();
+  await call("card_assign", { cardId: "card_1", sessionId: "sess-1", force: true }, api);
+  expect(calls[0]!.body).toEqual({ cardId: "card_1", sessionId: "sess-1", force: true });
+});
+
+test("card_assign leaves force out when it was not asked for", async () => {
+  const { api, calls } = fakeApi();
+  await call("card_assign", { cardId: "card_1", sessionId: "sess-1" }, api);
+  expect(calls[0]!.body).toEqual({ cardId: "card_1", sessionId: "sess-1" });
+});
+
+test("card_assign surfaces the board's refusal when a claim is in the way", async () => {
+  const { api } = fakeApi({
+    "/action/card-assign": { status: 409, body: { ok: false, error: "card_9 already claims src/ui/TheLine.tsx (in doing) - wait for it to merge, or edit touches to remove the overlap" } },
+  });
+  const res = await call("card_assign", { cardId: "card_1", sessionId: "sess-1" }, api);
+  expect(res.result.isError).toBe(true);
+  expect(res.result.content[0].text).toContain("already claims src/ui/TheLine.tsx");
+});
+
+test("card_read shows a card's file claim, and says so when there is none", async () => {
+  expect(formatCard({ ...board, cards: [{ ...board.cards[0]!, touches: ["src/lib/board.ts"] }] } as any, "card_1"))
+    .toContain("touches: src/lib/board.ts");
+  expect(formatCard(board as any, "card_1")).toContain("touches: (none)");
 });
