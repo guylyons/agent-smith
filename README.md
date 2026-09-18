@@ -203,7 +203,10 @@ note can't press keys on a permission dialog, can't collide with a tool call,
 and isn't limited to ASCII. (Without hooks, the next snapshot that shows the
 session idle types the backlog in.) The card modal says which happened —
 "Notified", or "Queued … lands when its turn ends" — and shows how many notes
-a busy assignee has waiting. **SEND TASK** is only offered for an idle assignee:
+a busy assignee has waiting. The inbox is in memory only: restarting the
+dashboard drops every queued note, and nothing sends them again. The board
+itself is saved, so an agent that was busy across a restart should re-read its
+card rather than wait for a note that will never come. **SEND TASK** is only offered for an idle assignee:
 a fresh task clears the agent's context first, so sending one mid-work would
 wipe what it was doing.
 
