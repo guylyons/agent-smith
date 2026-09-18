@@ -10,7 +10,7 @@ import { readOverrides, applyOverrides, setNameOverride, setSpriteOverride } fro
 import { loadPersonas, applyPersonas } from "./lib/personas";
 import { applyCrew, pickName, mintCrewId, findAssigneeSession, isAssigneeSession, addNote, CREW_ID_RE } from "./lib/crew";
 import { sendTaskReadiness } from "./lib/sendTaskReady";
-import { readBoard, writeBoard, boardFile, addCard, moveCard, progressCard, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, addColumn, renameColumn, setInstruction, setColumnStage, STAGES, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, sanitizeCard, sanitizeColumn, setCardTouches, claimBlockReason, type Board, type Card, type Column, type Stage } from "./lib/board";
+import { readBoard, writeBoard, boardFile, addCard, moveCard, moveToWorkColumn, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, addColumn, renameColumn, setInstruction, setColumnStage, STAGES, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, sanitizeCard, sanitizeColumn, setCardTouches, claimBlockReason, type Board, type Card, type Column, type Stage } from "./lib/board";
 import { ALLOWED_MODELS, ALLOWED_PERMISSION_MODES, focusSession, interruptSession, killAgent, sendPrompt, sendFreshPrompt, spawnAgent } from "./ghostty";
 import { readRepo } from "./repo";
 import { readMergeState, mergeWork } from "./lib/merge";
@@ -734,7 +734,7 @@ export function makeServer(
             // ourselves, then compose the prompt from THAT board — so the card
             // reaches in-progress even if the agent skips STEP 1, and the prompt
             // correctly tells it the card is already there (leave it, pick it up).
-            const progressed = progressCard(board, cardId);
+            const progressed = moveToWorkColumn(board, cardId);
             const prompt = cardTaskPrompt(progressed, cardId, url.origin, agent.name, { workedBefore });
             if (!prompt.trim()) return json({ ok: false, error: "card has no task text to send" }, 400);
             // Fresh delivery: clear the agent's context before the new task so
@@ -743,8 +743,8 @@ export function makeServer(
             if (!r.ok) return json(r, 502); // delivery failed: leave the card where it was
             const by = typeof body.author === "string" && body.author.trim() ? body.author.trim() : "You";
             // Re-read after the await, then apply the move + the send record as one
-            // write (progressCard is a no-op if it already landed in-progress).
-            writeBoard(dir, addComment(progressCard(readBoard(dir), cardId), cardId, by, `Sent task to ${agent.name}.`));
+            // write (moveToWorkColumn is a no-op if it already landed in-progress).
+            writeBoard(dir, addComment(moveToWorkColumn(readBoard(dir), cardId), cardId, by, `Sent task to ${agent.name}.`));
             push();
             return json({ ok: true });
           }

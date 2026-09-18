@@ -363,14 +363,16 @@ function taskColumns(board: Board, card: Card): { work: Column; land: Column } {
   return { work, land };
 }
 
-/** Move a card into the column where its work happens (the board's `doing`
- *  stage, else the positional fallback from `taskColumns`), unless it is
- *  already there. The server calls this when a task is delivered to an agent,
- *  so a card reaches in-progress deterministically instead of depending on the
- *  agent running its STEP 1 card-move — which it often skips, batches, or has
- *  silently rejected. No-op (returns the same board) for an unknown card or one
- *  already in its work column. */
-export function progressCard(board: Board, id: string): Board {
+/** Move a card into its work column: the board's `doing`-stage column, else
+ *  the positional fallback from `taskColumns`. Not a generic "advance one
+ *  stage" step — it always targets the work column, wherever the card starts;
+ *  use `moveCard` to move a card anywhere else. The server calls this when a
+ *  task is delivered to an agent, so a card reaches in-progress
+ *  deterministically instead of depending on the agent running its STEP 1
+ *  card-move — which it often skips, batches, or has silently rejected. No-op
+ *  (returns the same board) for an unknown card or one already in its work
+ *  column. */
+export function moveToWorkColumn(board: Board, id: string): Board {
   const card = board.cards.find((k) => k.id === id);
   if (!card) return board;
   const { work } = taskColumns(board, card);
