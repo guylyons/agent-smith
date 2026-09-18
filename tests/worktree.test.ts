@@ -1,6 +1,6 @@
 import { test, expect } from "bun:test";
 import { fixtureDir } from "./fixtures";
-import { mkdirSync, rmSync, existsSync } from "node:fs";
+import { mkdirSync, rmSync, existsSync, realpathSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { slugify, slugifyBranch } from "../src/lib/slug";
 import { createWorktree, createBranch, prepareLaunch } from "../src/lib/worktree";
@@ -66,6 +66,25 @@ test("createWorktree makes an isolated worktree + branch off HEAD", async () => 
   expect(r.branch).toBe("fix-thing");
   expect(r.path).toBe(join(repo, ".claude", "worktrees", "fix-thing"));
   expect(existsSync(r.path!)).toBe(true);
+});
+
+test("createWorktree reports the main checkout's real path as repoRoot", async () => {
+  const repo = await freshRepo();
+  // Through a symlink (and, on macOS, /var -> /private/var under tmpdir): the
+  // merge allow rule is written from this, so it must be the canonical path.
+  const link = join(base, `link${seq++}`);
+  symlinkSync(repo, link);
+  const r = await createWorktree(link, "via-link");
+  expect(r.ok).toBe(true);
+  expect(r.repoRoot).toBe(realpathSync(repo));
+});
+
+test("createWorktree made from inside a linked worktree still reports the main checkout as repoRoot", async () => {
+  const repo = await freshRepo();
+  const first = await createWorktree(repo, "first");
+  const second = await createWorktree(first.path!, "second");
+  expect(second.ok).toBe(true);
+  expect(second.repoRoot).toBe(realpathSync(repo));
 });
 
 test("createWorktree slugifies the requested name", async () => {

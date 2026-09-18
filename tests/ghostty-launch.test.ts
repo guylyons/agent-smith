@@ -128,8 +128,8 @@ test("a cardId is shell-quoted so it can't inject into the launch command", () =
   expect(out).toContain("AGENT_CARD='x'\\''; rm -rf /'");
 });
 
-test("workerPermissionSettings allows the board read, card writes, and local git", () => {
-  const s = workerPermissionSettings("http://localhost:4173");
+test("workerPermissionSettings allows the board read, card writes, local git, and a merge into its own repo", () => {
+  const s = workerPermissionSettings("http://localhost:4173", "/Users/guy/github/agent-smith");
   expect(s.permissions.allow).toEqual([
     "Bash(curl -s http://localhost:4173/board)",
     "Bash(curl -s http://localhost:4173/agents)",
@@ -147,6 +147,7 @@ test("workerPermissionSettings allows the board read, card writes, and local git
     "Bash(git log:*)",
     "Bash(git add:*)",
     "Bash(git commit:*)",
+    "Bash(git -C /Users/guy/github/agent-smith merge:*)",
   ]);
   // never the spawn/kill/prompt endpoints, the MCP tools that reach other
   // sessions, or git push — those stay behind a human approval
@@ -154,6 +155,20 @@ test("workerPermissionSettings allows the board read, card writes, and local git
   expect(s.permissions.allow).not.toContain("mcp__the-line__card_assign");
   expect(JSON.stringify(s)).not.toContain("/action/spawn");
   expect(JSON.stringify(s)).not.toContain("git push");
+});
+
+test("workerPermissionSettings scopes merge to the repo root it is given, and nothing else", () => {
+  const root = "/tmp/some repo/root";
+  const allow = workerPermissionSettings("http://localhost:4173", root).permissions.allow;
+  const gitRules = allow.filter((r) => r.includes("git") && !r.startsWith("Bash(git status") && !r.startsWith("Bash(git diff")
+    && !r.startsWith("Bash(git log") && !r.startsWith("Bash(git add") && !r.startsWith("Bash(git commit"));
+  // exactly one extra git rule, and it names this root
+  expect(gitRules).toEqual([`Bash(git -C ${root} merge:*)`]);
+  // never a bare merge that would work in any repo, and no other history-rewriting verb
+  expect(allow).not.toContain("Bash(git merge:*)");
+  for (const verb of ["push", "reset", "rebase", "checkout", "switch", "branch", "worktree"]) {
+    expect(allow.some((r) => r.includes(`git ${verb}`) || r.includes(` ${verb}:`))).toBe(false);
+  }
 });
 
 // --- crew: the name and id ride the env, and the prompt is addressed to it ---
