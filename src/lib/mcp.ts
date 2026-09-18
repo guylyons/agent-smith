@@ -145,6 +145,7 @@ export function formatBoard(board: Board): string {
     if (cards.length === 0) out.push("  (empty)");
     for (const card of cards) {
       const bits = [`  [${card.id}] ${card.title}`];
+      if (card.repo) bits.push(`repo: ${card.repo}`);
       if (card.assignee) bits.push(`assigned: ${card.assignee.name}`);
       const n = card.comments?.length ?? 0;
       if (n) bits.push(plural(n, "comment"));
@@ -169,6 +170,8 @@ export function formatCard(board: Board, cardId: string): string {
   // The card's file claim (see overlappingClaims in lib/board): what it is
   // expected to change, and therefore what it blocks others from being staffed on.
   out.push(`touches: ${card.touches?.length ? card.touches.join(", ") : "(none)"}`);
+  // Which project the card is for — one board holds several repos.
+  out.push(`repo: ${card.repo ? `${card.repo}${card.repoPath ? ` (${card.repoPath})` : ""}` : "(none)"}`);
   const description = (card.description ?? "").trim();
   out.push("", "description:", description || "(none)");
   const comments = card.comments ?? [];
@@ -239,7 +242,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "card_update",
-    description: "Rename a card, rewrite its description, or set the files it touches. Fields you leave out are untouched. This does not notify the assignee — comment if they need to know.",
+    description: "Rename a card, rewrite its description, set the files it touches, or label its repo. Fields you leave out are untouched. This does not notify the assignee — comment if they need to know.",
     inputSchema: {
       type: "object",
       properties: {
@@ -252,6 +255,7 @@ export const TOOLS: Tool[] = [
           description:
             "The files this card is expected to change: paths or globs from the repo root (e.g. src/ui/CardModal.tsx, src/lib/**). This is the card's FILE CLAIM — while it is staffed and unmerged, no other card touching the same files can be staffed. Replaces the whole list; pass [] to clear it.",
         },
+        repo: { type: "string", description: "Which repo/project the card is for — a short name like the repo folder (e.g. agent-smith). Pass \"\" to clear it. Omit to leave it alone." },
       },
       required: ["cardId"],
     },
@@ -260,11 +264,13 @@ export const TOOLS: Tool[] = [
       const title = optionalStr(args, "title");
       const description = optionalStr(args, "description");
       const touches = optionalStrList(args, "touches");
+      const repo = optionalStr(args, "repo");
       if (title !== undefined) body.title = title;
       if (description !== undefined) body.description = description;
       if (touches !== undefined) body.touches = touches;
-      if (title === undefined && description === undefined && touches === undefined) {
-        throw new Error("title, description or touches is required");
+      if (repo !== undefined) body.repo = repo;
+      if (title === undefined && description === undefined && touches === undefined && repo === undefined) {
+        throw new Error("title, description, touches or repo is required");
       }
       await request(ctx, "POST", "/action/card-update", body);
       return `Updated ${body.cardId}.`;

@@ -41,6 +41,14 @@ async function repoRoot(cwd: string): Promise<string | null> {
   return dirname(resolve(cwd, common.stdout));
 }
 
+/** The folder a card's repo label names: the main checkout's real path when
+ *  `cwd` is in a git repo (so a worktree resolves to the repo it hangs off),
+ *  else `cwd` itself. Never throws. */
+export async function mainCheckout(cwd: string): Promise<string> {
+  const root = (await repoRoot(cwd)) ?? cwd;
+  try { return realpathSync(root); } catch { return root; }
+}
+
 async function branchExists(cwd: string, branch: string): Promise<boolean> {
   return (await git(cwd, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`])).code === 0;
 }

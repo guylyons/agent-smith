@@ -308,6 +308,14 @@ export function mergeWaitFlag(board: Board, cardId: string): { label: string; ti
   return { label: `⏳ ${ahead.map((c) => c.cardId).join(", ")}`, title: `Waiting to merge: ${mergeBlockReason(board, cardId)}` };
 }
 
+/** The face's repo chip: which project this card is for, so a board mixing
+ *  several repos reads at a glance. Null for a card nobody has labelled — it
+ *  shows nothing rather than a placeholder that would just be noise. */
+export function repoChip(card: Card): { label: string; title: string } | null {
+  if (!card.repo) return null;
+  return { label: card.repo, title: `Repo: ${card.repo}${card.repoPath ? ` (${card.repoPath})` : ""}` };
+}
+
 const PEEK = 10; // px of the next card left showing, so the cut reads as scrollable
 
 // Cap a column's card stack at `rows` cards and let the rest scroll. The cut is
@@ -384,6 +392,7 @@ function CardView({
   // says "working" for the five minutes it takes to age off the board; ask
   // liveness whether anything has refreshed it lately instead of trusting it.
   const avatarState = assignedAgent ? displayState(assignedAgent, Date.now()) : "idle";
+  const repo = repoChip(card);
 
   // Deleting takes the card's whole comment thread with it, so it has to be
   // recoverable. Rather than a blocking confirm() in front of every delete
@@ -443,6 +452,7 @@ function CardView({
               the avatar, which reads as "nothing here" — the same as a card whose
               footer is empty for other reasons. A chip makes "nobody is on this"
               a thing you can scan a backlog column for. */}
+          {repo && <span className="card-repo" title={repo.title}>{repo.label}</span>}
           {card.assignee
             ? (assignedAgent
                 ? <span className="card-avatar" title={card.assignee.name}>
