@@ -16,6 +16,7 @@ import { onOpenCard } from "./nav";
 import { CardModal } from "./CardModal";
 import { Sprite } from "./Sprite";
 import { stackMaxHeight } from "./stackCap";
+import { findLiveAssignee } from "./liveAssignee";
 import { displayState } from "../lib/liveness";
 import {
   canPrime, loadMarks, markCardRead, newestCommentAt, primeMarks, saveMarks,
@@ -362,9 +363,7 @@ function CardView({
   const commentCount = card.comments?.length ?? 0;
   // The live session behind the assignee, if any — gives us its sprite. A card
   // assigned to a session that has since ended falls back to initials.
-  const assignedAgent = card.assignee
-    ? agents.find((a) => a.sessionId === card.assignee!.id || (!!card.assignee!.crew && a.crew?.id === card.assignee!.crew))
-    : undefined;
+  const assignedAgent = findLiveAssignee(agents, card.assignee);
   // The sprite bobs on "working", and on a card face that bob is the ONLY thing
   // saying the agent is busy — so it has to be honest. A status file frozen
   // mid-turn (killed session, crashed window, a Stop that never came back) still

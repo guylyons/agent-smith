@@ -13,6 +13,7 @@ import { MergeKey } from "./MergeKey";
 import { renderMarkdown, imageSrc } from "./markdown";
 import { imagesIn, imageMarkdown, appendImage, removeImage } from "./cardImages";
 import { toast } from "./toast";
+import { findLiveAssignee } from "./liveAssignee";
 
 // Matches TheLine's: the pure op to paint immediately, plus the one scoped
 // server call that makes it real. See actions.ts for why nothing sends a board.
@@ -51,7 +52,7 @@ function useImageAttach() {
  *  would press keys on its dialog. */
 export function sendTaskGate(assigned: Assignee | null | undefined, agents: AgentStatus[]): { enabled: boolean; reason: string } {
   if (!assigned) return { enabled: false, reason: "Assign a running agent first" };
-  const live = agents.find((a) => a.sessionId === assigned.id || (!!assigned.crew && a.crew?.id === assigned.crew));
+  const live = findLiveAssignee(agents, assigned);
   if (!live) return { enabled: false, reason: `${assigned.name}'s session has ended - assign a running agent` };
   if (live.state === "working") return { enabled: false, reason: `${live.name} is working - wait for it to go idle (or pause it) before sending a new task` };
   if (live.state === "waiting") return { enabled: false, reason: `${live.name} is waiting on a prompt in its terminal - answer that first` };
@@ -125,10 +126,8 @@ export function CardModal({
   // and labelled so the card still shows who had it.
   const assigned = card.assignee;
   // Matched by crew as well as session id: the same agent comes back under a
-  // new session id after a /clear (see src/lib/crew.ts).
-  const assignedAgent = assigned
-    ? agents.find((a) => a.sessionId === assigned.id || (!!assigned.crew && a.crew?.id === assigned.crew))
-    : undefined;
+  // new session id after a /clear (see liveAssignee.ts).
+  const assignedAgent = findLiveAssignee(agents, assigned);
   const assignedIsLive = !!assignedAgent;
   const gate = sendTaskGate(assigned, agents);
   // Two independent reasons a task can't go out: the agent isn't ready
