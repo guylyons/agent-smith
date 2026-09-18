@@ -10,9 +10,9 @@ import { readOverrides, applyOverrides, setNameOverride, setSpriteOverride } fro
 import { loadPersonas, applyPersonas } from "./lib/personas";
 import { applyCrew, pickName, mintCrewId, findAssigneeSession, isAssigneeSession, addNote, CREW_ID_RE } from "./lib/crew";
 import { sendTaskReadiness } from "./lib/sendTaskReady";
-import { readBoard, writeBoard, boardFile, addCard, moveCard, moveToWorkColumn, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, addColumn, renameColumn, setInstruction, setColumnStage, STAGES, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, sanitizeCard, sanitizeColumn, setCardTouches, setCardRepo, repoName, claimBlockReason, mergeBlockReason, landMergedCard, mergeReleaseNotes, type Board, type Card, type Column, type Stage } from "./lib/board";
+import { readBoard, writeBoard, boardFile, addCard, moveCard, moveToWorkColumn, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, addColumn, renameColumn, setInstruction, setColumnStage, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, setCardTouches, setCardRepo, repoName, claimBlockReason, mergeBlockReason, landMergedCard, mergeReleaseNotes, type Board, type Card } from "./lib/board";
 import { mainCheckout } from "./lib/worktree";
-import { ALLOWED_MODELS, ALLOWED_PERMISSION_MODES, focusSession, interruptSession, killAgent, sendPrompt, sendFreshPrompt, spawnAgent } from "./ghostty";
+import { focusSession, interruptSession, killAgent, sendPrompt, sendFreshPrompt, spawnAgent } from "./ghostty";
 import { readRepo } from "./repo";
 import { readMergeState, mergeWork, holdForClaims } from "./lib/merge";
 import { saveUpload, resolveUploadPath } from "./lib/uploads";
@@ -20,6 +20,13 @@ import { chooseFolder } from "./lib/chooser";
 import { initialIdle, onConnect, onDisconnect, shouldShutDown, type IdleState } from "./lib/idle";
 import { matchPendingSpawns, sessionsNeedingOpeningPrompt, type PendingSpawn } from "./lib/spawnAssign";
 import { dispatchAction, type ActionContext, type ActionHandler } from "./lib/actionDispatch";
+import type { z } from "zod";
+import {
+  parseBody, SESSION_ID_RE, ColumnRef, CardRef, SessionRef, NoFields, type Signature,
+  PickFolderBody, SpawnBody, ColumnAddBody, ColumnUpdateBody, ColumnReorderBody, ColumnRestoreBody,
+  CardRestoreBody, CardAddBody, CommentDeleteBody, CardMoveBody, CardUpdateBody, CardMergeBody,
+  CardCommentBody, SendTaskBody, CardAssignBody, UploadBody, CrewNoteBody, RenameBody, SpriteBody, PromptBody,
+} from "./lib/actionBodies";
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -27,7 +34,7 @@ function json(body: unknown, status = 200): Response {
 
 // sessionId comes from the client; keep it to a single, safe path/key segment.
 function validSessionId(sessionId: unknown): sessionId is string {
-  return typeof sessionId === "string" && /^[A-Za-z0-9-]+$/.test(sessionId);
+  return typeof sessionId === "string" && SESSION_ID_RE.test(sessionId);
 }
 
 function loadStatus(dir: string, sessionId: string): AgentStatus | null {
@@ -98,8 +105,6 @@ export async function searchChats(
 
 /** The JSON body any POST /action/* may carry; each handler reads its own
  *  fields and checks their types itself. */
-type ActionBody = { sessionId?: string | null; name?: string; text?: string; cwd?: string; palette?: number; gear?: string; body?: string; model?: string; permissionMode?: string; worktree?: string; branch?: string; persona?: string; type?: string; dataBase64?: string; cardId?: string; columnId?: string; toColumnId?: string; title?: string; description?: string; author?: string; instruction?: string; toIndex?: number; index?: number; column?: unknown; card?: unknown; cards?: unknown; commentId?: string; as?: string; stage?: string | null; crew?: string; replace?: boolean; touches?: unknown; force?: boolean; repo?: string | null };
-
 /** Who signs the note a merge leaves on the cards it was holding up. */
 const MERGE_NOTE_AUTHOR = "THE LINE";
 
@@ -222,13 +227,10 @@ export function makeServer(
    *  caller that doesn't (crew-note) passes `cardId` in the body instead. */
   type Signer = { via: "assignee" | "session" | "crew" | "author"; name?: string; sessionId?: string; crew?: string };
 
-  function resolveSigner(
-    body: { as?: unknown; sessionId?: unknown; crew?: unknown; cardId?: unknown; author?: unknown },
-    card?: Card,
-  ): Signer | Unsignable {
+  function resolveSigner(body: Signature, card?: Card): Signer | Unsignable {
     if (body.as === "assignee") {
       const k = card ?? readBoard(dir).cards.find((c) => c.id === body.cardId);
-      if (!k) return { error: `unknown card: ${typeof body.cardId === "string" ? body.cardId : ""}`, status: 404 };
+      if (!k) return { error: `unknown card: ${body.cardId ?? ""}`, status: 404 };
       if (!k.assignee) return { error: "card has no assignee to sign as", status: 400 };
       const live = findAssigneeSession(readSnapshot(dir, Date.now()).agents, k.assignee);
       const fresh = live ?? resolveAssignee(dir, k.assignee.id);
@@ -239,21 +241,21 @@ export function makeServer(
         crew: live?.crew?.id ?? k.assignee.crew,
       };
     }
-    if (typeof body.sessionId === "string") {
+    if (body.sessionId !== undefined) {
       if (!validSessionId(body.sessionId)) return { error: "bad sessionId", status: 400 };
       const who = resolveAssignee(dir, body.sessionId);
       return who ? { via: "session", name: who.name, sessionId: who.id, crew: who.crew } : { error: "no session with that id", status: 404 };
     }
-    if (typeof body.crew === "string") {
+    if (body.crew !== undefined) {
       return CREW_ID_RE.test(body.crew) ? { via: "crew", crew: body.crew } : { error: "bad crew id", status: 400 };
     }
-    return { via: "author", name: typeof body.author === "string" ? body.author.trim() : "" };
+    return { via: "author", name: body.author };
   }
 
   /** The signer as a display name. Never fails: a signature that names nobody
    *  yields an empty name, and each write path decides what that means for it
    *  (a move says "someone", a merge "You", a comment refuses). */
-  function resolveActor(card: Card, body: { as?: unknown; sessionId?: unknown; crew?: unknown; author?: unknown }): Actor | Unsignable {
+  function resolveActor(card: Card, body: Signature): Actor | Unsignable {
     const signer = resolveSigner(body, card);
     return "error" in signer ? signer : { name: signer.name ?? "", sessionId: signer.sessionId };
   }
@@ -263,7 +265,7 @@ export function makeServer(
    *  can only offer a name is turned away with the reason its own convention
    *  couldn't produce one. A session without a crew (no hooks) has nowhere to
    *  keep notes, and says so. */
-  function resolveCrewId(body: { crew?: unknown; sessionId?: unknown; cardId?: unknown; as?: unknown }): { id: string } | Unsignable {
+  function resolveCrewId(body: Signature): { id: string } | Unsignable {
     const signer = resolveSigner(body);
     if ("error" in signer) return signer;
     if (signer.crew) return { id: signer.crew };
@@ -424,51 +426,59 @@ export function makeServer(
 
   // ---- POST /action/* handlers ------------------------------------------------
   // One named function per action, wired up in `actionHandlers` below. The
-  // CSRF gate and the body parse live in dispatchAction (src/lib/actionDispatch.ts),
+  // CSRF gate and the JSON parse live in dispatchAction (src/lib/actionDispatch.ts),
   // wrapped around the lookup, so no handler here can be reached without them.
-  type Ctx = ActionContext<ActionBody>;
+  // What the body must hold is declared per action in src/lib/actionBodies.ts;
+  // the raw body stays `unknown` until one of those schemas has read it.
+  type Ctx = ActionContext<unknown>;
+  type Result = Response | Promise<Response>;
+
+  /** Read the body with the action's schema, answering 400 with the schema's
+   *  own message when it breaks a rule. */
+  const withBody = <S extends z.ZodType>(schema: S, fn: (ctx: Ctx, body: z.output<S>) => Result): ActionHandler<unknown> =>
+    (ctx) => {
+      const r = parseBody(schema, ctx.body);
+      return "error" in r ? json({ ok: false, error: r.error }, 400) : fn(ctx, r.data);
+    };
 
   // Shared preambles. Each reads what a family of actions needs, answers the
-  // unhappy path itself, and hands the rest to the handler.
+  // unhappy path itself, and only then reads the rest of the body with the
+  // action's own schema — so a missing card or column is reported ahead of a
+  // malformed field, as it always has been.
 
   /** column-update/-delete/-reorder: the column must exist on a fresh read. */
-  const withColumn = (fn: (ctx: Ctx, board: Board, columnId: string) => Response | Promise<Response>): ActionHandler<ActionBody> =>
-    (ctx) => {
-      const columnId = typeof ctx.body.columnId === "string" ? ctx.body.columnId : "";
+  const withColumn = <S extends z.ZodType>(schema: S, fn: (ctx: Ctx, body: z.output<S>, board: Board, columnId: string) => Result) =>
+    withBody(ColumnRef, (ctx, { columnId }) => {
       const board = readBoard(dir);
       if (!board.columns.some((c) => c.id === columnId)) {
         return json({ ok: false, error: `unknown column: ${columnId}` }, 404);
       }
-      return fn(ctx, board, columnId);
-    };
+      return withBody(schema, (ctx, body) => fn(ctx, body, board, columnId))(ctx);
+    });
 
   /** card-*: the write half of the agent card API. Each op re-reads the
    *  board and applies one pure, card-scoped mutation before persisting —
    *  so an agent's move/comment can never clobber (or be clobbered by)
    *  another writer the way a whole-board write can. Not tied to a
    *  sessionId: the author is a display name carried on the comment. */
-  const withCard = (fn: (ctx: Ctx, card: Card, board: Board, title: string) => Response | Promise<Response>): ActionHandler<ActionBody> =>
-    (ctx) => {
-      const cardId = typeof ctx.body.cardId === "string" ? ctx.body.cardId : "";
+  const withCard = <S extends z.ZodType>(schema: S, fn: (ctx: Ctx, body: z.output<S>, card: Card, board: Board, title: string) => Result) =>
+    withBody(CardRef, (ctx, { cardId }) => {
       const board = readBoard(dir);
       const card = board.cards.find((k) => k.id === cardId);
       if (!card) return json({ ok: false, error: `unknown card: ${cardId}` }, 404);
-      return fn(ctx, card, board, card.title.trim() || "(untitled card)");
-    };
+      return withBody(schema, (ctx, body) => fn(ctx, body, card, board, card.title.trim() || "(untitled card)"))(ctx);
+    });
 
   /** Actions about one session, by id. */
-  const withSessionId = (fn: (ctx: Ctx, sessionId: string) => Response | Promise<Response>): ActionHandler<ActionBody> =>
-    (ctx) => {
-      if (!validSessionId(ctx.body.sessionId)) return json({ ok: false, error: "bad sessionId" }, 400);
-      return fn(ctx, ctx.body.sessionId);
-    };
+  const withSessionId = <S extends z.ZodType>(schema: S, fn: (ctx: Ctx, body: z.output<S>, sessionId: string) => Result) =>
+    withBody(SessionRef, (ctx, { sessionId }) => withBody(schema, (ctx, body) => fn(ctx, body, sessionId))(ctx));
 
   /** Actions that drive a session's terminal: it must have a status file. */
-  const withSessionStatus = (fn: (ctx: Ctx, status: AgentStatus) => Response | Promise<Response>): ActionHandler<ActionBody> =>
-    withSessionId((ctx, sessionId) => {
+  const withSessionStatus = <S extends z.ZodType>(schema: S, fn: (ctx: Ctx, body: z.output<S>, status: AgentStatus) => Result) =>
+    withSessionId(schema, (ctx, body, sessionId) => {
       const status = loadStatus(dir, sessionId);
       if (!status) return json({ ok: false, error: "unknown session" }, 404);
-      return fn(ctx, status);
+      return fn(ctx, body, status);
     });
 
   // pick-folder opens the real macOS folder chooser on the user's screen and
@@ -477,42 +487,34 @@ export function makeServer(
   // our own page — a scripted client (curl, an agent) sends no
   // sec-fetch-site and is refused rather than allowed through the way the
   // read endpoints are.
-  async function pickFolder({ req, body }: Ctx): Promise<Response> {
+  async function pickFolder({ req }: Ctx, body: z.output<typeof PickFolderBody>): Promise<Response> {
     if (req.headers.get("sec-fetch-site") !== "same-origin") {
       return json({ ok: false, error: "the folder picker is a browser-only action" }, 403);
     }
-    return json(await chooseFolder(typeof body.cwd === "string" ? body.cwd : undefined));
+    return json(await chooseFolder(body.cwd));
   }
 
   // spawn creates a brand-new session — it has a folder + task, not a sessionId
-  async function spawnSession({ req, url, body }: Ctx): Promise<Response> {
-    const cwd = typeof body.cwd === "string" ? body.cwd : "";
-    const task = typeof body.text === "string" ? body.text : "";
-    if (!cwd || !task.trim()) return json({ ok: false, error: "folder and task are required" }, 400);
+  async function spawnSession({ req, url }: Ctx, body: z.output<typeof SpawnBody>): Promise<Response> {
+    const { cwd, text: task, cardId, model, permissionMode, worktree, branch, persona } = body;
     // The card this agent is being spawned for, if any: rides into the
     // session env so its SessionStart hook self-assigns the card once the
     // real session id exists, and is recorded below so the server does
     // the same when there are no hooks (see pendingSpawns).
-    const cardId = typeof body.cardId === "string" && body.cardId.trim() ? body.cardId.trim() : undefined;
     // File-claim gate. Staffing a card whose `touches` overlap those of
     // another active, unmerged card is what puts two agents on a collision
     // course, so it is refused here — before a worktree, a branch or a
     // terminal exists. `force` is the human's override.
-    if (cardId && body.force !== true) {
+    if (cardId && !body.force) {
       const blocked = claimBlockReason(readBoard(dir), cardId);
       if (blocked) return json({ ok: false, error: blocked }, 409);
     }
     try { if (!statSync(cwd).isDirectory()) throw 0; } catch { return json({ ok: false, error: `folder not found: ${cwd}` }, 400); }
-    const model = typeof body.model === "string" && ALLOWED_MODELS.has(body.model) ? body.model : undefined;
-    const permissionMode = typeof body.permissionMode === "string" && ALLOWED_PERMISSION_MODES.has(body.permissionMode) ? body.permissionMode : undefined;
-    // A blank/whitespace field means "no worktree" (launch in the folder). The
-    // name is sanitized to a slug inside createWorktree, so pass it as typed.
-    const worktree = typeof body.worktree === "string" && body.worktree.trim() ? body.worktree.trim() : undefined;
-    // Same rule for the branch, and the two are independent: a branch on
-    // its own switches the folder itself, a branch alongside a worktree
-    // names that worktree's branch (see prepareLaunch).
-    const branch = typeof body.branch === "string" && body.branch.trim() ? body.branch.trim() : undefined;
-    const persona = typeof body.persona === "string" && body.persona.trim() ? body.persona.trim() : undefined;
+    // model/permissionMode arrive already narrowed to the allowed sets. A
+    // blank worktree means "no worktree" (launch in the folder); a blank
+    // branch likewise, and the two are independent: a branch on its own
+    // switches the folder itself, a branch alongside a worktree names that
+    // worktree's branch (see prepareLaunch).
     // Loop-breaker: an agent (curl sends no sec-fetch-site) may spawn
     // workers but never another orchestrator. A live run showed confused
     // scrum-masters spawning scrum-masters exponentially; only a human in
@@ -530,7 +532,7 @@ export function makeServer(
     if (r.ok && cardId && r.cwd) {
       pendingSpawns.push({
         cardId, cwd: r.cwd, uniqueCwd: r.worktreeCreated === true, crewId: crew.id, task,
-        before: live.map((a) => a.sessionId), at: Date.now(), force: body.force === true,
+        before: live.map((a) => a.sessionId), at: Date.now(), force: body.force,
       });
     }
     // Label the card with the repo it is being worked in, unless someone
@@ -552,32 +554,25 @@ export function makeServer(
   // column-*: the same discipline as card-*, for the board's own shape.
   // These exist so the UI never has to send a whole board to rename a
   // column or drag one — each re-reads, applies one pure op, and writes.
-  function columnAdd({ body }: Ctx): Response {
-    const name = typeof body.name === "string" ? body.name : "";
+  function columnAdd(_ctx: Ctx, { name }: z.output<typeof ColumnAddBody>): Response {
     const next = addColumn(readBoard(dir), name);
     writeBoard(dir, next);
     push();
     return json({ ok: true, columnId: next.columns[next.columns.length - 1]!.id });
   }
 
-  function columnUpdate({ body }: Ctx, board: Board, columnId: string): Response {
-    const hasName = typeof body.name === "string";
-    const hasInstruction = typeof body.instruction === "string";
-    const hasStage = body.stage !== undefined;
-    if (!hasName && !hasInstruction && !hasStage) return json({ ok: false, error: "name, instruction or stage is required" }, 400);
-    if (hasStage && body.stage !== null && !(STAGES as readonly string[]).includes(body.stage as string)) {
-      return json({ ok: false, error: `stage must be one of ${STAGES.join(", ")} or null` }, 400);
-    }
+  // Each field is applied only when present; ColumnUpdateBody requires one.
+  function columnUpdate(_ctx: Ctx, body: z.output<typeof ColumnUpdateBody>, board: Board, columnId: string): Response {
     let next = board;
-    if (hasName) next = renameColumn(next, columnId, body.name as string);
-    if (hasInstruction) next = setInstruction(next, columnId, body.instruction as string);
-    if (hasStage) next = setColumnStage(next, columnId, body.stage as Stage | null);
+    if (body.name !== undefined) next = renameColumn(next, columnId, body.name);
+    if (body.instruction !== undefined) next = setInstruction(next, columnId, body.instruction);
+    if (body.stage !== undefined) next = setColumnStage(next, columnId, body.stage);
     writeBoard(dir, next);
     push();
     return json({ ok: true });
   }
 
-  function columnDelete(_ctx: Ctx, board: Board, columnId: string): Response {
+  function columnDelete(_ctx: Ctx, _body: unknown, board: Board, columnId: string): Response {
     // writeBoard falls back to the default board when none are left, so
     // deleting the last column would silently resurrect the stock four.
     if (board.columns.length <= 1) {
@@ -588,9 +583,7 @@ export function makeServer(
     return json({ ok: true });
   }
 
-  function columnReorder({ body }: Ctx, board: Board, columnId: string): Response {
-    const toIndex = typeof body.toIndex === "number" ? body.toIndex : NaN;
-    if (!Number.isInteger(toIndex)) return json({ ok: false, error: "toIndex must be an integer" }, 400);
+  function columnReorder(_ctx: Ctx, { toIndex }: z.output<typeof ColumnReorderBody>, board: Board, columnId: string): Response {
     writeBoard(dir, reorderColumn(board, columnId, toIndex));
     push();
     return json({ ok: true });
@@ -599,67 +592,51 @@ export function makeServer(
   // column-restore / card-restore: the undo half. The caller hands back the
   // thing it deleted, so the id, comments and assignee return with it
   // rather than coming back as a fresh empty card.
-  function columnRestore({ body }: Ctx): Response {
-    const column = sanitizeColumn(body.column);
-    if (!column) return json({ ok: false, error: "a valid column is required" }, 400);
-    const index = typeof body.index === "number" ? body.index : 0;
-    const cards = Array.isArray(body.cards)
-      ? (body.cards.map(sanitizeCard).filter(Boolean) as Card[])
-      : [];
+  function columnRestore(_ctx: Ctx, { column, index, cards }: z.output<typeof ColumnRestoreBody>): Response {
     writeBoard(dir, restoreColumn(readBoard(dir), column, index, cards));
     push();
     return json({ ok: true });
   }
 
-  function cardRestore({ body }: Ctx): Response {
-    const card = sanitizeCard(body.card);
-    if (!card) return json({ ok: false, error: "a valid card is required" }, 400);
-    const index = typeof body.index === "number" ? body.index : 0;
+  function cardRestore(_ctx: Ctx, { card, index }: z.output<typeof CardRestoreBody>): Response {
     writeBoard(dir, restoreCard(readBoard(dir), card, index));
     push();
     return json({ ok: true });
   }
 
-  function cardAdd({ body }: Ctx): Response {
-    const columnId = typeof body.columnId === "string" ? body.columnId : "";
-    const title = typeof body.title === "string" ? body.title.trim() : "";
-    if (!title) return json({ ok: false, error: "title is required" }, 400);
+  function cardAdd(_ctx: Ctx, { columnId, title, description }: z.output<typeof CardAddBody>): Response {
     const board = readBoard(dir);
     if (!board.columns.some((c) => c.id === columnId)) return json({ ok: false, error: `unknown column: ${columnId}` }, 400);
     let next = addCard(board, columnId, title);
     const card = next.cards[next.cards.length - 1]!; // addCard appends
-    const description = typeof body.description === "string" ? body.description : "";
     if (description.trim()) next = setCardDescription(next, card.id, description);
     writeBoard(dir, next);
     push();
     return json({ ok: true, cardId: card.id });
   }
 
-  function cardDelete(_ctx: Ctx, card: Card, board: Board): Response {
+  function cardDelete(_ctx: Ctx, _body: unknown, card: Card, board: Board): Response {
     writeBoard(dir, deleteCard(board, card.id));
     push();
     return json({ ok: true });
   }
 
-  function commentDelete({ body }: Ctx, card: Card, board: Board): Response {
-    const commentId = typeof body.commentId === "string" ? body.commentId : "";
-    if (!commentId) return json({ ok: false, error: "commentId is required" }, 400);
+  function commentDelete(_ctx: Ctx, { commentId }: z.output<typeof CommentDeleteBody>, card: Card, board: Board): Response {
     writeBoard(dir, deleteComment(board, card.id, commentId));
     push();
     return json({ ok: true });
   }
 
-  async function cardMove({ body }: Ctx, card: Card, board: Board, title: string): Promise<Response> {
+  async function cardMove(_ctx: Ctx, body: z.output<typeof CardMoveBody>, card: Card, board: Board, title: string): Promise<Response> {
     const cardId = card.id;
     const to = board.columns.find((c) => c.id === body.toColumnId);
     if (!to) return json({ ok: false, error: `unknown column: ${String(body.toColumnId)}` }, 400);
     const actor = resolveActor(card, body);
     if ("error" in actor) return json({ ok: false, error: actor.error }, actor.status);
     if (!actor.name) actor.name = "someone";
-    const toIndex = typeof body.toIndex === "number" && Number.isInteger(body.toIndex) ? body.toIndex : undefined;
     const fromIndex = board.columns.findIndex((c) => c.id === card.columnId);
     const direction = board.columns.indexOf(to) < fromIndex ? "back" : "forward";
-    const next = moveCard(board, cardId, to.id, toIndex);
+    const next = moveCard(board, cardId, to.id, body.toIndex);
     writeBoard(dir, next);
     push();
     // The column id (not display name): unambiguous, and directly
@@ -673,29 +650,16 @@ export function makeServer(
   // can't wipe a description written by someone else (and vice versa).
   // Silent by design: text edits don't wake the assignee the way a move
   // or a comment does.
-  function cardUpdate({ body }: Ctx, card: Card, board: Board): Response {
+  // CardUpdateBody holds the rules: at least one field, a title that isn't
+  // blank, touches as a list of paths/globs ([] clears the claim), and repo
+  // as the card's project label ("" or null clears it).
+  function cardUpdate(_ctx: Ctx, body: z.output<typeof CardUpdateBody>, card: Card, board: Board): Response {
     const cardId = card.id;
-    const hasTitle = typeof body.title === "string";
-    const hasDescription = typeof body.description === "string";
-    const hasTouches = body.touches !== undefined;
-    const hasRepo = body.repo !== undefined;
-    if (!hasTitle && !hasDescription && !hasTouches && !hasRepo) return json({ ok: false, error: "title, description, touches or repo is required" }, 400);
-    // repo is the card's project label; "" or null clears it.
-    if (hasRepo && body.repo !== null && typeof body.repo !== "string") {
-      return json({ ok: false, error: "repo must be a string (or null to clear it)" }, 400);
-    }
-    // A blank title would leave the card unidentifiable on the board.
-    if (hasTitle && !body.title!.trim()) return json({ ok: false, error: "title cannot be blank" }, 400);
-    // touches is the card's file claim: a list of paths/globs. An empty
-    // list is how you clear it; anything else is a malformed edit.
-    if (hasTouches && (!Array.isArray(body.touches) || body.touches.some((t: unknown) => typeof t !== "string"))) {
-      return json({ ok: false, error: "touches must be a list of file paths or globs" }, 400);
-    }
     let next = board;
-    if (hasTitle) next = renameCard(next, cardId, body.title!.trim());
-    if (hasDescription) next = setCardDescription(next, cardId, body.description!);
-    if (hasTouches) next = setCardTouches(next, cardId, body.touches as string[]);
-    if (hasRepo) next = setCardRepo(next, cardId, body.repo ?? null);
+    if (body.title !== undefined) next = renameCard(next, cardId, body.title);
+    if (body.description !== undefined) next = setCardDescription(next, cardId, body.description);
+    if (body.touches !== undefined) next = setCardTouches(next, cardId, body.touches);
+    if (body.repo !== undefined) next = setCardRepo(next, cardId, body.repo);
     writeBoard(dir, next);
     push();
     return json({ ok: true });
@@ -711,7 +675,7 @@ export function makeServer(
   // own checkout and their history, and the board protocol has agents
   // hand work to Review for a person to accept. An agent (curl, no
   // sec-fetch-site) is refused rather than allowed to land its own work.
-  async function cardMerge({ req, body }: Ctx, card: Card, board: Board, title: string): Promise<Response> {
+  async function cardMerge({ req }: Ctx, body: z.output<typeof CardMergeBody>, card: Card, board: Board, title: string): Promise<Response> {
     const cardId = card.id;
     if (req.headers.get("sec-fetch-site") !== "same-origin") {
       return json({ ok: false, error: "merging is a human's call — press MERGE on the card in the dashboard" }, 403);
@@ -728,7 +692,7 @@ export function makeServer(
     // Merge order: a card behind an overlapping, unmerged card waits
     // for it. Checked before the queue so a held card never touches git.
     // `force` is the human's override, as on card-assign and spawn.
-    const waiting = body.force === true ? null : mergeBlockReason(board, cardId);
+    const waiting = body.force ? null : mergeBlockReason(board, cardId);
     if (waiting) return json({ ok: false, error: waiting }, 409);
     const r = await mergeWork(where.cwd);
     if (!r.ok) return json(r, 409);
@@ -751,11 +715,12 @@ export function makeServer(
     return json(r);
   }
 
-  async function cardComment({ body }: Ctx, card: Card, board: Board, title: string): Promise<Response> {
+  async function cardComment(_ctx: Ctx, body: z.output<typeof CardCommentBody>, card: Card, board: Board, title: string): Promise<Response> {
     const cardId = card.id;
     const actor = resolveActor(card, body);
     if ("error" in actor) return json({ ok: false, error: actor.error }, actor.status);
-    const text = typeof body.text === "string" ? body.text.trim() : "";
+    const text = body.text;
+    // Checked after the signature, so a bad one is what gets reported.
     if (!actor.name || !text) return json({ ok: false, error: "a signature (author, sessionId or as: \"assignee\") and text are required" }, 400);
     const next = addComment(board, cardId, actor.name, text);
     writeBoard(dir, next);
@@ -767,7 +732,7 @@ export function makeServer(
   // send-task: compose the full protocol prompt server-side and type it
   // into the assigned live session's terminal. The curl targets in the
   // footer are this very server, taken from the request's own origin.
-  async function sendTask({ url, body }: Ctx, card: Card, board: Board): Promise<Response> {
+  async function sendTask({ url }: Ctx, body: z.output<typeof SendTaskBody>, card: Card, board: Board): Promise<Response> {
     const cardId = card.id;
     // The same readiness rule the SEND TASK button asks
     // (src/lib/sendTaskReady.ts), so the two can't drift apart.
@@ -799,7 +764,7 @@ export function makeServer(
     // the previous ticket doesn't bleed into this one.
     const r = await deliverFresh(agent, prompt);
     if (!r.ok) return json(r, 502); // delivery failed: leave the card where it was
-    const by = typeof body.author === "string" && body.author.trim() ? body.author.trim() : "You";
+    const by = body.author || "You";
     // Re-read after the await, then apply the move + the send record as one
     // write (moveToWorkColumn is a no-op if it already landed in-progress).
     writeBoard(dir, addComment(moveToWorkColumn(readBoard(dir), cardId), cardId, by, `Sent task to ${agent.name}.`));
@@ -809,7 +774,7 @@ export function makeServer(
 
   // card-assign: bind a LIVE session (resolved to its display name so
   // the label survives the session ending), or clear with null.
-  function cardAssign({ body }: Ctx, card: Card, board: Board): Response {
+  function cardAssign(_ctx: Ctx, body: z.output<typeof CardAssignBody>, card: Card, board: Board): Response {
     const cardId = card.id;
     if (body.sessionId === null) {
       pendingSpawns = pendingSpawns.filter((p) => p.cardId !== cardId);
@@ -817,11 +782,10 @@ export function makeServer(
       push();
       return json({ ok: true });
     }
-    if (!validSessionId(body.sessionId)) return json({ ok: false, error: "bad sessionId" }, 400);
     // The same file-claim gate as spawn: binding an agent to this card is
     // staffing it. Unassigning (handled above) is never blocked — it is
     // how you get OUT of a conflict.
-    if (body.force !== true) {
+    if (!body.force) {
       const blocked = claimBlockReason(board, cardId);
       if (blocked) return json({ ok: false, error: blocked }, 409);
     }
@@ -836,29 +800,25 @@ export function makeServer(
   // upload: save an image dropped/pasted into a chat to a temp file, and
   // return its path. Not tied to a session — the path is later prepended to
   // a prompt and typed into the terminal, where Claude Code reads it.
-  function upload({ body }: Ctx): Response {
-    const name = typeof body.name === "string" ? body.name : "image";
-    const type = typeof body.type === "string" ? body.type : "";
-    const data = typeof body.dataBase64 === "string" ? body.dataBase64 : "";
-    if (!data) return json({ ok: false, error: "no image data" }, 400);
-    const r = saveUpload(name, type, data);
+  function upload(_ctx: Ctx, { name, type, dataBase64 }: z.output<typeof UploadBody>): Response {
+    const r = saveUpload(name, type, dataBase64);
     return json(r, r.ok ? 200 : 400);
   }
 
   // crew-note: a crew member keeping its notes (see src/lib/crew.ts),
   // signed like a card write: by crew id (the SessionStart context hands
   // the agent its own), by session id, or as a card's assignee.
-  function crewNote({ body }: Ctx): Response {
+  function crewNote(_ctx: Ctx, body: z.output<typeof CrewNoteBody>): Response {
     const crewId = resolveCrewId(body);
     if ("error" in crewId) return json({ ok: false, error: crewId.error }, crewId.status);
-    const r = addNote(dir, crewId.id, typeof body.text === "string" ? body.text : "", { replace: body.replace === true });
+    const r = addNote(dir, crewId.id, body.text, { replace: body.replace });
     return json(r, r.ok ? 200 : 400);
   }
 
   // inbox-drain: a session's Stop hook collecting the board events that
   // arrived while it was busy. Hands them over once; the hook feeds them
   // back to the agent as the reason its turn should continue.
-  function inboxDrain(_ctx: Ctx, sessionId: string): Response {
+  function inboxDrain(_ctx: Ctx, _body: unknown, sessionId: string): Response {
     const items = drain(sessionId);
     if (items.length) push();
     return json({ ok: true, items });
@@ -868,65 +828,54 @@ export function makeServer(
   // session has one, so it survives the /clear that ends this session id.
   const overrideKey = (sessionId: string) => loadStatus(dir, sessionId)?.crew?.id ?? sessionId;
 
-  function renameSession({ body }: Ctx, sessionId: string): Response {
-    // name must be a string (or absent = clear); a non-string would throw
-    // inside setNameOverride (.trim()) and 500 the handler.
-    if (body.name !== undefined && typeof body.name !== "string") {
-      return json({ ok: false, error: "name must be a string" }, 400);
-    }
+  function renameSession(_ctx: Ctx, body: z.output<typeof RenameBody>, sessionId: string): Response {
     setNameOverride(dir, overrideKey(sessionId), body.name ?? null);
     push();
     return json({ ok: true });
   }
 
-  function setSprite({ body }: Ctx, sessionId: string): Response {
-    if (typeof body.palette !== "number" || typeof body.gear !== "string") {
-      return json({ ok: false, error: "palette and gear are required" }, 400);
-    }
-    const character = typeof body.body === "string" ? body.body : undefined;
-    setSpriteOverride(dir, overrideKey(sessionId), { palette: body.palette, gear: body.gear, body: character });
+  function setSprite(_ctx: Ctx, { palette, gear, body }: z.output<typeof SpriteBody>, sessionId: string): Response {
+    setSpriteOverride(dir, overrideKey(sessionId), { palette, gear, body });
     push();
     return json({ ok: true });
   }
 
-  async function promptSession({ body }: Ctx, status: AgentStatus): Promise<Response> {
-    const text = typeof body.text === "string" ? body.text : "";
-    if (!text.trim()) return json({ ok: false, error: "empty prompt" }, 400);
-    if (text.length > 10_000) return json({ ok: false, error: "prompt too long" }, 400);
+  async function promptSession(_ctx: Ctx, { text }: z.output<typeof PromptBody>, status: AgentStatus): Promise<Response> {
     return json(await sendPrompt(status, text));
   }
 
   // Anything else. Answers after the same session checks the terminal
   // actions run, so a bad or unknown session id reads as it always has.
-  const unknownAction = withSessionStatus(() => json({ ok: false, error: "unknown action" }, 404));
+  const unknownAction = withSessionStatus(NoFields, () => json({ ok: false, error: "unknown action" }, 404));
 
-  const actionHandlers: Record<string, ActionHandler<ActionBody>> = {
-    "pick-folder": pickFolder,
-    "spawn": spawnSession,
-    "column-add": columnAdd,
-    "column-update": withColumn(columnUpdate),
-    "column-delete": withColumn(columnDelete),
-    "column-reorder": withColumn(columnReorder),
-    "column-restore": columnRestore,
-    "card-restore": cardRestore,
-    "card-add": cardAdd,
-    "card-delete": withCard(cardDelete),
-    "comment-delete": withCard(commentDelete),
-    "card-move": withCard(cardMove),
-    "card-update": withCard(cardUpdate),
-    "card-merge": withCard(cardMerge),
-    "card-comment": withCard(cardComment),
-    "send-task": withCard(sendTask),
-    "card-assign": withCard(cardAssign),
-    "upload": upload,
-    "crew-note": crewNote,
-    "inbox-drain": withSessionId(inboxDrain),
-    "rename": withSessionId(renameSession),
-    "sprite": withSessionId(setSprite),
-    "focus": withSessionStatus(async (_ctx, status) => json(await focusSession(status))),
-    "pause": withSessionStatus(async (_ctx, status) => json(await interruptSession(status))),
-    "kill": withSessionStatus(async (_ctx, status) => json(await killAgent(status))),
-    "prompt": withSessionStatus(promptSession),
+  // Each entry names the schema its body is read with (src/lib/actionBodies.ts).
+  const actionHandlers: Record<string, ActionHandler<unknown>> = {
+    "pick-folder": withBody(PickFolderBody, pickFolder),
+    "spawn": withBody(SpawnBody, spawnSession),
+    "column-add": withBody(ColumnAddBody, columnAdd),
+    "column-update": withColumn(ColumnUpdateBody, columnUpdate),
+    "column-delete": withColumn(NoFields, columnDelete),
+    "column-reorder": withColumn(ColumnReorderBody, columnReorder),
+    "column-restore": withBody(ColumnRestoreBody, columnRestore),
+    "card-restore": withBody(CardRestoreBody, cardRestore),
+    "card-add": withBody(CardAddBody, cardAdd),
+    "card-delete": withCard(NoFields, cardDelete),
+    "comment-delete": withCard(CommentDeleteBody, commentDelete),
+    "card-move": withCard(CardMoveBody, cardMove),
+    "card-update": withCard(CardUpdateBody, cardUpdate),
+    "card-merge": withCard(CardMergeBody, cardMerge),
+    "card-comment": withCard(CardCommentBody, cardComment),
+    "send-task": withCard(SendTaskBody, sendTask),
+    "card-assign": withCard(CardAssignBody, cardAssign),
+    "upload": withBody(UploadBody, upload),
+    "crew-note": withBody(CrewNoteBody, crewNote),
+    "inbox-drain": withSessionId(NoFields, inboxDrain),
+    "rename": withSessionId(RenameBody, renameSession),
+    "sprite": withSessionId(SpriteBody, setSprite),
+    "focus": withSessionStatus(NoFields, async (_ctx, _body, status) => json(await focusSession(status))),
+    "pause": withSessionStatus(NoFields, async (_ctx, _body, status) => json(await interruptSession(status))),
+    "kill": withSessionStatus(NoFields, async (_ctx, _body, status) => json(await killAgent(status))),
+    "prompt": withSessionStatus(PromptBody, promptSession),
   };
 
   const server = Bun.serve({

@@ -101,6 +101,19 @@ test("server: bad JSON on a real action is a 400 bad body", async () => {
   });
 });
 
+test("server: JSON that isn't an object is a 400 bad body too, not a crash", async () => {
+  // Each action reads its body through a zod object schema (src/lib/actionBodies.ts),
+  // so null, an array or a bare value is refused before any handler runs.
+  await withServer(async (post) => {
+    for (const action of ["card-add", "card-move", "spawn", "rename", "nope"]) {
+      for (const raw of ["null", "[]", "5", "\"s\""]) {
+        const res = await post(`/action/${action}`, raw);
+        expect([action, raw, res.status, await res.json()]).toEqual([action, raw, 400, { ok: false, error: "bad body" }]);
+      }
+    }
+  });
+});
+
 test("server: an unknown action answers as it always has (session checks first)", async () => {
   await withServer(async (post) => {
     for (const action of ["nope", "constructor", "toString"]) {
