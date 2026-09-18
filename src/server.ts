@@ -19,6 +19,7 @@ import { saveUpload, resolveUploadPath } from "./lib/uploads";
 import { chooseFolder } from "./lib/chooser";
 import { initialIdle, onConnect, onDisconnect, shouldShutDown, type IdleState } from "./lib/idle";
 import { matchPendingSpawns, sessionsNeedingOpeningPrompt, type PendingSpawn } from "./lib/spawnAssign";
+import { dispatchAction, type ActionContext, type ActionHandler } from "./lib/actionDispatch";
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -94,6 +95,10 @@ export async function searchChats(
   );
   return hits.filter((h): h is ChatHitResult => h !== null);
 }
+
+/** The JSON body any POST /action/* may carry; each handler reads its own
+ *  fields and checks their types itself. */
+type ActionBody = { sessionId?: string | null; name?: string; text?: string; cwd?: string; palette?: number; gear?: string; body?: string; model?: string; permissionMode?: string; worktree?: string; branch?: string; persona?: string; type?: string; dataBase64?: string; cardId?: string; columnId?: string; toColumnId?: string; title?: string; description?: string; author?: string; instruction?: string; toIndex?: number; index?: number; column?: unknown; card?: unknown; cards?: unknown; commentId?: string; as?: string; stage?: string | null; crew?: string; replace?: boolean; touches?: unknown; force?: boolean; repo?: string | null };
 
 /** Who signs the note a merge leaves on the cards it was holding up. */
 const MERGE_NOTE_AUTHOR = "THE LINE";
@@ -395,6 +400,528 @@ export function makeServer(
     }, idleCheckMs);
   }
 
+  // Where a card's work actually lives: its assignee's working directory.
+  // Read from the session's own status FILE rather than the live snapshot,
+  // so a card whose agent has finished and gone still knows which branch
+  // holds its work — which is exactly when you want to merge it.
+  const cardWorkDir = (cardId: string): { cwd: string } | { error: string; status: number } => {
+    const card = readBoard(dir).cards.find((k) => k.id === cardId);
+    if (!card) return { error: `unknown card: ${cardId}`, status: 404 };
+    if (!card.assignee) return { error: "card has no assignee, so there's no branch to merge", status: 400 };
+    // The crew member's current session first (its id moved on with a
+    // /clear), then the session the card was bound to.
+    const st = findAssigneeSession(readSnapshot(dir, Date.now()).agents, card.assignee) ?? loadStatus(dir, card.assignee.id);
+    if (!st?.cwd) return { error: `no working directory known for ${card.assignee.name}`, status: 404 };
+    return { cwd: st.cwd };
+  };
+
+  // ---- POST /action/* handlers ------------------------------------------------
+  // One named function per action, wired up in `actionHandlers` below. The
+  // CSRF gate and the body parse live in dispatchAction (src/lib/actionDispatch.ts),
+  // wrapped around the lookup, so no handler here can be reached without them.
+  type Ctx = ActionContext<ActionBody>;
+
+  // Shared preambles. Each reads what a family of actions needs, answers the
+  // unhappy path itself, and hands the rest to the handler.
+
+  /** column-update/-delete/-reorder: the column must exist on a fresh read. */
+  const withColumn = (fn: (ctx: Ctx, board: Board, columnId: string) => Response | Promise<Response>): ActionHandler<ActionBody> =>
+    (ctx) => {
+      const columnId = typeof ctx.body.columnId === "string" ? ctx.body.columnId : "";
+      const board = readBoard(dir);
+      if (!board.columns.some((c) => c.id === columnId)) {
+        return json({ ok: false, error: `unknown column: ${columnId}` }, 404);
+      }
+      return fn(ctx, board, columnId);
+    };
+
+  /** card-*: the write half of the agent card API. Each op re-reads the
+   *  board and applies one pure, card-scoped mutation before persisting —
+   *  so an agent's move/comment can never clobber (or be clobbered by)
+   *  another writer the way a whole-board write can. Not tied to a
+   *  sessionId: the author is a display name carried on the comment. */
+  const withCard = (fn: (ctx: Ctx, card: Card, board: Board, title: string) => Response | Promise<Response>): ActionHandler<ActionBody> =>
+    (ctx) => {
+      const cardId = typeof ctx.body.cardId === "string" ? ctx.body.cardId : "";
+      const board = readBoard(dir);
+      const card = board.cards.find((k) => k.id === cardId);
+      if (!card) return json({ ok: false, error: `unknown card: ${cardId}` }, 404);
+      return fn(ctx, card, board, card.title.trim() || "(untitled card)");
+    };
+
+  /** Actions about one session, by id. */
+  const withSessionId = (fn: (ctx: Ctx, sessionId: string) => Response | Promise<Response>): ActionHandler<ActionBody> =>
+    (ctx) => {
+      if (!validSessionId(ctx.body.sessionId)) return json({ ok: false, error: "bad sessionId" }, 400);
+      return fn(ctx, ctx.body.sessionId);
+    };
+
+  /** Actions that drive a session's terminal: it must have a status file. */
+  const withSessionStatus = (fn: (ctx: Ctx, status: AgentStatus) => Response | Promise<Response>): ActionHandler<ActionBody> =>
+    withSessionId((ctx, sessionId) => {
+      const status = loadStatus(dir, sessionId);
+      if (!status) return json({ ok: false, error: "unknown session" }, 404);
+      return fn(ctx, status);
+    });
+
+  // pick-folder opens the real macOS folder chooser on the user's screen and
+  // hands back the path they picked. Browser-only on purpose: it puts a
+  // modal window on someone's desktop, so it takes a same-origin POST from
+  // our own page — a scripted client (curl, an agent) sends no
+  // sec-fetch-site and is refused rather than allowed through the way the
+  // read endpoints are.
+  async function pickFolder({ req, body }: Ctx): Promise<Response> {
+    if (req.headers.get("sec-fetch-site") !== "same-origin") {
+      return json({ ok: false, error: "the folder picker is a browser-only action" }, 403);
+    }
+    return json(await chooseFolder(typeof body.cwd === "string" ? body.cwd : undefined));
+  }
+
+  // spawn creates a brand-new session — it has a folder + task, not a sessionId
+  async function spawnSession({ req, url, body }: Ctx): Promise<Response> {
+    const cwd = typeof body.cwd === "string" ? body.cwd : "";
+    const task = typeof body.text === "string" ? body.text : "";
+    if (!cwd || !task.trim()) return json({ ok: false, error: "folder and task are required" }, 400);
+    // The card this agent is being spawned for, if any: rides into the
+    // session env so its SessionStart hook self-assigns the card once the
+    // real session id exists, and is recorded below so the server does
+    // the same when there are no hooks (see pendingSpawns).
+    const cardId = typeof body.cardId === "string" && body.cardId.trim() ? body.cardId.trim() : undefined;
+    // File-claim gate. Staffing a card whose `touches` overlap those of
+    // another active, unmerged card is what puts two agents on a collision
+    // course, so it is refused here — before a worktree, a branch or a
+    // terminal exists. `force` is the human's override.
+    if (cardId && body.force !== true) {
+      const blocked = claimBlockReason(readBoard(dir), cardId);
+      if (blocked) return json({ ok: false, error: blocked }, 409);
+    }
+    try { if (!statSync(cwd).isDirectory()) throw 0; } catch { return json({ ok: false, error: `folder not found: ${cwd}` }, 400); }
+    const model = typeof body.model === "string" && ALLOWED_MODELS.has(body.model) ? body.model : undefined;
+    const permissionMode = typeof body.permissionMode === "string" && ALLOWED_PERMISSION_MODES.has(body.permissionMode) ? body.permissionMode : undefined;
+    // A blank/whitespace field means "no worktree" (launch in the folder). The
+    // name is sanitized to a slug inside createWorktree, so pass it as typed.
+    const worktree = typeof body.worktree === "string" && body.worktree.trim() ? body.worktree.trim() : undefined;
+    // Same rule for the branch, and the two are independent: a branch on
+    // its own switches the folder itself, a branch alongside a worktree
+    // names that worktree's branch (see prepareLaunch).
+    const branch = typeof body.branch === "string" && body.branch.trim() ? body.branch.trim() : undefined;
+    const persona = typeof body.persona === "string" && body.persona.trim() ? body.persona.trim() : undefined;
+    // Loop-breaker: an agent (curl sends no sec-fetch-site) may spawn
+    // workers but never another orchestrator. A live run showed confused
+    // scrum-masters spawning scrum-masters exponentially; only a human in
+    // the browser may start one.
+    if (persona === "scrum-master" && !req.headers.get("sec-fetch-site")) {
+      return json({ ok: false, error: "agents may not spawn a scrum-master — only a human can (use the + NEW AGENT dialog)" }, 403);
+    }
+    // Who the new agent is: a roster name no live desk is using, and a
+    // crew id it keeps across every /clear (see src/lib/crew.ts).
+    const live = readSnapshot(dir, Date.now()).agents;
+    const name = pickName(live.map((a) => a.name));
+    const crew = { id: mintCrewId(name), name };
+    const r = await spawn(cwd, task, { model, permissionMode, worktree, branch, persona, serverUrl: url.origin, cardId, crew });
+    // Bind the card to the new session once it shows up, hooks or not.
+    if (r.ok && cardId && r.cwd) {
+      pendingSpawns.push({
+        cardId, cwd: r.cwd, uniqueCwd: r.worktreeCreated === true, crewId: crew.id, task,
+        before: live.map((a) => a.sessionId), at: Date.now(), force: body.force === true,
+      });
+    }
+    // Label the card with the repo it is being worked in, unless someone
+    // already has. The main checkout, not the worktree: the label names the
+    // project, and every worktree of it should read the same.
+    if (r.ok && cardId && !readBoard(dir).cards.find((k) => k.id === cardId)?.repo) {
+      const root = await mainCheckout(cwd);
+      const board = readBoard(dir); // re-read: the git call above yielded
+      if (board.cards.some((k) => k.id === cardId && !k.repo)) {
+        writeBoard(dir, setCardRepo(board, cardId, repoName(root), root));
+        push();
+      }
+    }
+    return json(r);
+  }
+
+  // There is deliberately no whole-board write: a writer holding a stale
+  // board would silently erase whatever landed since it read.
+  // column-*: the same discipline as card-*, for the board's own shape.
+  // These exist so the UI never has to send a whole board to rename a
+  // column or drag one — each re-reads, applies one pure op, and writes.
+  function columnAdd({ body }: Ctx): Response {
+    const name = typeof body.name === "string" ? body.name : "";
+    const next = addColumn(readBoard(dir), name);
+    writeBoard(dir, next);
+    push();
+    return json({ ok: true, columnId: next.columns[next.columns.length - 1]!.id });
+  }
+
+  function columnUpdate({ body }: Ctx, board: Board, columnId: string): Response {
+    const hasName = typeof body.name === "string";
+    const hasInstruction = typeof body.instruction === "string";
+    const hasStage = body.stage !== undefined;
+    if (!hasName && !hasInstruction && !hasStage) return json({ ok: false, error: "name, instruction or stage is required" }, 400);
+    if (hasStage && body.stage !== null && !(STAGES as readonly string[]).includes(body.stage as string)) {
+      return json({ ok: false, error: `stage must be one of ${STAGES.join(", ")} or null` }, 400);
+    }
+    let next = board;
+    if (hasName) next = renameColumn(next, columnId, body.name as string);
+    if (hasInstruction) next = setInstruction(next, columnId, body.instruction as string);
+    if (hasStage) next = setColumnStage(next, columnId, body.stage as Stage | null);
+    writeBoard(dir, next);
+    push();
+    return json({ ok: true });
+  }
+
+  function columnDelete(_ctx: Ctx, board: Board, columnId: string): Response {
+    // writeBoard falls back to the default board when none are left, so
+    // deleting the last column would silently resurrect the stock four.
+    if (board.columns.length <= 1) {
+      return json({ ok: false, error: "cannot delete the last column" }, 400);
+    }
+    writeBoard(dir, deleteColumn(board, columnId));
+    push();
+    return json({ ok: true });
+  }
+
+  function columnReorder({ body }: Ctx, board: Board, columnId: string): Response {
+    const toIndex = typeof body.toIndex === "number" ? body.toIndex : NaN;
+    if (!Number.isInteger(toIndex)) return json({ ok: false, error: "toIndex must be an integer" }, 400);
+    writeBoard(dir, reorderColumn(board, columnId, toIndex));
+    push();
+    return json({ ok: true });
+  }
+
+  // column-restore / card-restore: the undo half. The caller hands back the
+  // thing it deleted, so the id, comments and assignee return with it
+  // rather than coming back as a fresh empty card.
+  function columnRestore({ body }: Ctx): Response {
+    const column = sanitizeColumn(body.column);
+    if (!column) return json({ ok: false, error: "a valid column is required" }, 400);
+    const index = typeof body.index === "number" ? body.index : 0;
+    const cards = Array.isArray(body.cards)
+      ? (body.cards.map(sanitizeCard).filter(Boolean) as Card[])
+      : [];
+    writeBoard(dir, restoreColumn(readBoard(dir), column, index, cards));
+    push();
+    return json({ ok: true });
+  }
+
+  function cardRestore({ body }: Ctx): Response {
+    const card = sanitizeCard(body.card);
+    if (!card) return json({ ok: false, error: "a valid card is required" }, 400);
+    const index = typeof body.index === "number" ? body.index : 0;
+    writeBoard(dir, restoreCard(readBoard(dir), card, index));
+    push();
+    return json({ ok: true });
+  }
+
+  function cardAdd({ body }: Ctx): Response {
+    const columnId = typeof body.columnId === "string" ? body.columnId : "";
+    const title = typeof body.title === "string" ? body.title.trim() : "";
+    if (!title) return json({ ok: false, error: "title is required" }, 400);
+    const board = readBoard(dir);
+    if (!board.columns.some((c) => c.id === columnId)) return json({ ok: false, error: `unknown column: ${columnId}` }, 400);
+    let next = addCard(board, columnId, title);
+    const card = next.cards[next.cards.length - 1]!; // addCard appends
+    const description = typeof body.description === "string" ? body.description : "";
+    if (description.trim()) next = setCardDescription(next, card.id, description);
+    writeBoard(dir, next);
+    push();
+    return json({ ok: true, cardId: card.id });
+  }
+
+  function cardDelete(_ctx: Ctx, card: Card, board: Board): Response {
+    writeBoard(dir, deleteCard(board, card.id));
+    push();
+    return json({ ok: true });
+  }
+
+  function commentDelete({ body }: Ctx, card: Card, board: Board): Response {
+    const commentId = typeof body.commentId === "string" ? body.commentId : "";
+    if (!commentId) return json({ ok: false, error: "commentId is required" }, 400);
+    writeBoard(dir, deleteComment(board, card.id, commentId));
+    push();
+    return json({ ok: true });
+  }
+
+  async function cardMove({ body }: Ctx, card: Card, board: Board, title: string): Promise<Response> {
+    const cardId = card.id;
+    const to = board.columns.find((c) => c.id === body.toColumnId);
+    if (!to) return json({ ok: false, error: `unknown column: ${String(body.toColumnId)}` }, 400);
+    const actor = resolveActor(card, body);
+    if ("error" in actor) return json({ ok: false, error: actor.error }, actor.status);
+    if (!actor.name) actor.name = "someone";
+    const toIndex = typeof body.toIndex === "number" && Number.isInteger(body.toIndex) ? body.toIndex : undefined;
+    const fromIndex = board.columns.findIndex((c) => c.id === card.columnId);
+    const direction = board.columns.indexOf(to) < fromIndex ? "back" : "forward";
+    const next = moveCard(board, cardId, to.id, toIndex);
+    writeBoard(dir, next);
+    push();
+    // The column id (not display name): unambiguous, and directly
+    // reusable by the recipient in a card-move call of its own.
+    const delivery = await notifyCardEvent(next, cardId, actor, `[THE LINE] ${actor.name} moved "${title}" to "${to.id}".`, { kind: "move", direction });
+    return json({ ok: true, delivery });
+  }
+
+  // card-update: edit a card's own text — its title, its description, its
+  // file claim, its repo label. Each field is applied only when present, so renaming a card
+  // can't wipe a description written by someone else (and vice versa).
+  // Silent by design: text edits don't wake the assignee the way a move
+  // or a comment does.
+  function cardUpdate({ body }: Ctx, card: Card, board: Board): Response {
+    const cardId = card.id;
+    const hasTitle = typeof body.title === "string";
+    const hasDescription = typeof body.description === "string";
+    const hasTouches = body.touches !== undefined;
+    const hasRepo = body.repo !== undefined;
+    if (!hasTitle && !hasDescription && !hasTouches && !hasRepo) return json({ ok: false, error: "title, description, touches or repo is required" }, 400);
+    // repo is the card's project label; "" or null clears it.
+    if (hasRepo && body.repo !== null && typeof body.repo !== "string") {
+      return json({ ok: false, error: "repo must be a string (or null to clear it)" }, 400);
+    }
+    // A blank title would leave the card unidentifiable on the board.
+    if (hasTitle && !body.title!.trim()) return json({ ok: false, error: "title cannot be blank" }, 400);
+    // touches is the card's file claim: a list of paths/globs. An empty
+    // list is how you clear it; anything else is a malformed edit.
+    if (hasTouches && (!Array.isArray(body.touches) || body.touches.some((t: unknown) => typeof t !== "string"))) {
+      return json({ ok: false, error: "touches must be a list of file paths or globs" }, 400);
+    }
+    let next = board;
+    if (hasTitle) next = renameCard(next, cardId, body.title!.trim());
+    if (hasDescription) next = setCardDescription(next, cardId, body.description!);
+    if (hasTouches) next = setCardTouches(next, cardId, body.touches as string[]);
+    if (hasRepo) next = setCardRepo(next, cardId, body.repo ?? null);
+    writeBoard(dir, next);
+    push();
+    return json({ ok: true });
+  }
+
+  // card-merge: land this card's branch on the trunk, for real. The
+  // guard rails live in lib/merge (nothing to merge, dirty tree, busy
+  // main checkout, conflicts) — this only resolves the card to a
+  // directory and records what happened on the card itself, so the
+  // ticket carries the trail rather than just a toast that scrolls away.
+  //
+  // Browser-only, like the folder picker: this writes to the human's
+  // own checkout and their history, and the board protocol has agents
+  // hand work to Review for a person to accept. An agent (curl, no
+  // sec-fetch-site) is refused rather than allowed to land its own work.
+  async function cardMerge({ req, body }: Ctx, card: Card, board: Board, title: string): Promise<Response> {
+    const cardId = card.id;
+    if (req.headers.get("sec-fetch-site") !== "same-origin") {
+      return json({ ok: false, error: "merging is a human's call — press MERGE on the card in the dashboard" }, 403);
+    }
+    const where = cardWorkDir(cardId);
+    if ("error" in where) return json({ ok: false, error: where.error }, where.status);
+    // Signed like any other card write, and resolved BEFORE the merge:
+    // a signature we can't honour should cost nothing, not leave the
+    // trunk moved with no record on the card of who moved it. The
+    // browser sends author: "You"; unsigned falls back to the same.
+    const actor = resolveActor(card, body);
+    if ("error" in actor) return json({ ok: false, error: actor.error }, actor.status);
+    const by = actor.name || "You";
+    // Merge order: a card behind an overlapping, unmerged card waits
+    // for it. Checked before the queue so a held card never touches git.
+    // `force` is the human's override, as on card-assign and spawn.
+    const waiting = body.force === true ? null : mergeBlockReason(board, cardId);
+    if (waiting) return json({ ok: false, error: waiting }, 409);
+    const r = await mergeWork(where.cwd);
+    if (!r.ok) return json(r, 409);
+    const note = `Merged ${r.branch} into ${r.base}.`;
+    // Landed for real, so the card goes to mergedColumn and its claim is
+    // released; each card that was waiting on it is told so on its own
+    // card. No await between this read and the write.
+    const before = readBoard(dir);
+    const landed = landMergedCard(addComment(before, cardId, by, note), cardId);
+    const released = mergeReleaseNotes(before, landed, cardId);
+    let next = landed;
+    for (const n of released) next = addComment(next, n.cardId, MERGE_NOTE_AUTHOR, n.text);
+    writeBoard(dir, next);
+    push();
+    void notifyCardEvent(next, cardId, { ...actor, name: by }, `[THE LINE] ${by} merged "${title}" -- ${note}`, { kind: "move", direction: "forward" });
+    for (const n of released) {
+      const t = next.cards.find((k) => k.id === n.cardId)?.title.trim() || "(untitled card)";
+      void notifyCardEvent(next, n.cardId, { name: MERGE_NOTE_AUTHOR }, `[THE LINE] ${MERGE_NOTE_AUTHOR} commented on "${t}":\n${n.text}`, { kind: "comment" });
+    }
+    return json(r);
+  }
+
+  async function cardComment({ body }: Ctx, card: Card, board: Board, title: string): Promise<Response> {
+    const cardId = card.id;
+    const actor = resolveActor(card, body);
+    if ("error" in actor) return json({ ok: false, error: actor.error }, actor.status);
+    const text = typeof body.text === "string" ? body.text.trim() : "";
+    if (!actor.name || !text) return json({ ok: false, error: "a signature (author, sessionId or as: \"assignee\") and text are required" }, 400);
+    const next = addComment(board, cardId, actor.name, text);
+    writeBoard(dir, next);
+    push();
+    const delivery = await notifyCardEvent(next, cardId, actor, `[THE LINE] ${actor.name} commented on "${title}":\n${text}`, { kind: "comment" });
+    return json({ ok: true, delivery });
+  }
+
+  // send-task: compose the full protocol prompt server-side and type it
+  // into the assigned live session's terminal. The curl targets in the
+  // footer are this very server, taken from the request's own origin.
+  async function sendTask({ url, body }: Ctx, card: Card, board: Board): Promise<Response> {
+    const cardId = card.id;
+    // The same readiness rule the SEND TASK button asks
+    // (src/lib/sendTaskReady.ts), so the two can't drift apart.
+    const readiness = sendTaskReadiness(card.assignee, readSnapshot(dir, Date.now()).agents);
+    if (!readiness.ready) {
+      switch (readiness.why) {
+        case "unassigned": return json({ ok: false, error: "card has no assignee" }, 400);
+        case "ended": return json({ ok: false, error: `assignee "${readiness.assignee.name}" is not a live session` }, 404);
+        // A session waiting on a dialog would take the typed task as
+        // keystrokes ON the dialog (Enter approves it) — refuse instead.
+        case "waiting": return json({ ok: false, error: `${readiness.agent.name} is waiting on a prompt in its terminal — answer that first, then resend` }, 409);
+        // And a working one would have its context cleared mid-task.
+        case "working": return json({ ok: false, error: `${readiness.agent.name} is still working — wait for it to go idle (or pause it), then resend` }, 409);
+      }
+    }
+    const agent = readiness.agent;
+    // An agent that already left comments here has worked this card
+    // before: its context is about to be cleared, so the footer sends
+    // it back to its own notes on the card first.
+    const workedBefore = (card.comments ?? []).some((c) => c.author === agent.name);
+    // Server-authoritative in-progress: put the card where work happens
+    // ourselves, then compose the prompt from THAT board — so the card
+    // reaches in-progress even if the agent skips STEP 1, and the prompt
+    // correctly tells it the card is already there (leave it, pick it up).
+    const progressed = moveToWorkColumn(board, cardId);
+    const prompt = cardTaskPrompt(progressed, cardId, url.origin, agent.name, { workedBefore });
+    if (!prompt.trim()) return json({ ok: false, error: "card has no task text to send" }, 400);
+    // Fresh delivery: clear the agent's context before the new task so
+    // the previous ticket doesn't bleed into this one.
+    const r = await deliverFresh(agent, prompt);
+    if (!r.ok) return json(r, 502); // delivery failed: leave the card where it was
+    const by = typeof body.author === "string" && body.author.trim() ? body.author.trim() : "You";
+    // Re-read after the await, then apply the move + the send record as one
+    // write (moveToWorkColumn is a no-op if it already landed in-progress).
+    writeBoard(dir, addComment(moveToWorkColumn(readBoard(dir), cardId), cardId, by, `Sent task to ${agent.name}.`));
+    push();
+    return json({ ok: true });
+  }
+
+  // card-assign: bind a LIVE session (resolved to its display name so
+  // the label survives the session ending), or clear with null.
+  function cardAssign({ body }: Ctx, card: Card, board: Board): Response {
+    const cardId = card.id;
+    if (body.sessionId === null) {
+      pendingSpawns = pendingSpawns.filter((p) => p.cardId !== cardId);
+      writeBoard(dir, assignCard(board, cardId, null));
+      push();
+      return json({ ok: true });
+    }
+    if (!validSessionId(body.sessionId)) return json({ ok: false, error: "bad sessionId" }, 400);
+    // The same file-claim gate as spawn: binding an agent to this card is
+    // staffing it. Unassigning (handled above) is never blocked — it is
+    // how you get OUT of a conflict.
+    if (body.force !== true) {
+      const blocked = claimBlockReason(board, cardId);
+      if (blocked) return json({ ok: false, error: blocked }, 409);
+    }
+    const resolved = resolveAssignee(dir, body.sessionId);
+    if (!resolved) return json({ ok: false, error: "no session with that id" }, 404);
+    pendingSpawns = pendingSpawns.filter((p) => p.cardId !== cardId);
+    writeBoard(dir, assignCard(board, cardId, resolved));
+    push();
+    return json({ ok: true });
+  }
+
+  // upload: save an image dropped/pasted into a chat to a temp file, and
+  // return its path. Not tied to a session — the path is later prepended to
+  // a prompt and typed into the terminal, where Claude Code reads it.
+  function upload({ body }: Ctx): Response {
+    const name = typeof body.name === "string" ? body.name : "image";
+    const type = typeof body.type === "string" ? body.type : "";
+    const data = typeof body.dataBase64 === "string" ? body.dataBase64 : "";
+    if (!data) return json({ ok: false, error: "no image data" }, 400);
+    const r = saveUpload(name, type, data);
+    return json(r, r.ok ? 200 : 400);
+  }
+
+  // crew-note: a crew member keeping its notes (see src/lib/crew.ts),
+  // signed like a card write: by crew id (the SessionStart context hands
+  // the agent its own), by session id, or as a card's assignee.
+  function crewNote({ body }: Ctx): Response {
+    const crewId = resolveCrewId(body);
+    if ("error" in crewId) return json({ ok: false, error: crewId.error }, crewId.status);
+    const r = addNote(dir, crewId.id, typeof body.text === "string" ? body.text : "", { replace: body.replace === true });
+    return json(r, r.ok ? 200 : 400);
+  }
+
+  // inbox-drain: a session's Stop hook collecting the board events that
+  // arrived while it was busy. Hands them over once; the hook feeds them
+  // back to the agent as the reason its turn should continue.
+  function inboxDrain(_ctx: Ctx, sessionId: string): Response {
+    const items = drain(sessionId);
+    if (items.length) push();
+    return json({ ok: true, items });
+  }
+
+  // A rename or a new look is stored against the crew member when the
+  // session has one, so it survives the /clear that ends this session id.
+  const overrideKey = (sessionId: string) => loadStatus(dir, sessionId)?.crew?.id ?? sessionId;
+
+  function renameSession({ body }: Ctx, sessionId: string): Response {
+    // name must be a string (or absent = clear); a non-string would throw
+    // inside setNameOverride (.trim()) and 500 the handler.
+    if (body.name !== undefined && typeof body.name !== "string") {
+      return json({ ok: false, error: "name must be a string" }, 400);
+    }
+    setNameOverride(dir, overrideKey(sessionId), body.name ?? null);
+    push();
+    return json({ ok: true });
+  }
+
+  function setSprite({ body }: Ctx, sessionId: string): Response {
+    if (typeof body.palette !== "number" || typeof body.gear !== "string") {
+      return json({ ok: false, error: "palette and gear are required" }, 400);
+    }
+    const character = typeof body.body === "string" ? body.body : undefined;
+    setSpriteOverride(dir, overrideKey(sessionId), { palette: body.palette, gear: body.gear, body: character });
+    push();
+    return json({ ok: true });
+  }
+
+  async function promptSession({ body }: Ctx, status: AgentStatus): Promise<Response> {
+    const text = typeof body.text === "string" ? body.text : "";
+    if (!text.trim()) return json({ ok: false, error: "empty prompt" }, 400);
+    if (text.length > 10_000) return json({ ok: false, error: "prompt too long" }, 400);
+    return json(await sendPrompt(status, text));
+  }
+
+  // Anything else. Answers after the same session checks the terminal
+  // actions run, so a bad or unknown session id reads as it always has.
+  const unknownAction = withSessionStatus(() => json({ ok: false, error: "unknown action" }, 404));
+
+  const actionHandlers: Record<string, ActionHandler<ActionBody>> = {
+    "pick-folder": pickFolder,
+    "spawn": spawnSession,
+    "column-add": columnAdd,
+    "column-update": withColumn(columnUpdate),
+    "column-delete": withColumn(columnDelete),
+    "column-reorder": withColumn(columnReorder),
+    "column-restore": columnRestore,
+    "card-restore": cardRestore,
+    "card-add": cardAdd,
+    "card-delete": withCard(cardDelete),
+    "comment-delete": withCard(commentDelete),
+    "card-move": withCard(cardMove),
+    "card-update": withCard(cardUpdate),
+    "card-merge": withCard(cardMerge),
+    "card-comment": withCard(cardComment),
+    "send-task": withCard(sendTask),
+    "card-assign": withCard(cardAssign),
+    "upload": upload,
+    "crew-note": crewNote,
+    "inbox-drain": withSessionId(inboxDrain),
+    "rename": withSessionId(renameSession),
+    "sprite": withSessionId(setSprite),
+    "focus": withSessionStatus(async (_ctx, status) => json(await focusSession(status))),
+    "pause": withSessionStatus(async (_ctx, status) => json(await interruptSession(status))),
+    "kill": withSessionStatus(async (_ctx, status) => json(await killAgent(status))),
+    "prompt": withSessionStatus(promptSession),
+  };
+
   const server = Bun.serve({
     port,
     // Bind to loopback only. Bun defaults to 0.0.0.0 when hostname is omitted,
@@ -465,21 +992,6 @@ export function makeServer(
         return json(loadPersonas().map(({ id, name, role, skills }) => ({ id, name, role, skills })));
       }
 
-      // Where a card's work actually lives: its assignee's working directory.
-      // Read from the session's own status FILE rather than the live snapshot,
-      // so a card whose agent has finished and gone still knows which branch
-      // holds its work — which is exactly when you want to merge it.
-      const cardWorkDir = (cardId: string): { cwd: string } | { error: string; status: number } => {
-        const card = readBoard(dir).cards.find((k) => k.id === cardId);
-        if (!card) return { error: `unknown card: ${cardId}`, status: 404 };
-        if (!card.assignee) return { error: "card has no assignee, so there's no branch to merge", status: 400 };
-        // The crew member's current session first (its id moved on with a
-        // /clear), then the session the card was bound to.
-        const st = findAssigneeSession(readSnapshot(dir, Date.now()).agents, card.assignee) ?? loadStatus(dir, card.assignee.id);
-        if (!st?.cwd) return { error: `no working directory known for ${card.assignee.name}`, status: 404 };
-        return { cwd: st.cwd };
-      };
-
       // whether a card's work is committed and can be landed on the trunk —
       // what puts the MERGE key on the card (and what greys it out). A card
       // waiting behind an overlapping, unmerged card is held here too, with
@@ -501,434 +1013,10 @@ export function makeServer(
         return json(await readRepo(status.cwd));
       }
 
-      // commands: act on a real session
+      // commands: act on a real session. dispatchAction applies the CSRF gate
+      // before it looks up any handler (see actionHandlers above).
       if (req.method === "POST" && url.pathname.startsWith("/action/")) {
-        // Block cross-site POSTs (localhost-CSRF from another local tab). Our own
-        // page sends same-origin; direct clients (curl) send no such header.
-        const site = req.headers.get("sec-fetch-site");
-        if (site && site !== "same-origin" && site !== "none") {
-          return json({ ok: false, error: "cross-site blocked" }, 403);
-        }
-        const action = url.pathname.slice("/action/".length);
-        let body: { sessionId?: string | null; name?: string; text?: string; cwd?: string; palette?: number; gear?: string; body?: string; model?: string; permissionMode?: string; worktree?: string; branch?: string; persona?: string; type?: string; dataBase64?: string; cardId?: string; columnId?: string; toColumnId?: string; title?: string; description?: string; author?: string; instruction?: string; toIndex?: number; index?: number; column?: unknown; card?: unknown; cards?: unknown; commentId?: string; as?: string; stage?: string | null; crew?: string; replace?: boolean; touches?: unknown; force?: boolean; repo?: string | null };
-        try { body = await req.json(); } catch { return json({ ok: false, error: "bad body" }, 400); }
-        // pick-folder opens the real macOS folder chooser on the user's screen and
-        // hands back the path they picked. Browser-only on purpose: it puts a
-        // modal window on someone's desktop, so it takes a same-origin POST from
-        // our own page — a scripted client (curl, an agent) sends no
-        // sec-fetch-site and is refused rather than allowed through the way the
-        // read endpoints are.
-        if (action === "pick-folder") {
-          if (req.headers.get("sec-fetch-site") !== "same-origin") {
-            return json({ ok: false, error: "the folder picker is a browser-only action" }, 403);
-          }
-          return json(await chooseFolder(typeof body.cwd === "string" ? body.cwd : undefined));
-        }
-        // spawn creates a brand-new session — it has a folder + task, not a sessionId
-        if (action === "spawn") {
-          const cwd = typeof body.cwd === "string" ? body.cwd : "";
-          const task = typeof body.text === "string" ? body.text : "";
-          if (!cwd || !task.trim()) return json({ ok: false, error: "folder and task are required" }, 400);
-          // The card this agent is being spawned for, if any: rides into the
-          // session env so its SessionStart hook self-assigns the card once the
-          // real session id exists, and is recorded below so the server does
-          // the same when there are no hooks (see pendingSpawns).
-          const cardId = typeof body.cardId === "string" && body.cardId.trim() ? body.cardId.trim() : undefined;
-          // File-claim gate. Staffing a card whose `touches` overlap those of
-          // another active, unmerged card is what puts two agents on a collision
-          // course, so it is refused here — before a worktree, a branch or a
-          // terminal exists. `force` is the human's override.
-          if (cardId && body.force !== true) {
-            const blocked = claimBlockReason(readBoard(dir), cardId);
-            if (blocked) return json({ ok: false, error: blocked }, 409);
-          }
-          try { if (!statSync(cwd).isDirectory()) throw 0; } catch { return json({ ok: false, error: `folder not found: ${cwd}` }, 400); }
-          const model = typeof body.model === "string" && ALLOWED_MODELS.has(body.model) ? body.model : undefined;
-          const permissionMode = typeof body.permissionMode === "string" && ALLOWED_PERMISSION_MODES.has(body.permissionMode) ? body.permissionMode : undefined;
-          // A blank/whitespace field means "no worktree" (launch in the folder). The
-          // name is sanitized to a slug inside createWorktree, so pass it as typed.
-          const worktree = typeof body.worktree === "string" && body.worktree.trim() ? body.worktree.trim() : undefined;
-          // Same rule for the branch, and the two are independent: a branch on
-          // its own switches the folder itself, a branch alongside a worktree
-          // names that worktree's branch (see prepareLaunch).
-          const branch = typeof body.branch === "string" && body.branch.trim() ? body.branch.trim() : undefined;
-          const persona = typeof body.persona === "string" && body.persona.trim() ? body.persona.trim() : undefined;
-          // Loop-breaker: an agent (curl sends no sec-fetch-site) may spawn
-          // workers but never another orchestrator. A live run showed confused
-          // scrum-masters spawning scrum-masters exponentially; only a human in
-          // the browser may start one.
-          if (persona === "scrum-master" && !req.headers.get("sec-fetch-site")) {
-            return json({ ok: false, error: "agents may not spawn a scrum-master — only a human can (use the + NEW AGENT dialog)" }, 403);
-          }
-          // Who the new agent is: a roster name no live desk is using, and a
-          // crew id it keeps across every /clear (see src/lib/crew.ts).
-          const live = readSnapshot(dir, Date.now()).agents;
-          const name = pickName(live.map((a) => a.name));
-          const crew = { id: mintCrewId(name), name };
-          const r = await spawn(cwd, task, { model, permissionMode, worktree, branch, persona, serverUrl: url.origin, cardId, crew });
-          // Bind the card to the new session once it shows up, hooks or not.
-          if (r.ok && cardId && r.cwd) {
-            pendingSpawns.push({
-              cardId, cwd: r.cwd, uniqueCwd: r.worktreeCreated === true, crewId: crew.id, task,
-              before: live.map((a) => a.sessionId), at: Date.now(), force: body.force === true,
-            });
-          }
-          // Label the card with the repo it is being worked in, unless someone
-          // already has. The main checkout, not the worktree: the label names the
-          // project, and every worktree of it should read the same.
-          if (r.ok && cardId && !readBoard(dir).cards.find((k) => k.id === cardId)?.repo) {
-            const root = await mainCheckout(cwd);
-            const board = readBoard(dir); // re-read: the git call above yielded
-            if (board.cards.some((k) => k.id === cardId && !k.repo)) {
-              writeBoard(dir, setCardRepo(board, cardId, repoName(root), root));
-              push();
-            }
-          }
-          return json(r);
-        }
-        // There is deliberately no whole-board write: a writer holding a stale
-        // board would silently erase whatever landed since it read.
-        // column-*: the same discipline as card-*, for the board's own shape.
-        // These exist so the UI never has to send a whole board to rename a
-        // column or drag one — each re-reads, applies one pure op, and writes.
-        if (action === "column-add") {
-          const name = typeof body.name === "string" ? body.name : "";
-          const next = addColumn(readBoard(dir), name);
-          writeBoard(dir, next);
-          push();
-          return json({ ok: true, columnId: next.columns[next.columns.length - 1]!.id });
-        }
-        if (action === "column-update" || action === "column-delete" || action === "column-reorder") {
-          const columnId = typeof body.columnId === "string" ? body.columnId : "";
-          const board = readBoard(dir);
-          if (!board.columns.some((c) => c.id === columnId)) {
-            return json({ ok: false, error: `unknown column: ${columnId}` }, 404);
-          }
-          if (action === "column-update") {
-            const hasName = typeof body.name === "string";
-            const hasInstruction = typeof body.instruction === "string";
-            const hasStage = body.stage !== undefined;
-            if (!hasName && !hasInstruction && !hasStage) return json({ ok: false, error: "name, instruction or stage is required" }, 400);
-            if (hasStage && body.stage !== null && !(STAGES as readonly string[]).includes(body.stage as string)) {
-              return json({ ok: false, error: `stage must be one of ${STAGES.join(", ")} or null` }, 400);
-            }
-            let next = board;
-            if (hasName) next = renameColumn(next, columnId, body.name as string);
-            if (hasInstruction) next = setInstruction(next, columnId, body.instruction as string);
-            if (hasStage) next = setColumnStage(next, columnId, body.stage as Stage | null);
-            writeBoard(dir, next);
-            push();
-            return json({ ok: true });
-          }
-          if (action === "column-delete") {
-            // writeBoard falls back to the default board when none are left, so
-            // deleting the last column would silently resurrect the stock four.
-            if (board.columns.length <= 1) {
-              return json({ ok: false, error: "cannot delete the last column" }, 400);
-            }
-            writeBoard(dir, deleteColumn(board, columnId));
-            push();
-            return json({ ok: true });
-          }
-          const toIndex = typeof body.toIndex === "number" ? body.toIndex : NaN;
-          if (!Number.isInteger(toIndex)) return json({ ok: false, error: "toIndex must be an integer" }, 400);
-          writeBoard(dir, reorderColumn(board, columnId, toIndex));
-          push();
-          return json({ ok: true });
-        }
-        // column-restore / card-restore: the undo half. The caller hands back the
-        // thing it deleted, so the id, comments and assignee return with it
-        // rather than coming back as a fresh empty card.
-        if (action === "column-restore") {
-          const column = sanitizeColumn(body.column);
-          if (!column) return json({ ok: false, error: "a valid column is required" }, 400);
-          const index = typeof body.index === "number" ? body.index : 0;
-          const cards = Array.isArray(body.cards)
-            ? (body.cards.map(sanitizeCard).filter(Boolean) as Card[])
-            : [];
-          writeBoard(dir, restoreColumn(readBoard(dir), column, index, cards));
-          push();
-          return json({ ok: true });
-        }
-        if (action === "card-restore") {
-          const card = sanitizeCard(body.card);
-          if (!card) return json({ ok: false, error: "a valid card is required" }, 400);
-          const index = typeof body.index === "number" ? body.index : 0;
-          writeBoard(dir, restoreCard(readBoard(dir), card, index));
-          push();
-          return json({ ok: true });
-        }
-        // card-*: the write half of the agent card API. Each op re-reads the
-        // board and applies one pure, card-scoped mutation before persisting —
-        // so an agent's move/comment can never clobber (or be clobbered by)
-        // another writer the way a whole-board write can. Not tied to a
-        // sessionId: the author is a display name carried on the comment.
-        if (action === "card-add") {
-          const columnId = typeof body.columnId === "string" ? body.columnId : "";
-          const title = typeof body.title === "string" ? body.title.trim() : "";
-          if (!title) return json({ ok: false, error: "title is required" }, 400);
-          const board = readBoard(dir);
-          if (!board.columns.some((c) => c.id === columnId)) return json({ ok: false, error: `unknown column: ${columnId}` }, 400);
-          let next = addCard(board, columnId, title);
-          const card = next.cards[next.cards.length - 1]!; // addCard appends
-          const description = typeof body.description === "string" ? body.description : "";
-          if (description.trim()) next = setCardDescription(next, card.id, description);
-          writeBoard(dir, next);
-          push();
-          return json({ ok: true, cardId: card.id });
-        }
-        if (action === "card-move" || action === "card-comment" || action === "card-update" || action === "card-assign" || action === "send-task" || action === "card-merge" || action === "card-delete" || action === "comment-delete") {
-          const cardId = typeof body.cardId === "string" ? body.cardId : "";
-          const board = readBoard(dir);
-          const card = board.cards.find((k) => k.id === cardId);
-          if (!card) return json({ ok: false, error: `unknown card: ${cardId}` }, 404);
-          const title = card.title.trim() || "(untitled card)";
-          if (action === "card-delete") {
-            writeBoard(dir, deleteCard(board, cardId));
-            push();
-            return json({ ok: true });
-          }
-          if (action === "comment-delete") {
-            const commentId = typeof body.commentId === "string" ? body.commentId : "";
-            if (!commentId) return json({ ok: false, error: "commentId is required" }, 400);
-            writeBoard(dir, deleteComment(board, cardId, commentId));
-            push();
-            return json({ ok: true });
-          }
-          if (action === "card-move") {
-            const to = board.columns.find((c) => c.id === body.toColumnId);
-            if (!to) return json({ ok: false, error: `unknown column: ${String(body.toColumnId)}` }, 400);
-            const actor = resolveActor(card, body);
-            if ("error" in actor) return json({ ok: false, error: actor.error }, actor.status);
-            if (!actor.name) actor.name = "someone";
-            const toIndex = typeof body.toIndex === "number" && Number.isInteger(body.toIndex) ? body.toIndex : undefined;
-            const fromIndex = board.columns.findIndex((c) => c.id === card.columnId);
-            const direction = board.columns.indexOf(to) < fromIndex ? "back" : "forward";
-            const next = moveCard(board, cardId, to.id, toIndex);
-            writeBoard(dir, next);
-            push();
-            // The column id (not display name): unambiguous, and directly
-            // reusable by the recipient in a card-move call of its own.
-            const delivery = await notifyCardEvent(next, cardId, actor, `[THE LINE] ${actor.name} moved "${title}" to "${to.id}".`, { kind: "move", direction });
-            return json({ ok: true, delivery });
-          }
-          // card-update: edit a card's own text — its title, its description, its
-          // file claim, its repo label. Each field is applied only when present, so renaming a card
-          // can't wipe a description written by someone else (and vice versa).
-          // Silent by design: text edits don't wake the assignee the way a move
-          // or a comment does.
-          if (action === "card-update") {
-            const hasTitle = typeof body.title === "string";
-            const hasDescription = typeof body.description === "string";
-            const hasTouches = body.touches !== undefined;
-            const hasRepo = body.repo !== undefined;
-            if (!hasTitle && !hasDescription && !hasTouches && !hasRepo) return json({ ok: false, error: "title, description, touches or repo is required" }, 400);
-            // repo is the card's project label; "" or null clears it.
-            if (hasRepo && body.repo !== null && typeof body.repo !== "string") {
-              return json({ ok: false, error: "repo must be a string (or null to clear it)" }, 400);
-            }
-            // A blank title would leave the card unidentifiable on the board.
-            if (hasTitle && !body.title!.trim()) return json({ ok: false, error: "title cannot be blank" }, 400);
-            // touches is the card's file claim: a list of paths/globs. An empty
-            // list is how you clear it; anything else is a malformed edit.
-            if (hasTouches && (!Array.isArray(body.touches) || body.touches.some((t: unknown) => typeof t !== "string"))) {
-              return json({ ok: false, error: "touches must be a list of file paths or globs" }, 400);
-            }
-            let next = board;
-            if (hasTitle) next = renameCard(next, cardId, body.title!.trim());
-            if (hasDescription) next = setCardDescription(next, cardId, body.description!);
-            if (hasTouches) next = setCardTouches(next, cardId, body.touches as string[]);
-            if (hasRepo) next = setCardRepo(next, cardId, body.repo ?? null);
-            writeBoard(dir, next);
-            push();
-            return json({ ok: true });
-          }
-          // card-merge: land this card's branch on the trunk, for real. The
-          // guard rails live in lib/merge (nothing to merge, dirty tree, busy
-          // main checkout, conflicts) — this only resolves the card to a
-          // directory and records what happened on the card itself, so the
-          // ticket carries the trail rather than just a toast that scrolls away.
-          //
-          // Browser-only, like the folder picker: this writes to the human's
-          // own checkout and their history, and the board protocol has agents
-          // hand work to Review for a person to accept. An agent (curl, no
-          // sec-fetch-site) is refused rather than allowed to land its own work.
-          if (action === "card-merge") {
-            if (req.headers.get("sec-fetch-site") !== "same-origin") {
-              return json({ ok: false, error: "merging is a human's call — press MERGE on the card in the dashboard" }, 403);
-            }
-            const where = cardWorkDir(cardId);
-            if ("error" in where) return json({ ok: false, error: where.error }, where.status);
-            // Signed like any other card write, and resolved BEFORE the merge:
-            // a signature we can't honour should cost nothing, not leave the
-            // trunk moved with no record on the card of who moved it. The
-            // browser sends author: "You"; unsigned falls back to the same.
-            const actor = resolveActor(card, body);
-            if ("error" in actor) return json({ ok: false, error: actor.error }, actor.status);
-            const by = actor.name || "You";
-            // Merge order: a card behind an overlapping, unmerged card waits
-            // for it. Checked before the queue so a held card never touches git.
-            // `force` is the human's override, as on card-assign and spawn.
-            const waiting = body.force === true ? null : mergeBlockReason(board, cardId);
-            if (waiting) return json({ ok: false, error: waiting }, 409);
-            const r = await mergeWork(where.cwd);
-            if (!r.ok) return json(r, 409);
-            const note = `Merged ${r.branch} into ${r.base}.`;
-            // Landed for real, so the card goes to mergedColumn and its claim is
-            // released; each card that was waiting on it is told so on its own
-            // card. No await between this read and the write.
-            const before = readBoard(dir);
-            const landed = landMergedCard(addComment(before, cardId, by, note), cardId);
-            const released = mergeReleaseNotes(before, landed, cardId);
-            let next = landed;
-            for (const n of released) next = addComment(next, n.cardId, MERGE_NOTE_AUTHOR, n.text);
-            writeBoard(dir, next);
-            push();
-            void notifyCardEvent(next, cardId, { ...actor, name: by }, `[THE LINE] ${by} merged "${title}" -- ${note}`, { kind: "move", direction: "forward" });
-            for (const n of released) {
-              const t = next.cards.find((k) => k.id === n.cardId)?.title.trim() || "(untitled card)";
-              void notifyCardEvent(next, n.cardId, { name: MERGE_NOTE_AUTHOR }, `[THE LINE] ${MERGE_NOTE_AUTHOR} commented on "${t}":\n${n.text}`, { kind: "comment" });
-            }
-            return json(r);
-          }
-          if (action === "card-comment") {
-            const actor = resolveActor(card, body);
-            if ("error" in actor) return json({ ok: false, error: actor.error }, actor.status);
-            const text = typeof body.text === "string" ? body.text.trim() : "";
-            if (!actor.name || !text) return json({ ok: false, error: "a signature (author, sessionId or as: \"assignee\") and text are required" }, 400);
-            const next = addComment(board, cardId, actor.name, text);
-            writeBoard(dir, next);
-            push();
-            const delivery = await notifyCardEvent(next, cardId, actor, `[THE LINE] ${actor.name} commented on "${title}":\n${text}`, { kind: "comment" });
-            return json({ ok: true, delivery });
-          }
-          // send-task: compose the full protocol prompt server-side and type it
-          // into the assigned live session's terminal. The curl targets in the
-          // footer are this very server, taken from the request's own origin.
-          if (action === "send-task") {
-            // The same readiness rule the SEND TASK button asks
-            // (src/lib/sendTaskReady.ts), so the two can't drift apart.
-            const readiness = sendTaskReadiness(card.assignee, readSnapshot(dir, Date.now()).agents);
-            if (!readiness.ready) {
-              switch (readiness.why) {
-                case "unassigned": return json({ ok: false, error: "card has no assignee" }, 400);
-                case "ended": return json({ ok: false, error: `assignee "${readiness.assignee.name}" is not a live session` }, 404);
-                // A session waiting on a dialog would take the typed task as
-                // keystrokes ON the dialog (Enter approves it) — refuse instead.
-                case "waiting": return json({ ok: false, error: `${readiness.agent.name} is waiting on a prompt in its terminal — answer that first, then resend` }, 409);
-                // And a working one would have its context cleared mid-task.
-                case "working": return json({ ok: false, error: `${readiness.agent.name} is still working — wait for it to go idle (or pause it), then resend` }, 409);
-              }
-            }
-            const agent = readiness.agent;
-            // An agent that already left comments here has worked this card
-            // before: its context is about to be cleared, so the footer sends
-            // it back to its own notes on the card first.
-            const workedBefore = (card.comments ?? []).some((c) => c.author === agent.name);
-            // Server-authoritative in-progress: put the card where work happens
-            // ourselves, then compose the prompt from THAT board — so the card
-            // reaches in-progress even if the agent skips STEP 1, and the prompt
-            // correctly tells it the card is already there (leave it, pick it up).
-            const progressed = moveToWorkColumn(board, cardId);
-            const prompt = cardTaskPrompt(progressed, cardId, url.origin, agent.name, { workedBefore });
-            if (!prompt.trim()) return json({ ok: false, error: "card has no task text to send" }, 400);
-            // Fresh delivery: clear the agent's context before the new task so
-            // the previous ticket doesn't bleed into this one.
-            const r = await deliverFresh(agent, prompt);
-            if (!r.ok) return json(r, 502); // delivery failed: leave the card where it was
-            const by = typeof body.author === "string" && body.author.trim() ? body.author.trim() : "You";
-            // Re-read after the await, then apply the move + the send record as one
-            // write (moveToWorkColumn is a no-op if it already landed in-progress).
-            writeBoard(dir, addComment(moveToWorkColumn(readBoard(dir), cardId), cardId, by, `Sent task to ${agent.name}.`));
-            push();
-            return json({ ok: true });
-          }
-          // card-assign: bind a LIVE session (resolved to its display name so
-          // the label survives the session ending), or clear with null.
-          if (body.sessionId === null) {
-            pendingSpawns = pendingSpawns.filter((p) => p.cardId !== cardId);
-            writeBoard(dir, assignCard(board, cardId, null));
-            push();
-            return json({ ok: true });
-          }
-          if (!validSessionId(body.sessionId)) return json({ ok: false, error: "bad sessionId" }, 400);
-          // The same file-claim gate as spawn: binding an agent to this card is
-          // staffing it. Unassigning (handled above) is never blocked — it is
-          // how you get OUT of a conflict.
-          if (body.force !== true) {
-            const blocked = claimBlockReason(board, cardId);
-            if (blocked) return json({ ok: false, error: blocked }, 409);
-          }
-          const resolved = resolveAssignee(dir, body.sessionId);
-          if (!resolved) return json({ ok: false, error: "no session with that id" }, 404);
-          pendingSpawns = pendingSpawns.filter((p) => p.cardId !== cardId);
-          writeBoard(dir, assignCard(board, cardId, resolved));
-          push();
-          return json({ ok: true });
-        }
-        // upload: save an image dropped/pasted into a chat to a temp file, and
-        // return its path. Not tied to a session — the path is later prepended to
-        // a prompt and typed into the terminal, where Claude Code reads it.
-        if (action === "upload") {
-          const name = typeof body.name === "string" ? body.name : "image";
-          const type = typeof body.type === "string" ? body.type : "";
-          const data = typeof body.dataBase64 === "string" ? body.dataBase64 : "";
-          if (!data) return json({ ok: false, error: "no image data" }, 400);
-          const r = saveUpload(name, type, data);
-          return json(r, r.ok ? 200 : 400);
-        }
-        // crew-note: a crew member keeping its notes (see src/lib/crew.ts),
-        // signed like a card write: by crew id (the SessionStart context hands
-        // the agent its own), by session id, or as a card's assignee.
-        if (action === "crew-note") {
-          const crewId = resolveCrewId(body);
-          if ("error" in crewId) return json({ ok: false, error: crewId.error }, crewId.status);
-          const r = addNote(dir, crewId.id, typeof body.text === "string" ? body.text : "", { replace: body.replace === true });
-          return json(r, r.ok ? 200 : 400);
-        }
-        if (!validSessionId(body.sessionId)) return json({ ok: false, error: "bad sessionId" }, 400);
-        // inbox-drain: a session's Stop hook collecting the board events that
-        // arrived while it was busy. Hands them over once; the hook feeds them
-        // back to the agent as the reason its turn should continue.
-        if (action === "inbox-drain") {
-          const items = drain(body.sessionId);
-          if (items.length) push();
-          return json({ ok: true, items });
-        }
-        // A rename or a new look is stored against the crew member when the
-        // session has one, so it survives the /clear that ends this session id.
-        const overrideKey = (sessionId: string) => loadStatus(dir, sessionId)?.crew?.id ?? sessionId;
-        if (action === "rename") {
-          // name must be a string (or absent = clear); a non-string would throw
-          // inside setNameOverride (.trim()) and 500 the handler.
-          if (body.name !== undefined && typeof body.name !== "string") {
-            return json({ ok: false, error: "name must be a string" }, 400);
-          }
-          setNameOverride(dir, overrideKey(body.sessionId), body.name ?? null);
-          push();
-          return json({ ok: true });
-        }
-        if (action === "sprite") {
-          if (typeof body.palette !== "number" || typeof body.gear !== "string") {
-            return json({ ok: false, error: "palette and gear are required" }, 400);
-          }
-          const character = typeof body.body === "string" ? body.body : undefined;
-          setSpriteOverride(dir, overrideKey(body.sessionId), { palette: body.palette, gear: body.gear, body: character });
-          push();
-          return json({ ok: true });
-        }
-        const status = loadStatus(dir, body.sessionId);
-        if (!status) return json({ ok: false, error: "unknown session" }, 404);
-        if (action === "focus") return json(await focusSession(status));
-        if (action === "pause") return json(await interruptSession(status));
-        if (action === "kill") return json(await killAgent(status));
-        if (action === "prompt") {
-          const text = typeof body.text === "string" ? body.text : "";
-          if (!text.trim()) return json({ ok: false, error: "empty prompt" }, 400);
-          if (text.length > 10_000) return json({ ok: false, error: "prompt too long" }, 400);
-          return json(await sendPrompt(status, text));
-        }
-        return json({ ok: false, error: "unknown action" }, 404);
+        return dispatchAction(req, actionHandlers, unknownAction);
       }
 
       // images the human dropped/pasted (chat attachments, ticket images, a
