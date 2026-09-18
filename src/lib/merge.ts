@@ -8,6 +8,7 @@
 // only gather facts and run the one command.
 import { dirname, resolve } from "node:path";
 import { runExclusive, pending } from "./merge-queue";
+import { mergeBlockers, mergeBlockReason, type Board } from "./board";
 
 /** The trunk we merge into, first one that exists. */
 const BASES = ["main", "master"] as const;
@@ -39,6 +40,9 @@ export type MergeState = MergeFacts & {
   /** a merge is already running (or queued) for this trunk — the key holds
    *  until it drains, so two cards never land on the checkout at once */
   merging: boolean;
+  /** cards whose overlapping file claims must merge before this one can —
+   *  filled in by the server from the board (see holdForClaims) */
+  waitingOn?: string[];
 };
 
 /**
@@ -63,6 +67,17 @@ export function mergeVerdict(f: MergeFacts): { committed: boolean; ready: boolea
   if (f.rootBranch !== f.base) return not(`your main checkout is on ${f.rootBranch || "a detached HEAD"}, not ${f.base}`);
   if (f.rootDirty) return not(`your ${f.base} checkout has uncommitted changes`);
   return { committed: true, ready: true, blocked: "" };
+}
+
+/** The git-level state with the board's merge order laid over it: a card
+ *  waiting behind an overlapping, unmerged card (see mergeBlockers) keeps its
+ *  key but held, and `blocked` names the card to merge first instead of leaving
+ *  a bare disabled key. Pure; `waitingOn` is always filled in. */
+export function holdForClaims(state: MergeState, board: Board, cardId: string): MergeState {
+  const waitingOn = mergeBlockers(board, cardId).map((c) => c.cardId);
+  const why = mergeBlockReason(board, cardId);
+  if (!why || !state.committed) return { ...state, waitingOn };
+  return { ...state, ready: false, blocked: why, waitingOn };
 }
 
 async function git(cwd: string, args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {

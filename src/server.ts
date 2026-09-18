@@ -10,10 +10,10 @@ import { readOverrides, applyOverrides, setNameOverride, setSpriteOverride } fro
 import { loadPersonas, applyPersonas } from "./lib/personas";
 import { applyCrew, pickName, mintCrewId, findAssigneeSession, isAssigneeSession, addNote, CREW_ID_RE } from "./lib/crew";
 import { sendTaskReadiness } from "./lib/sendTaskReady";
-import { readBoard, writeBoard, boardFile, addCard, moveCard, moveToWorkColumn, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, addColumn, renameColumn, setInstruction, setColumnStage, STAGES, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, sanitizeCard, sanitizeColumn, setCardTouches, claimBlockReason, type Board, type Card, type Column, type Stage } from "./lib/board";
+import { readBoard, writeBoard, boardFile, addCard, moveCard, moveToWorkColumn, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, addColumn, renameColumn, setInstruction, setColumnStage, STAGES, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, sanitizeCard, sanitizeColumn, setCardTouches, claimBlockReason, mergeBlockReason, landMergedCard, mergeReleaseNotes, type Board, type Card, type Column, type Stage } from "./lib/board";
 import { ALLOWED_MODELS, ALLOWED_PERMISSION_MODES, focusSession, interruptSession, killAgent, sendPrompt, sendFreshPrompt, spawnAgent } from "./ghostty";
 import { readRepo } from "./repo";
-import { readMergeState, mergeWork } from "./lib/merge";
+import { readMergeState, mergeWork, holdForClaims } from "./lib/merge";
 import { saveUpload, resolveUploadPath } from "./lib/uploads";
 import { chooseFolder } from "./lib/chooser";
 import { initialIdle, onConnect, onDisconnect, shouldShutDown, type IdleState } from "./lib/idle";
@@ -93,6 +93,9 @@ export async function searchChats(
   );
   return hits.filter((h): h is ChatHitResult => h !== null);
 }
+
+/** Who signs the note a merge leaves on the cards it was holding up. */
+const MERGE_NOTE_AUTHOR = "THE LINE";
 
 export function makeServer(
   port: number,
@@ -477,11 +480,15 @@ export function makeServer(
       };
 
       // whether a card's work is committed and can be landed on the trunk —
-      // what puts the MERGE key on the card (and what greys it out)
+      // what puts the MERGE key on the card (and what greys it out). A card
+      // waiting behind an overlapping, unmerged card is held here too, with
+      // the card to merge first named (see mergeBlockers in lib/board).
       if (url.pathname === "/merge-state") {
-        const where = cardWorkDir(url.searchParams.get("cardId") ?? "");
+        const cardId = url.searchParams.get("cardId") ?? "";
+        const where = cardWorkDir(cardId);
         if ("error" in where) return json({ error: where.error }, where.status);
-        return json(await readMergeState(where.cwd));
+        const state = await readMergeState(where.cwd);
+        return json(holdForClaims(state, readBoard(dir), cardId));
       }
 
       // a session's git context (branch, commits, working-tree status)
@@ -741,13 +748,28 @@ export function makeServer(
             const actor = resolveActor(card, body);
             if ("error" in actor) return json({ ok: false, error: actor.error }, actor.status);
             const by = actor.name || "You";
+            // Merge order: a card behind an overlapping, unmerged card waits
+            // for it. Checked before the queue so a held card never touches git.
+            const waiting = mergeBlockReason(board, cardId);
+            if (waiting) return json({ ok: false, error: waiting }, 409);
             const r = await mergeWork(where.cwd);
             if (!r.ok) return json(r, 409);
             const note = `Merged ${r.branch} into ${r.base}.`;
-            const next = addComment(readBoard(dir), cardId, by, note);
+            // Landed for real, so the card goes to done and its file claim is
+            // released; each card that was waiting on it is told so on its own
+            // card. No await between this read and the write.
+            const before = readBoard(dir);
+            const landed = landMergedCard(addComment(before, cardId, by, note), cardId);
+            const released = mergeReleaseNotes(before, landed, cardId);
+            let next = landed;
+            for (const n of released) next = addComment(next, n.cardId, MERGE_NOTE_AUTHOR, n.text);
             writeBoard(dir, next);
             push();
             void notifyCardEvent(next, cardId, { ...actor, name: by }, `[THE LINE] ${by} merged "${title}" -- ${note}`, { kind: "move", direction: "forward" });
+            for (const n of released) {
+              const t = next.cards.find((k) => k.id === n.cardId)?.title.trim() || "(untitled card)";
+              void notifyCardEvent(next, n.cardId, { name: MERGE_NOTE_AUTHOR }, `[THE LINE] ${MERGE_NOTE_AUTHOR} commented on "${t}":\n${n.text}`, { kind: "comment" });
+            }
             return json(r);
           }
           if (action === "card-comment") {

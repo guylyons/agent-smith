@@ -5,6 +5,7 @@ import type { Board, Column, Card, Stage } from "../lib/board";
 import {
   renameColumn, setInstruction, setColumnStage, deleteColumn, reorderColumn,
   deleteCard, restoreCard, moveCard, restoreColumn, cardMoveTarget, STAGES,
+  mergeBlockers, mergeBlockReason,
 } from "../lib/board";
 import {
   addColumnAction, renameColumnAction, setInstructionAction, setColumnStageAction, deleteColumnAction,
@@ -287,6 +288,7 @@ function ColumnView({
             onMoveByKey={(dir) => moveByKey(card.id, dir)}
             onOpen={() => onOpenCard(card.id)}
             unread={unreadOn(card)}
+            mergeWait={mergeWaitFlag(board, card.id)}
           />
         ))}
       </div>
@@ -294,6 +296,16 @@ function ColumnView({
       <AddCard mutate={mutate} columnId={column.id} />
     </div>
   );
+}
+
+/** The face's "wait for that card first" flag: the overlapping, unmerged cards
+ *  this one has to let merge before it (see mergeBlockers), so an agent sees
+ *  its place in line without opening the card or pressing MERGE. Null when
+ *  nothing is ahead of it. */
+export function mergeWaitFlag(board: Board, cardId: string): { label: string; title: string } | null {
+  const ahead = mergeBlockers(board, cardId);
+  if (!ahead.length) return null;
+  return { label: `⏳ ${ahead.map((c) => c.cardId).join(", ")}`, title: `Waiting to merge: ${mergeBlockReason(board, cardId)}` };
 }
 
 const PEEK = 10; // px of the next card left showing, so the cut reads as scrollable
@@ -350,7 +362,7 @@ function edgeScroll(e: DragEvent<HTMLDivElement>) {
 // avatar, initials when the session has ended, or an UNASSIGNED chip when nobody
 // is on it) and a comment count. Detail lives in the modal.
 function CardView({
-  agents, mutate, card, index, dropBefore, dropAfterLast, onDragOverCard, onMoveByKey, onOpen, unread,
+  agents, mutate, card, index, dropBefore, dropAfterLast, onDragOverCard, onMoveByKey, onOpen, unread, mergeWait,
 }: {
   agents: AgentStatus[]; mutate: Mutate; card: Card; index: number;
   dropBefore: boolean; dropAfterLast: boolean;
@@ -359,6 +371,8 @@ function CardView({
   onOpen: () => void;
   /** comments on this card you haven't read — 0 when there's nothing new */
   unread: number;
+  /** the card(s) that must merge before this one, when any (mergeWaitFlag) */
+  mergeWait: { label: string; title: string } | null;
 }) {
   const commentCount = card.comments?.length ?? 0;
   // The live session behind the assignee, if any — gives us its sprite. A card
@@ -437,6 +451,7 @@ function CardView({
                 : <span className="card-assignee" title={`${card.assignee.name} (session ended)`}>{initials(card.assignee.name)}</span>)
             : <span className="card-unassigned" title="No agent assigned yet">Unassigned</span>}
           {card.description && <span className="card-flag" title="Has a description">≡</span>}
+          {mergeWait && <span className="card-flag card-flag-wait" title={mergeWait.title}>{mergeWait.label}</span>}
           {/* Unread turns the count into "N NEW" and colours it, so a thread
               you've already read never looks the same as one that's moved on. */}
           {commentCount > 0 && (

@@ -562,6 +562,81 @@ export function claimBlockReason(board: Board, cardId: string): string | null {
   return `${held} - wait for ${them} to merge, or edit touches to remove the overlap`;
 }
 
+// ---- merge order ------------------------------------------------------------
+//
+// The merge-time half. The staffing gate above keeps overlapping cards from
+// being staffed together, but they still can be (touches edited after the
+// fact, a forced assign). Those land one at a time, in board order: a card
+// further right goes first, and within a column the one higher up. Only cards
+// AHEAD hold a card back, so two overlapping cards never wait on each other.
+// This is the visible queue; merge-queue.ts still serializes the git merge.
+
+/** Where a card stands in the merge line: its column's index, then its row in
+ *  that column. Compare with `isAhead`. */
+function mergeRank(board: Board, card: Card): [number, number] {
+  const col = board.columns.findIndex((c) => c.id === card.columnId);
+  const row = board.cards.filter((k) => k.columnId === card.columnId).indexOf(card);
+  return [col, row];
+}
+
+function isAhead(board: Board, a: Card, b: Card): boolean {
+  const [ac, ar] = mergeRank(board, a);
+  const [bc, br] = mergeRank(board, b);
+  return ac !== bc ? ac > bc : ar < br;
+}
+
+/** The overlapping, unmerged cards this one has to wait for before it can
+ *  merge: every active claim (see overlappingClaims) that sits ahead of it.
+ *  Empty when the card isn't holding a claim itself — unstaffed, landed, or no
+ *  `touches` — since then it has nothing in the line to wait for. */
+export function mergeBlockers(board: Board, cardId: string): Claim[] {
+  const card = board.cards.find((k) => k.id === cardId);
+  if (!card || !isClaiming(board, card)) return [];
+  return overlappingClaims(board, cardId).filter((c) => {
+    const other = board.cards.find((k) => k.id === c.cardId);
+    return !!other && isAhead(board, other, card);
+  });
+}
+
+function blockedOn(claims: Claim[]): string {
+  return claims.map((c) => `${c.cardId} (${c.paths.join(", ")})`).join(", ");
+}
+
+/** One line saying which card(s) to merge first, or null when this card is
+ *  clear to land. ASCII only, like claimBlockReason. */
+export function mergeBlockReason(board: Board, cardId: string): string | null {
+  const claims = mergeBlockers(board, cardId);
+  if (!claims.length) return null;
+  return `blocked on ${blockedOn(claims)} - merge ${claims.length === 1 ? "that" : "those"} first`;
+}
+
+/** A card whose branch just merged, moved into the done-stage column so its
+ *  claim is released. Unchanged (same board) when it has already landed or the
+ *  board has no done column to put it in. */
+export function landMergedCard(board: Board, cardId: string): Board {
+  const card = board.cards.find((k) => k.id === cardId);
+  const done = stageColumn(board, "done");
+  if (!card || !done || isLandedColumn(board, card.columnId)) return board;
+  return moveCard(board, cardId, done.id);
+}
+
+/** The comment to post on each card that was waiting on `mergedId`, given the
+ *  board just before and just after that card merged. A card with nothing left
+ *  ahead of it is told it is clear; one still behind another is told which. */
+export function mergeReleaseNotes(before: Board, after: Board, mergedId: string): { cardId: string; text: string }[] {
+  const out: { cardId: string; text: string }[] = [];
+  for (const card of before.cards) {
+    if (card.id === mergedId) continue;
+    if (!mergeBlockers(before, card.id).some((c) => c.cardId === mergedId)) continue;
+    const left = mergeBlockers(after, card.id).filter((c) => c.cardId !== mergedId);
+    const text = left.length
+      ? `${mergedId} merged - you are still blocked on ${blockedOn(left)}. Merge that first.`
+      : `${mergedId} merged - you're clear to land now.`;
+    out.push({ cardId: card.id, text });
+  }
+  return out;
+}
+
 // ---- validation & persistence --------------------------------------------
 
 function str(v: unknown): string | null {
