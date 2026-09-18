@@ -16,7 +16,7 @@ import { onOpenCard } from "./nav";
 import { CardModal } from "./CardModal";
 import { Sprite } from "./Sprite";
 import { stackMaxHeight } from "./stackCap";
-import { findLiveAssignee } from "./liveAssignee";
+import { findLiveAssignee } from "../lib/sendTaskReady";
 import { displayState } from "../lib/liveness";
 import {
   canPrime, loadMarks, markCardRead, newestCommentAt, primeMarks, saveMarks,
