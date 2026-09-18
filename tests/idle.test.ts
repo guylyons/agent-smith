@@ -1,4 +1,5 @@
 import { test, expect } from "bun:test";
+import { fixtureDir } from "./fixtures";
 import { initialIdle, onConnect, onDisconnect, shouldShutDown, type IdleState } from "../src/lib/idle";
 
 const OPTS = { graceMs: 5_000, startupGraceMs: 30_000 };
@@ -75,7 +76,7 @@ test("a stray disconnect can't drive the client count negative", () => {
 
 // ---- wired into the server -----------------------------------------------
 
-const dir = "/tmp/aw-idle-server-test";
+const dir = fixtureDir("idle-server-test");
 
 test("closing the last /events stream shuts the server down", async () => {
   process.env.AGENT_STATUS_DIR = dir;

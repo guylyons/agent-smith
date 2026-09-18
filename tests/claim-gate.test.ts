@@ -2,11 +2,12 @@
 // through card-update, and spawn/card-assign refuse to put a second agent on
 // files another active card already claims (unless force is passed).
 import { test, expect } from "bun:test";
+import { fixtureDir } from "./fixtures";
 import { readSnapshot } from "../src/server";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
-const dir = "/tmp/aw-claim-gate-test";
+const dir = fixtureDir("claim-gate-test");
 
 const A = "502d0e8c-8790-4804-b767-0549edfc959c";
 const B = "11111111-2222-4333-8444-555555555555";

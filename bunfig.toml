@@ -1,0 +1,6 @@
+[test]
+# Sweeps away the scratch dirs a run created (see tests/fixtures.ts). It has to
+# happen here: `bun test` exits without running process "exit" handlers, so the
+# only hook that fires at the end of a run is an afterAll registered in a
+# preload — those apply to the whole run, not to one file.
+preload = ["./tests/preload.ts"]

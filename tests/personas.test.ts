@@ -1,9 +1,10 @@
 import { test, expect } from "bun:test";
+import { fixtureDir } from "./fixtures";
 import { mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parsePersona, loadPersonas, getPersona, composePrompt, composeIdentityPrompt, PERSONA_ID_RE } from "../src/lib/personas";
 
-const dir = "/tmp/aw-personas-test";
+const dir = fixtureDir("personas-test");
 function reset() { rmSync(dir, { recursive: true, force: true }); mkdirSync(dir, { recursive: true }); }
 function write(stem: string, body: string) { writeFileSync(join(dir, `${stem}.md`), body); }
 

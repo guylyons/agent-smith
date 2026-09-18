@@ -1,4 +1,5 @@
 import { test, expect } from "bun:test";
+import { fixtureDir } from "./fixtures";
 import { mkdirSync, rmSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -7,7 +8,7 @@ import {
 } from "../src/lib/crew";
 import type { AgentStatus } from "../src/schema";
 
-const dir = "/tmp/aw-crew-test";
+const dir = fixtureDir("crew-test");
 function reset() { rmSync(dir, { recursive: true, force: true }); mkdirSync(dir, { recursive: true }); }
 
 test("the roster is uppercase ASCII with no duplicates", () => {

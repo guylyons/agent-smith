@@ -1,10 +1,11 @@
 // tests/uploads.test.ts
 import { test, expect, beforeEach } from "bun:test";
+import { fixtureDir } from "./fixtures";
 import { saveUpload, uploadDir, uploadUrlFor, resolveUploadPath, MAX_UPLOAD_BYTES } from "../src/lib/uploads";
 import { rmSync, readFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 
-const dir = "/tmp/aw-upload-test";
+const dir = fixtureDir("upload-test");
 process.env.AGENT_UPLOAD_DIR = dir;
 
 beforeEach(() => rmSync(dir, { recursive: true, force: true }));
@@ -55,7 +56,7 @@ test("uploadDir honors AGENT_UPLOAD_DIR", () => {
 });
 
 test("uploadUrlFor maps a saved path to its /uploads route", () => {
-  expect(uploadUrlFor("/tmp/aw-upload-test/abc-shot.png")).toBe("/uploads/abc-shot.png");
+  expect(uploadUrlFor(join(dir, "abc-shot.png"))).toBe("/uploads/abc-shot.png");
 });
 
 test("resolveUploadPath accepts a plain basename", () => {

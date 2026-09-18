@@ -1,4 +1,5 @@
 import { test, expect } from "bun:test";
+import { fixtureDir } from "./fixtures";
 import { mkdirSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { slugify, slugifyBranch } from "../src/lib/slug";
@@ -28,7 +29,7 @@ test("slugify returns empty string when nothing usable remains", () => {
 // which raced: git's background housekeeping from the previous test could still
 // be holding the .git dir when the next test wiped and re-initialised it, so a
 // setup commit would fail silently and the test after it saw an unborn branch.
-const base = "/tmp/aw-worktree-test";
+const base = fixtureDir("worktree-test");
 // Wipe the whole scratch root once per run: an older layout left a repo AT this
 // path, and a leftover .git there would be discovered from the dirs below it —
 // making the "not a git repository" tests pass a repo in without noticing.
