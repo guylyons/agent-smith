@@ -90,6 +90,26 @@ export function deliveryToast(delivery: Delivery[]): string {
   return parts.join("; ");
 }
 
+/** A live agent as the card stores it: its session, plus its crew id so the
+ *  binding survives a /clear (see src/lib/crew.ts). */
+function asAssignee(a: AgentStatus): Assignee {
+  return { id: a.sessionId, name: a.name, ...(a.crew ? { crew: a.crew.id } : {}) };
+}
+
+/** Move a card from one assignee to another (either may be nobody). A stray
+ *  pick in the dropdown can pull a working agent off its ticket, so, like card
+ *  delete in TheLine, the change applies at once and the toast offers it back:
+ *  UNDO re-applies `prev` through the same mutate, onto the latest board. */
+export function reassign(mutate: Mutate, cardId: string, prev: Assignee | null, next: Assignee | null): void {
+  const set = (a: Assignee | null) =>
+    mutate((b) => assignCard(b, cardId, a), () => assignCardAction(cardId, a ? a.id : null));
+  set(next);
+  const text = next
+    ? `Assigned ${next.name}${prev ? ` (was ${prev.name})` : ""}`
+    : `Unassigned ${prev?.name ?? ""}`.trim();
+  toast(text, { label: "UNDO", run: () => set(prev) });
+}
+
 // A Trello-style detail view for one card, over a dimmed backdrop. Gives a
 // single card room to breathe: editable title + description, an agent
 // assignee, a comment thread, and images you can paste, drop, or pick.
@@ -278,8 +298,9 @@ export function CardModal({
           </div>
 
           <div className="cardmodal-row">
-            <label className="pix cardmodal-label">ASSIGNEE</label>
+            <label className="pix cardmodal-label" htmlFor="cardmodal-assignee">ASSIGNEE</label>
             <select
+              id="cardmodal-assignee"
               className="cardmodal-select"
               value={assignedAgent?.sessionId ?? assigned?.id ?? ""}
               onChange={(e) => {
@@ -288,10 +309,10 @@ export function CardModal({
                 // gate; clearing the assignee is how you get out of a conflict
                 // and is never blocked.
                 if (a && !claim.enabled) { toast(claim.reason); return; }
-                mutate(
-                  (b) => assignCard(b, card.id, a ? { id: a.sessionId, name: a.name, ...(a.crew ? { crew: a.crew.id } : {}) } : null),
-                  () => assignCardAction(card.id, a ? a.sessionId : null),
-                );
+                // UNDO restores the agent as it is live now (a /clear gives it
+                // a new session id), or the stored one if its session ended.
+                const prev = assignedAgent ? asAssignee(assignedAgent) : assigned ?? null;
+                reassign(mutate, card.id, prev, a ? asAssignee(a) : null);
               }}
             >
               <option value="">Unassigned</option>

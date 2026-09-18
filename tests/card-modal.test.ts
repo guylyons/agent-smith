@@ -1,7 +1,8 @@
 // tests/card-modal.test.ts — the card modal's pure decisions, DOM-free.
-import { test, expect } from "bun:test";
-import { sendTaskGate, deliveryToast, parseTouches, touchesText, staffingGate } from "../src/ui/CardModal";
-import { defaultBoard, type Board, type Card } from "../src/lib/board";
+import { test, expect, afterEach } from "bun:test";
+import { sendTaskGate, deliveryToast, parseTouches, touchesText, staffingGate, reassign } from "../src/ui/CardModal";
+import { defaultBoard, type Board, type Card, type Assignee } from "../src/lib/board";
+import { subscribeToasts, type Toast } from "../src/ui/toast";
 import type { AgentStatus } from "../src/schema";
 
 const agent = (o: Partial<AgentStatus>): AgentStatus =>
@@ -86,4 +87,65 @@ test("staffingGate: closed, and says which card is in the way", () => {
   expect(g.enabled).toBe(false);
   expect(g.reason).toContain("card_1");
   expect(g.reason).toContain("src/ui/TheLine.tsx");
+});
+
+// ---- reassigning, with UNDO ------------------------------------------------
+
+// A stand-in for TheLine's mutate: applies the pure op to a local board and
+// runs the server half, whose fetch is captured instead of sent.
+function harness(start: Board) {
+  let board = start;
+  const sent: unknown[] = [];
+  const toasts: Toast[] = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (_url: string, init: { body: string }) => {
+    sent.push(JSON.parse(init.body));
+    return new Response(JSON.stringify({ ok: true }));
+  }) as unknown as typeof fetch;
+  const unsubscribe = subscribeToasts((t) => toasts.push(t));
+  cleanups.push(() => { globalThis.fetch = realFetch; unsubscribe(); });
+  const mutate = (fn: ((b: Board) => Board) | null, send: () => void) => { if (fn) board = fn(board); send(); };
+  return { mutate, sent, toasts, card: () => board.cards[0]! };
+}
+const cleanups: (() => void)[] = [];
+afterEach(() => { while (cleanups.length) cleanups.pop()!(); });
+
+const VOLT: Assignee = { id: "11111111-2222-4333-8444-555555555555", name: "VOLT", crew: "volt-1" };
+const ORAM: Assignee = { id: "66666666-7777-4888-8999-000000000000", name: "ORAM" };
+
+test("reassign: switching agents applies at once and toasts an UNDO that puts the old one back", () => {
+  const h = harness(boardWith({ id: "card_1", assignee: VOLT }));
+  reassign(h.mutate, "card_1", VOLT, ORAM);
+  expect(h.card().assignee).toEqual(ORAM);
+  expect(h.sent).toEqual([{ cardId: "card_1", sessionId: ORAM.id }]);
+  expect(h.toasts).toHaveLength(1);
+  expect(h.toasts[0]!.text).toContain("ORAM");
+  expect(h.toasts[0]!.text).toContain("VOLT");
+  expect(h.toasts[0]!.action?.label).toBe("UNDO");
+
+  h.toasts[0]!.action!.run();
+  expect(h.card().assignee).toEqual(VOLT);
+  expect(h.sent[1]).toEqual({ cardId: "card_1", sessionId: VOLT.id });
+});
+
+test("reassign: clearing to Unassigned can be undone", () => {
+  const h = harness(boardWith({ id: "card_1", assignee: VOLT }));
+  reassign(h.mutate, "card_1", VOLT, null);
+  expect(h.card().assignee).toBeNull();
+  expect(h.sent).toEqual([{ cardId: "card_1", sessionId: null }]);
+  expect(h.toasts[0]!.text).toContain("VOLT");
+
+  h.toasts[0]!.action!.run();
+  expect(h.card().assignee).toEqual(VOLT);
+  expect(h.sent[1]).toEqual({ cardId: "card_1", sessionId: VOLT.id });
+});
+
+test("reassign: when the card was Unassigned, UNDO clears it again", () => {
+  const h = harness(boardWith({ id: "card_1" }));
+  reassign(h.mutate, "card_1", null, ORAM);
+  expect(h.card().assignee).toEqual(ORAM);
+
+  h.toasts[0]!.action!.run();
+  expect(h.card().assignee).toBeNull();
+  expect(h.sent[1]).toEqual({ cardId: "card_1", sessionId: null });
 });
