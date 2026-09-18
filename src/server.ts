@@ -98,6 +98,13 @@ export async function searchChats(
 /** Who signs the note a merge leaves on the cards it was holding up. */
 const MERGE_NOTE_AUTHOR = "THE LINE";
 
+/** How often the scanner re-reads ~/.claude/projects for live sessions — the
+ *  main load-vs-responsiveness knob on a machine with many transcripts.
+ *  Override with AGENT_SCAN_INTERVAL_MS; a missing, zero or non-numeric value
+ *  keeps the default rather than spinning setInterval at ~0ms. */
+const envScanMs = Number(process.env.AGENT_SCAN_INTERVAL_MS);
+const SCAN_INTERVAL_MS = envScanMs > 0 ? envScanMs : 20_000;
+
 export function makeServer(
   port: number,
   opts: {
@@ -123,7 +130,7 @@ export function makeServer(
   } = {},
 ) {
   const {
-    scan = false, scanIntervalMs = 20_000, deliver = sendPrompt, deliverFresh = sendFreshPrompt, spawn = spawnAgent,
+    scan = false, scanIntervalMs = SCAN_INTERVAL_MS, deliver = sendPrompt, deliverFresh = sendFreshPrompt, spawn = spawnAgent,
     onWindowsClosed, idleGraceMs = 5_000, idleStartupGraceMs = 30_000, idleCheckMs = 1_000,
   } = opts;
   const dir = ensureStatusDir();

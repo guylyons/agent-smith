@@ -13,6 +13,11 @@ import {
   type ChatMessage, type Subagent, type RepoInfo, type PendingQuestion, type PersonaInfo, type BlockingTool,
 } from "./actions";
 
+/** How often the open drawer re-reads the chat transcript and subagents. */
+const CHAT_POLL_MS = 1500;
+/** How often the INFO tab re-reads the session's repo state while it's open. */
+const REPO_POLL_MS = 4000;
+
 type Pending = { id: string; text: string; base: number; at: number };
 type Attachment = { id: string; name: string; path: string };
 
@@ -89,7 +94,7 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
       }));
     };
     void load();
-    const id = setInterval(load, 1500);
+    const id = setInterval(load, CHAT_POLL_MS);
     return () => { alive = false; clearInterval(id); };
   }, [agent.sessionId]);
 
@@ -101,11 +106,11 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
     // single dropped request doesn't blank the INFO tab back to "loading repo…".
     const load = async () => { const r = await fetchRepo(agent.sessionId); if (alive && r) setRepo(r); };
     void load();
-    const id = setInterval(load, 4000);
+    const id = setInterval(load, REPO_POLL_MS);
     return () => { alive = false; clearInterval(id); };
   }, [tab, agent.sessionId]);
 
-  // Persona list is small and static — fetch it once when needed, not on the 4s poll.
+  // Persona list is small and static — fetch it once when needed, not on the repo poll.
   useEffect(() => {
     if (tab !== "info" || !agent.persona || personas.length) return;
     void fetchPersonas().then(setPersonas);

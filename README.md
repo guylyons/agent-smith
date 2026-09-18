@@ -450,6 +450,9 @@ signaling it.
   `~/.agent-status/`); useful for isolated testing.
 - **`AGENT_SCAN_FRESH_MS`** — how recently a transcript must have changed to
   count as "open" (default 15 min).
+- **`AGENT_SCAN_INTERVAL_MS`** — how often the scanner re-reads
+  `~/.claude/projects` (default 20 s). Raise it to cut load on a machine with
+  many transcripts, at the cost of slower status updates.
 
 ## Testing
 
