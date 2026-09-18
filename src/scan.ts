@@ -15,7 +15,7 @@ import { ensureStatusDir } from "./lib/paths";
 import { deriveStatusFromTranscript } from "./lib/transcript";
 import { firstTokensLeftIn } from "./lib/budget";
 import { parseConversation, findPendingQuestion, findBlockingTool, type ChatMessage, type PendingQuestion, type BlockingTool } from "./lib/conversation";
-import { deriveSubagent, type Subagent } from "./lib/subagents";
+import { lastToolOf, subagentView, type LastTool, type Subagent, type SubagentMeta } from "./lib/subagents";
 import { isClaudeComm, pidIsLiveSession } from "./lib/proc";
 
 export { isClaudeComm, isSessionHostComm } from "./lib/proc";
@@ -230,65 +230,124 @@ export async function readConversation(sessionId: string, maxBytes = 512 * 1024)
   return { messages: [], question: null, blocked: null };
 }
 
+// Directory listings, cached by the directory's inode + mtime. Creating,
+// removing or renaming an entry moves a directory's mtime, so an unchanged key
+// means an unchanged listing and the readdir is skipped. Appending to a file does
+// NOT move it, so freshness is still judged per file by its own stat.
+type Entry = { name: string; isFile: boolean; isDir: boolean };
+const listingCache = new Map<string, { key: string; entries: Entry[] }>();
+
+/** `readdir(dir)`, served from cache while the directory is unchanged. Throws
+ *  (like readdir) when the directory is missing or unreadable. */
+async function listDir(dir: string): Promise<Entry[]> {
+  let key: string;
+  try {
+    const st = await stat(dir);
+    key = `${st.ino}:${st.mtimeMs}`;
+  } catch (e) { listingCache.delete(dir); throw e; }
+  const hit = listingCache.get(dir);
+  if (hit && hit.key === key) return hit.entries;
+  const entries = (await readdir(dir, { withFileTypes: true }))
+    .map((d) => ({ name: d.name, isFile: d.isFile(), isDir: d.isDirectory() }));
+  if (listingCache.size > 2000) listingCache.clear();
+  listingCache.set(dir, { key, entries });
+  return entries;
+}
+
 /** Count subagents actively writing (mtime < 90s) in a session's subagents dir. */
 export async function countActiveSubagents(transcriptFile: string, now: number, activeMs = 90_000): Promise<number> {
   const dir = transcriptFile.replace(/\.jsonl$/, "") + "/subagents";
-  let entries: string[];
-  try { entries = await readdir(dir); } catch { return 0; }
+  let entries: Entry[];
+  try { entries = await listDir(dir); } catch { return 0; }
   let n = 0;
   for (const e of entries) {
-    if (!e.endsWith(".jsonl")) continue;
-    try { if (now - (await stat(join(dir, e))).mtimeMs < activeMs) n++; } catch { /* skip */ }
+    if (!e.name.endsWith(".jsonl")) continue;
+    try { if (now - (await stat(join(dir, e.name))).mtimeMs < activeMs) n++; } catch { /* skip */ }
   }
   return n;
 }
 
+// Where each session's subagents dir was last found, so readSubagents doesn't
+// probe every project dir on each call; and each subagent's parsed tail + meta,
+// keyed by its transcript's mtime, so an unchanged one isn't re-read.
+const subagentDirCache = new Map<string, string>();
+const subagentCache = new Map<string, { mtime: number; meta: SubagentMeta; lastTool: LastTool | null }>();
+
+/** A session's subagents dir and its listing, or null when it has none. */
+async function subagentListing(sessionId: string): Promise<{ subdir: string; entries: Entry[] } | null> {
+  const known = subagentDirCache.get(sessionId);
+  if (known) {
+    try { return { subdir: known, entries: await listDir(known) }; } catch { subagentDirCache.delete(sessionId); }
+  }
+  const root = projectsDir();
+  let projects: Entry[];
+  try { projects = await listDir(root); } catch { return null; }
+  for (const proj of projects) {
+    if (!proj.isDir) continue;
+    const subdir = join(root, proj.name, sessionId, "subagents");
+    let entries: Entry[];
+    try { entries = await listDir(subdir); } catch { continue; } // not this project
+    if (subagentDirCache.size > 500) subagentDirCache.clear();
+    subagentDirCache.set(sessionId, subdir);
+    return { subdir, entries };
+  }
+  return null;
+}
+
 /** List a session's recent subagents with their description + current activity. */
 export async function readSubagents(sessionId: string, now: number, maxAgeMs = 10 * 60_000): Promise<Subagent[]> {
-  const root = projectsDir();
-  let projects: import("node:fs").Dirent[];
-  try { projects = await readdir(root, { withFileTypes: true }); } catch { return []; }
-  for (const proj of projects) {
-    if (!proj.isDirectory()) continue;
-    const subdir = join(root, proj.name, sessionId, "subagents");
-    let entries: string[];
-    try { entries = await readdir(subdir); } catch { continue; } // not this project
-    const out: Subagent[] = [];
-    for (const e of entries) {
-      if (!e.endsWith(".jsonl")) continue;
-      const file = join(subdir, e);
-      try {
-        const mtimeMs = (await stat(file)).mtimeMs;
-        if (now - mtimeMs > maxAgeMs) continue;
-        const agentId = e.replace(/^agent-/, "").replace(/\.jsonl$/, "");
-        let meta = {};
+  const found = await subagentListing(sessionId);
+  if (!found) return [];
+  const { subdir, entries } = found;
+  if (subagentCache.size > 1000) subagentCache.clear();
+  const out: Subagent[] = [];
+  for (const { name: e } of entries) {
+    if (!e.endsWith(".jsonl")) continue;
+    const file = join(subdir, e);
+    try {
+      const mtimeMs = (await stat(file)).mtimeMs;
+      if (now - mtimeMs > maxAgeMs) continue;
+      const agentId = e.replace(/^agent-/, "").replace(/\.jsonl$/, "");
+      let hit = subagentCache.get(file);
+      if (!hit || hit.mtime !== mtimeMs) {
+        let meta: SubagentMeta = {};
         try { meta = JSON.parse(await readFile(join(subdir, e.replace(/\.jsonl$/, ".meta.json")), "utf8")); } catch { /* no meta */ }
-        out.push(deriveSubagent(agentId, meta, await tailLinesOf(file, 32 * 1024), mtimeMs, now));
+        hit = { mtime: mtimeMs, meta, lastTool: lastToolOf(await tailLinesOf(file, 32 * 1024)) };
+        subagentCache.set(file, hit);
+      }
+      out.push(subagentView(agentId, hit.meta, hit.lastTool, mtimeMs, now));
+    } catch { /* skip */ }
+  }
+  return out.sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+/** Top-level transcripts modified within freshMs, with the mtime each was seen at
+ *  (subagent sidechains live in subdirs and are skipped). */
+async function freshTranscriptEntries(now: number, freshMs: number): Promise<{ file: string; mtime: number }[]> {
+  const root = projectsDir();
+  const out: { file: string; mtime: number }[] = [];
+  let projects: Entry[];
+  try { projects = await listDir(root); } catch { return out; }
+  for (const proj of projects) {
+    if (!proj.isDir) continue;
+    const dir = join(root, proj.name);
+    let entries: Entry[];
+    try { entries = await listDir(dir); } catch { continue; }
+    for (const ent of entries) {
+      if (!ent.isFile || !ent.name.endsWith(".jsonl")) continue; // subdirs (subagents/) skipped
+      const file = join(dir, ent.name);
+      try {
+        const mtime = (await stat(file)).mtimeMs;
+        if (now - mtime <= freshMs) out.push({ file, mtime });
       } catch { /* skip */ }
     }
-    return out.sort((a, b) => b.updatedAt - a.updatedAt);
   }
-  return [];
+  return out;
 }
 
 /** Top-level transcript files modified within freshMs (subagent sidechains live in subdirs and are skipped). */
 export async function freshTranscripts(now: number, freshMs = FRESH_MS): Promise<string[]> {
-  const root = projectsDir();
-  const out: string[] = [];
-  let projects: import("node:fs").Dirent[];
-  try { projects = await readdir(root, { withFileTypes: true }); } catch { return out; }
-  for (const proj of projects) {
-    if (!proj.isDirectory()) continue;
-    const dir = join(root, proj.name);
-    let entries: import("node:fs").Dirent[];
-    try { entries = await readdir(dir, { withFileTypes: true }); } catch { continue; }
-    for (const ent of entries) {
-      if (!ent.isFile() || !ent.name.endsWith(".jsonl")) continue; // subdirs (subagents/) skipped
-      const file = join(dir, ent.name);
-      try { if (now - (await stat(file)).mtimeMs <= freshMs) out.push(file); } catch { /* skip */ }
-    }
-  }
-  return out;
+  return (await freshTranscriptEntries(now, freshMs)).map((t) => t.file);
 }
 
 /**
@@ -437,9 +496,8 @@ export async function scanLiveSessions(
   const cands: Candidate[] = [];
   if (deriveCache.size > 200) deriveCache.clear();
   if (budgetTotalCache.size > 500) budgetTotalCache.clear();
-  for (const file of await freshTranscripts(now, freshMs)) {
+  for (const { file, mtime } of await freshTranscriptEntries(now, freshMs)) {
     try {
-      const mtime = (await stat(file)).mtimeMs;
       const cached = deriveCache.get(file);
       let base: AgentStatus | null;
       if (cached && cached.mtime === mtime) {
