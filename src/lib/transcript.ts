@@ -8,20 +8,16 @@ import { parseTicket } from "./ticket";
 import { identify } from "./identity";
 import { humanizeTool } from "./humanize";
 import { findPendingQuestion } from "./conversation";
+import { lastTokensLeftIn } from "./budget";
 
 type Content = { type?: string; text?: string; name?: string; input?: Record<string, unknown> };
-
-// The harness stamps every turn's context with the session's remaining token
-// budget. Matched on the raw line (the marker needs no JSON escaping), so it's
-// found regardless of which entry type carries it.
-const TOKENS_LEFT_RE = /<total_tokens>(\d+) tokens left<\/total_tokens>/g;
 
 /** Newest budget marker in these lines, or null when the session has none. */
 export function lastTokensLeft(lines: string[]): number | null {
   let left: number | null = null;
   for (const line of lines) {
-    if (!line.includes("</total_tokens>")) continue;
-    for (const m of line.matchAll(TOKENS_LEFT_RE)) left = Number(m[1]);
+    const n = lastTokensLeftIn(line);
+    if (n !== null) left = n;
   }
   return left;
 }
