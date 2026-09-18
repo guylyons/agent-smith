@@ -508,6 +508,25 @@ test("cardTaskPrompt gives runnable curl calls for move and comment", () => {
   expect(p).toContain('"toColumnId":"in-progress"');
 });
 
+test("cardTaskPrompt says how to recover when the card has no assignee yet", () => {
+  // A spawn's self-assign can fail or lag, so an "as":"assignee" write can be
+  // refused with 400 "card has no assignee to sign as". The footer must say
+  // what to do instead of leaving the agent to reverse-engineer the error.
+  let b = defaultBoard();
+  b = addCard(b, "backlog", "Fix login bug");
+  const id = b.cards[0]!.id;
+  const expected = [
+    'If a call signed "as":"assignee" is rejected with "card has no',
+    'assignee to sign as", resend the same call with "author":"<your name>"',
+    'in place of "as":"assignee".',
+  ].join("\n");
+  // A placeholder even when the name is known: a baked-in name goes stale on
+  // a rename, the same reason the commands sign "as":"assignee".
+  expect(cardTaskPrompt(b, id, SRV, "MORROW")).toContain(expected);
+  expect(cardTaskPrompt(b, id, SRV, "MORROW")).not.toContain('"author":"MORROW"');
+  expect(cardTaskPrompt(b, id, SRV)).toContain(expected);
+});
+
 test("cardTaskPrompt forbids editing the board file directly", () => {
   let b = defaultBoard();
   b = addCard(b, "backlog", "Fix login bug");
@@ -758,7 +777,12 @@ test("cardTaskPrompt signs writes as the card's assignee, never a typed name", (
   const p = cardTaskPrompt(b, b.cards[0]!.id, SRV, "VOLT");
   expect(p).toContain('"as":"assignee"');
   expect(p).not.toContain('"author":"VOLT"');
-  expect(p).not.toContain("<your name>");
+  // The commands themselves carry no typed name or placeholder; only the
+  // no-assignee fallback line mentions "author".
+  for (const cmd of p.split("\n").filter((l) => l.includes("curl -s -X POST"))) {
+    expect(cmd).not.toContain('"author"');
+    expect(cmd).not.toContain("<your name>");
+  }
   expect(p).toContain("assigned agent on this card, VOLT");
 });
 

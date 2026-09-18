@@ -310,6 +310,14 @@ export function cardTaskPrompt(board: Board, id: string, server: string, agentNa
     "board_read, ...), use those instead -- same board, same effect, no curl.",
     "",
     ...step1,
+    // The assignee can lag the task: a spawn binds itself only once its
+    // SessionStart hook's card-assign lands, and that can fail or be refused.
+    // Until then the server turns "as":"assignee" away; say what to do instead.
+    // A placeholder, not agentName, for the same reason the commands use "as":
+    // a baked-in name goes stale when the desk is renamed.
+    'If a call signed "as":"assignee" is rejected with "card has no',
+    'assignee to sign as", resend the same call with "author":"<your name>"',
+    'in place of "as":"assignee".',
     "STEP 2: do the work. Whenever you find or decide something worth knowing,",
     "post it as a card-comment (same shape as above). Keep comments plain and",
     "short -- write like a quick note to a busy teammate, no jargon or filler,",
