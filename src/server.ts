@@ -9,7 +9,7 @@ import type { ChatMessage } from "./lib/conversation";
 import { readOverrides, applyOverrides, setNameOverride, setSpriteOverride } from "./lib/overrides";
 import { loadPersonas, applyPersonas } from "./lib/personas";
 import { applyCrew, pickName, mintCrewId, findAssigneeSession, isAssigneeSession, addNote, CREW_ID_RE } from "./lib/crew";
-import { readBoard, writeBoard, sanitizeBoard, boardFile, addCard, moveCard, progressCard, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, addColumn, renameColumn, setInstruction, setColumnStage, STAGES, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, sanitizeCard, sanitizeColumn, setCardTouches, claimBlockReason, type Board, type Card, type Column, type Stage } from "./lib/board";
+import { readBoard, writeBoard, boardFile, addCard, moveCard, progressCard, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, addColumn, renameColumn, setInstruction, setColumnStage, STAGES, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, sanitizeCard, sanitizeColumn, setCardTouches, claimBlockReason, type Board, type Card, type Column, type Stage } from "./lib/board";
 import { ALLOWED_MODELS, ALLOWED_PERMISSION_MODES, focusSession, interruptSession, killAgent, sendPrompt, sendFreshPrompt, spawnAgent } from "./ghostty";
 import { readRepo } from "./repo";
 import { readMergeState, mergeWork } from "./lib/merge";
@@ -457,7 +457,7 @@ export function makeServer(
           return json({ ok: false, error: "cross-site blocked" }, 403);
         }
         const action = url.pathname.slice("/action/".length);
-        let body: { sessionId?: string | null; name?: string; text?: string; cwd?: string; palette?: number; gear?: string; body?: string; model?: string; permissionMode?: string; worktree?: string; branch?: string; persona?: string; board?: unknown; type?: string; dataBase64?: string; cardId?: string; columnId?: string; toColumnId?: string; title?: string; description?: string; author?: string; instruction?: string; toIndex?: number; index?: number; column?: unknown; card?: unknown; cards?: unknown; commentId?: string; as?: string; stage?: string | null; crew?: string; replace?: boolean; touches?: unknown; force?: boolean };
+        let body: { sessionId?: string | null; name?: string; text?: string; cwd?: string; palette?: number; gear?: string; body?: string; model?: string; permissionMode?: string; worktree?: string; branch?: string; persona?: string; type?: string; dataBase64?: string; cardId?: string; columnId?: string; toColumnId?: string; title?: string; description?: string; author?: string; instruction?: string; toIndex?: number; index?: number; column?: unknown; card?: unknown; cards?: unknown; commentId?: string; as?: string; stage?: string | null; crew?: string; replace?: boolean; touches?: unknown; force?: boolean };
         try { body = await req.json(); } catch { return json({ ok: false, error: "bad body" }, 400); }
         // pick-folder opens the real macOS folder chooser on the user's screen and
         // hands back the path they picked. Browser-only on purpose: it puts a
@@ -512,16 +512,8 @@ export function makeServer(
           const crew = { id: mintCrewId(name), name };
           return json(await spawnAgent(cwd, task, { model, permissionMode, worktree, branch, persona, serverUrl: url.origin, cardId, crew }));
         }
-        // board: a whole-board write. Kept for external/scripted callers, but
-        // NOTHING in the UI uses it any more: it overwrites the file wholesale,
-        // so a writer holding a slightly stale board silently erases whatever
-        // landed since it read. Every browser edit now goes through the scoped
-        // column-*/card-* ops below instead. Not tied to a sessionId.
-        if (action === "board") {
-          writeBoard(dir, sanitizeBoard(body.board));
-          push();
-          return json({ ok: true });
-        }
+        // There is deliberately no whole-board write: a writer holding a stale
+        // board would silently erase whatever landed since it read.
         // column-*: the same discipline as card-*, for the board's own shape.
         // These exist so the UI never has to send a whole board to rename a
         // column or drag one — each re-reads, applies one pure op, and writes.
