@@ -603,6 +603,16 @@
     font-family:var(--mono);font-size:12px;letter-spacing:.5px;
     color:var(--on-accent);background:var(--gold);padding:3px 4px;line-height:1;
   }
+  /* The other half of the assignee slot: a card nobody is on yet. Deliberately
+     quiet — dim text in the same dashed outline the empty-state controls use,
+     so it reads as the normal starting state and not as an error. It never
+     appears beside .card-assignee, the two are exclusive. */
+  .card-unassigned{
+    font-family:var(--mono);font-size:11px;letter-spacing:.5px;text-transform:uppercase;
+    color:var(--dim);background:transparent;
+    border:1px dashed var(--bevel);border-radius:var(--radius-sm);
+    padding:2px 4px;line-height:1;white-space:nowrap;
+  }
   .card-flag{font-size:13px;color:var(--dim);line-height:1}
   /* the assignee's agent sprite, shrunk to a small avatar on the card face */
   .card-avatar{flex:0 0 auto;display:inline-flex;line-height:0}

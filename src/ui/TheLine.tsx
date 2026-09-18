@@ -345,9 +345,9 @@ function edgeScroll(e: DragEvent<HTMLDivElement>) {
 }
 
 // A card face: click anywhere to open the detail modal. Kept deliberately
-// sparse — just the title and, only when there's something to show, a footer
-// with the assignee (its agent's sprite avatar, or initials when the session has
-// ended) and a comment count. Detail lives in the modal.
+// sparse — just the title and a footer with the staffing (its agent's sprite
+// avatar, initials when the session has ended, or an UNASSIGNED chip when nobody
+// is on it) and a comment count. Detail lives in the modal.
 function CardView({
   agents, mutate, card, index, dropBefore, dropAfterLast, onDragOverCard, onMoveByKey, onOpen, unread,
 }: {
@@ -360,7 +360,6 @@ function CardView({
   unread: number;
 }) {
   const commentCount = card.comments?.length ?? 0;
-  const hasMeta = !!card.assignee || commentCount > 0 || !!card.description;
   // The live session behind the assignee, if any — gives us its sprite. A card
   // assigned to a session that has since ended falls back to initials.
   const assignedAgent = card.assignee
@@ -426,28 +425,30 @@ function CardView({
     >
       <div className="card-main">
         <span className="card-title-text">{card.title || "Untitled"}</span>
-        {hasMeta && (
-          <div className="card-meta">
-            {card.assignee && (
-              assignedAgent
+        <div className="card-meta">
+          {/* Staffing always says something. An unstaffed card used to just omit
+              the avatar, which reads as "nothing here" — the same as a card whose
+              footer is empty for other reasons. A chip makes "nobody is on this"
+              a thing you can scan a backlog column for. */}
+          {card.assignee
+            ? (assignedAgent
                 ? <span className="card-avatar" title={card.assignee.name}>
                     <Sprite sessionId={assignedAgent.sessionId} role={assignedAgent.role} name={assignedAgent.name} state={avatarState} override={assignedAgent.sprite} />
                   </span>
-                : <span className="card-assignee" title={`${card.assignee.name} (session ended)`}>{initials(card.assignee.name)}</span>
-            )}
-            {card.description && <span className="card-flag" title="Has a description">≡</span>}
-            {/* Unread turns the count into "N NEW" and colours it, so a thread
-                you've already read never looks the same as one that's moved on. */}
-            {commentCount > 0 && (
-              unread
-                ? <span className="card-flag card-flag-unread" role="status"
-                        title={`${unread} unread of ${commentCount} comment${commentCount > 1 ? "s" : ""}`}>
-                    💬 {unread} NEW
-                  </span>
-                : <span className="card-flag" title={`${commentCount} comment${commentCount > 1 ? "s" : ""}`}>💬 {commentCount}</span>
-            )}
-          </div>
-        )}
+                : <span className="card-assignee" title={`${card.assignee.name} (session ended)`}>{initials(card.assignee.name)}</span>)
+            : <span className="card-unassigned" title="No agent assigned yet">Unassigned</span>}
+          {card.description && <span className="card-flag" title="Has a description">≡</span>}
+          {/* Unread turns the count into "N NEW" and colours it, so a thread
+              you've already read never looks the same as one that's moved on. */}
+          {commentCount > 0 && (
+            unread
+              ? <span className="card-flag card-flag-unread" role="status"
+                      title={`${unread} unread of ${commentCount} comment${commentCount > 1 ? "s" : ""}`}>
+                  💬 {unread} NEW
+                </span>
+              : <span className="card-flag" title={`${commentCount} comment${commentCount > 1 ? "s" : ""}`}>💬 {commentCount}</span>
+          )}
+        </div>
       </div>
       <button
         className="card-del"
