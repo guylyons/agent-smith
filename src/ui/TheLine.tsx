@@ -13,7 +13,7 @@ import {
   deleteCardAction, restoreCardAction, ME,
 } from "./actions";
 import { toast } from "./toast";
-import { onOpenCard } from "./nav";
+import { onOpenCard, type CardFocus } from "./nav";
 import { CardModal } from "./CardModal";
 import { Sprite } from "./Sprite";
 import { stackMaxHeight } from "./stackCap";
@@ -49,14 +49,19 @@ export function TheLine({
   const [board, setBoard] = useState(incoming);
   const [addingCol, setAddingCol] = useState(false);
   const [openCardId, setOpenCardId] = useState<string | null>(null);
+  // Where to land inside the open card (a notice's comment, a move's stage, a
+  // fresh card's description). Lives exactly as long as that viewing.
+  const [openFocus, setOpenFocus] = useState<CardFocus | null>(null);
+  const showCard = (id: string | null, focus?: CardFocus) => { setOpenCardId(id); setOpenFocus(focus ?? null); };
 
   // Adopt snapshots from the server (our own echoes, or edits from another tab
   // / an agent). Active text fields keep their own draft, so this never yanks a
   // value out from under the cursor.
   useEffect(() => { setBoard(incoming); }, [incoming]);
 
-  // Open a card when the notification center asks (clicking a comment/move).
-  useEffect(() => onOpenCard(setOpenCardId), []);
+  // Open a card when the notification center asks (clicking a comment/move),
+  // landing on the exact thing the notice was about.
+  useEffect(() => onOpenCard((id, focus) => showCard(id, focus)), []);
 
   // Which comment threads you haven't read, and whether a baseline has ever
   // been taken. A browser with no baseline takes one from the first REAL board
@@ -121,7 +126,7 @@ export function TheLine({
             rows={lineRows}
             autoFocusName={addingCol && i === board.columns.length - 1}
             onNamed={() => setAddingCol(false)}
-            onOpenCard={setOpenCardId}
+            onOpenCard={showCard}
             unreadOn={unreadOn}
           />
         ))}
@@ -130,13 +135,15 @@ export function TheLine({
 
       {openCard && (
         <CardModal
+          key={openCard.id}
           board={board}
           card={openCard}
           columnName={openColumn?.name ?? ""}
           agents={agents}
           mutate={mutate}
+          focus={openFocus}
           onSpawnForCard={onSpawnForCard}
-          onClose={() => setOpenCardId(null)}
+          onClose={() => showCard(null)}
         />
       )}
     </section>
@@ -148,7 +155,7 @@ function ColumnView({
 }: {
   board: Board; agents: AgentStatus[]; mutate: Mutate; column: Column; index: number;
   rows: number; autoFocusName: boolean;
-  onNamed: () => void; onOpenCard: (id: string) => void;
+  onNamed: () => void; onOpenCard: (id: string, focus?: CardFocus) => void;
   /** unread comments on a card — computed by TheLine, which owns the read marks */
   unreadOn: (card: Card) => number;
 }) {
@@ -293,7 +300,7 @@ function ColumnView({
         ))}
       </div>
 
-      <AddCard mutate={mutate} columnId={column.id} />
+      <AddCard mutate={mutate} columnId={column.id} onCreated={(id) => onOpenCard(id, { kind: "new" })} />
     </div>
   );
 }
@@ -497,12 +504,19 @@ function initials(name: string): string {
   return letters || "?";
 }
 
-function AddCard({ mutate, columnId }: { mutate: Mutate; columnId: string }) {
+// Enter makes the card and opens it, ready to fill in, so a new ticket never
+// sits there as a bare title. Blur (clicking away) still saves it but leaves
+// you where you clicked — that click was about something else.
+function AddCard({ mutate, columnId, onCreated }: {
+  mutate: Mutate; columnId: string; onCreated: (cardId: string) => void;
+}) {
   const [value, setValue] = useState("");
-  function commit() {
+  function commit(open: boolean) {
     const t = value.trim();
     if (!t) return;
-    mutate(null, () => addCardAction(columnId, t)); // the server mints the id
+    // The server mints the id; the modal shows once the SSE echo brings the
+    // card in, whichever of the two lands first.
+    mutate(null, () => { void addCardAction(columnId, t).then((id) => { if (id && open) onCreated(id); }); });
     setValue("");
   }
   return (
@@ -511,8 +525,8 @@ function AddCard({ mutate, columnId }: { mutate: Mutate; columnId: string }) {
       value={value}
       placeholder="+ add card"
       onChange={(e) => setValue(e.target.value)}
-      onKeyDown={(e) => { if (e.key === "Enter") commit(); }}
-      onBlur={commit}
+      onKeyDown={(e) => { if (e.key === "Enter") commit(true); }}
+      onBlur={() => commit(false)}
     />
   );
 }

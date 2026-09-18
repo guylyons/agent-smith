@@ -13,6 +13,7 @@ import { MergeKey } from "./MergeKey";
 import { renderMarkdown, imageSrc } from "./markdown";
 import { imagesIn, imageMarkdown, appendImage, removeImage } from "./cardImages";
 import { toast } from "./toast";
+import type { CardFocus } from "./nav";
 import { findLiveAssignee, sendTaskReadiness } from "../lib/sendTaskReady";
 
 // Matches TheLine's: the pure op to paint immediately, plus the one scoped
@@ -117,10 +118,14 @@ export function reassign(mutate: Mutate, cardId: string, prev: Assignee | null, 
 // assignee, a comment thread, and images you can paste, drop, or pick.
 // Backdrop click or Esc closes it.
 export function CardModal({
-  board, card, columnName, agents, mutate, onSpawnForCard, onClose,
+  board, card, columnName, agents, mutate, focus = null, onSpawnForCard, onClose,
 }: {
   board: Board; card: Card; columnName: string; agents: AgentStatus[];
-  mutate: Mutate; onSpawnForCard: (task: string, cardId: string) => void; onClose: () => void;
+  mutate: Mutate;
+  /** what to land on: a notice's comment or stage change (highlighted for as
+   *  long as the card stays open), or the description of a card just made */
+  focus?: CardFocus | null;
+  onSpawnForCard: (task: string, cardId: string) => void; onClose: () => void;
 }) {
   // The assignee is a live agent session: its assignee.id is the sessionId. If
   // that session is no longer in the snapshot it has ended — we keep it selected
@@ -139,7 +144,9 @@ export function CardModal({
   // Both editable texts live here rather than in the fields, so an image dropped
   // anywhere on the modal can be appended to whichever one is active.
   const [desc, setDesc] = useState(card.description ?? "");
-  const [editingDesc, setEditingDesc] = useState(false);
+  // A card you just created opens with its description already in edit, so
+  // the next keystroke fills it in.
+  const [editingDesc, setEditingDesc] = useState(focus?.kind === "new");
   const [touches, setTouches] = useState(touchesText(card.touches));
   const [editingTouches, setEditingTouches] = useState(false);
   const [comment, setComment] = useState("");
@@ -152,6 +159,27 @@ export function CardModal({
   const [dragOver, setDragOver] = useState(false);
   const { busy: uploading, upload } = useImageAttach();
   const commentRef = useRef<HTMLTextAreaElement>(null);
+  const targetRef = useRef<HTMLElement | null>(null);
+  const setTargetEl = (el: HTMLElement | null) => { targetRef.current = el; };
+  const targetCommentId = focus?.kind === "comment" ? focus.id : null;
+  const targetStage = focus?.kind === "stage";
+
+  // Bring the thing a notice was about into view and put keyboard focus on it,
+  // so a screen reader reads it too. Smooth scroll only when motion is welcome.
+  // Only the modal's own body scrolls: scrollIntoView would also scroll the page
+  // behind the modal, which on a phone pans the header off the top. Once per
+  // arrival: a live echo re-rendering the modal must not yank the view back.
+  useEffect(() => {
+    const el = targetRef.current;
+    const box = el?.closest<HTMLElement>(".cardmodal-body");
+    if (!el || !box) return;
+    const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const at = el.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop;
+    // Centred; one taller than the box starts at its top rather than mid-text.
+    const top = Math.max(0, at - Math.max(0, (box.clientHeight - el.offsetHeight) / 2));
+    box.scrollTo({ top, behavior: still ? "auto" : "smooth" });
+    el.focus({ preventScroll: true });
+  }, [targetCommentId, targetStage]);
 
   // A live snapshot echo must never yank the description out from under the
   // cursor, so only re-sync it while the field is idle.
@@ -244,17 +272,27 @@ export function CardModal({
     onClose();
   }
 
+  // Every field here saves on blur, and unmounting a focused field never blurs
+  // it — so Esc straight out of a half-typed description (the editor a new
+  // card opens in) would drop it. Blur first, while it's still mounted, so its
+  // own commit runs; then close.
+  function close() {
+    const el = document.activeElement;
+    if (el instanceof HTMLElement && el.closest(".cardmodal")) el.blur();
+    onClose();
+  }
+
   // Esc closes from anywhere in the modal.
   useEffect(() => {
-    function onKey(e: KeyboardEvent) { if (e.key === "Escape") onClose(); }
+    function onKey(e: KeyboardEvent) { if (e.key === "Escape") close(); }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  });
 
   const comments = card.comments ?? [];
 
   return (
-    <ModalBackdrop onClose={onClose}>
+    <ModalBackdrop onClose={close}>
       <div
         className={`win cardmodal${dragOver ? " drag-over" : ""}`}
         onDragOver={(e: DragEvent) => { if (e.dataTransfer?.types.includes("Files")) { e.preventDefault(); setDragOver(true); } }}
@@ -267,7 +305,7 @@ export function CardModal({
       >
         <div className="cardmodal-head">
           <span className="pix cardmodal-crumb">IN {columnName || "—"}</span>
-          <button className="cardmodal-x" title="Close" onClick={onClose}>✕</button>
+          <button className="cardmodal-x" title="Close" onClick={close}>✕</button>
         </div>
 
         <div className="cardmodal-body">
@@ -293,9 +331,12 @@ export function CardModal({
               on a touch screen HTML5 drag events never fire at all. A plain
               select is the path that works for touch, keyboard and screen
               readers alike. */}
-          <div className="cardmodal-row">
-            <label className="pix cardmodal-label" htmlFor="cardmodal-column">STAGE</label>
+          <div className={`cardmodal-row${targetStage ? " is-target" : ""}`}>
+            <label className="pix cardmodal-label" htmlFor="cardmodal-column">
+              STAGE{targetStage ? <span className="target-tag"> · JUST MOVED</span> : null}
+            </label>
             <select
+              ref={targetStage ? setTargetEl : undefined}
               id="cardmodal-column"
               className="cardmodal-select"
               value={card.columnId}
@@ -431,20 +472,28 @@ export function CardModal({
           <div className="cardmodal-row">
             <label className="pix cardmodal-label">COMMENTS {comments.length ? `(${comments.length})` : ""}</label>
             <div className="cardmodal-comments">
-              {comments.map((c) => (
-                <div key={c.id} className="comment">
-                  <div className="comment-meta">
-                    <span className="comment-author">{c.author}</span>
-                    <span className="comment-time">{timeAgo(c.at)}</span>
-                    <button
-                      className="comment-del"
-                      title="Delete comment"
-                      onClick={() => mutate((b) => deleteComment(b, card.id, c.id), () => deleteCommentAction(card.id, c.id))}
-                    >✕</button>
+              {comments.map((c) => {
+                const isTarget = c.id === targetCommentId;
+                return (
+                  <div
+                    key={c.id}
+                    className={`comment${isTarget ? " is-target" : ""}`}
+                    ref={isTarget ? setTargetEl : undefined}
+                    tabIndex={isTarget ? -1 : undefined}
+                  >
+                    <div className="comment-meta">
+                      <span className="comment-author">{c.author}</span>
+                      <span className="comment-time">{timeAgo(c.at)}</span>
+                      <button
+                        className="comment-del"
+                        title="Delete comment"
+                        onClick={() => mutate((b) => deleteComment(b, card.id, c.id), () => deleteCommentAction(card.id, c.id))}
+                      >✕</button>
+                    </div>
+                    <div className="comment-text">{renderMarkdown(c.text)}</div>
                   </div>
-                  <div className="comment-text">{renderMarkdown(c.text)}</div>
-                </div>
-              ))}
+                );
+              })}
               {!comments.length && <p className="cardmodal-empty">No comments yet.</p>}
             </div>
 
