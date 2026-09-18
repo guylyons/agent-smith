@@ -13,6 +13,7 @@ import type { AgentStatus } from "./schema";
 import { parseStatus } from "./schema";
 import { ensureStatusDir } from "./lib/paths";
 import { deriveStatusFromTranscript } from "./lib/transcript";
+import { firstTokensLeftIn } from "./lib/budget";
 import { parseConversation, findPendingQuestion, findBlockingTool, type ChatMessage, type PendingQuestion, type BlockingTool } from "./lib/conversation";
 import { deriveSubagent, type Subagent } from "./lib/subagents";
 import { isClaudeComm, pidIsLiveSession } from "./lib/proc";
@@ -191,7 +192,6 @@ const tailLines = (file: string) => tailLinesOf(file, TAIL_BYTES);
 // A session's starting token budget is its FIRST "<total_tokens>N tokens left"
 // marker, which lives at the head of the transcript — outside the tail window
 // once the session grows. The head never changes, so cache by path.
-const BUDGET_TOTAL_RE = /<total_tokens>(\d+) tokens left<\/total_tokens>/;
 const budgetTotalCache = new Map<string, number | null>();
 
 /** The session's starting token budget, or null when it runs without one. */
@@ -207,8 +207,7 @@ export async function budgetTotalOf(file: string, bytes = 48 * 1024): Promise<nu
       const { bytesRead } = await fh.read(buf, 0, bytes, 0);
       head = buf.toString("utf8", 0, bytesRead);
     } finally { await fh.close(); }
-    const m = head.match(BUDGET_TOTAL_RE);
-    if (m) total = Number(m[1]);
+    total = firstTokensLeftIn(head);
   } catch { /* unreadable head -> no total */ }
   budgetTotalCache.set(file, total);
   return total;
