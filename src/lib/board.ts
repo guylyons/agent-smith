@@ -610,14 +610,25 @@ export function mergeBlockReason(board: Board, cardId: string): string | null {
   return `blocked on ${blockedOn(claims)} - merge ${claims.length === 1 ? "that" : "those"} first`;
 }
 
-/** A card whose branch just merged, moved into the done-stage column so its
- *  claim is released. Unchanged (same board) when it has already landed or the
- *  board has no done column to put it in. */
+/** Where a card goes once its branch has really merged: the last landed column
+ *  after the done-stage one (a user's "Merged" or "Archived", see
+ *  isLandedColumn), else the done-stage column itself. Undefined on a board
+ *  with no done column. The one place this rule lives, so it can change. */
+export function mergedColumn(board: Board): Column | undefined {
+  const done = stageColumn(board, "done");
+  if (!done) return undefined;
+  const after = board.columns.slice(board.columns.indexOf(done) + 1).filter((c) => isLandedColumn(board, c.id));
+  return after[after.length - 1] ?? done;
+}
+
+/** A card whose branch just merged, moved to mergedColumn so its claim is
+ *  released. Unchanged (same board) when it has already landed or the board
+ *  has nowhere to put it. */
 export function landMergedCard(board: Board, cardId: string): Board {
   const card = board.cards.find((k) => k.id === cardId);
-  const done = stageColumn(board, "done");
-  if (!card || !done || isLandedColumn(board, card.columnId)) return board;
-  return moveCard(board, cardId, done.id);
+  const to = mergedColumn(board);
+  if (!card || !to || isLandedColumn(board, card.columnId)) return board;
+  return moveCard(board, cardId, to.id);
 }
 
 /** The comment to post on each card that was waiting on `mergedId`, given the

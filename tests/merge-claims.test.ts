@@ -13,6 +13,7 @@ import {
   mergeBlockers,
   mergeBlockReason,
   landMergedCard,
+  mergedColumn,
   mergeReleaseNotes,
   type Board,
   type Card,
@@ -116,6 +117,32 @@ test("mergeBlockReason names the card to merge first, in plain ASCII", () => {
 test("landMergedCard moves the card into the done-stage column", () => {
   const b = boardWith({ id: "card_a", columnId: "review", assignee, touches: ["x.ts"] });
   expect(landMergedCard(b, "card_a").cards[0]!.columnId).toBe("done");
+});
+
+/** The stock board plus stageless columns after Done, e.g. a "Merged". */
+function withColumnsAfterDone(b: Board, ...names: string[]): Board {
+  return { ...b, columns: [...b.columns, ...names.map((n) => ({ id: `col_${n.toLowerCase()}`, name: n, instruction: "" }))] };
+}
+
+test("mergedColumn is the last landed column after Done, where merged cards live", () => {
+  expect(mergedColumn(withColumnsAfterDone(defaultBoard(), "Merged"))!.id).toBe("col_merged");
+  expect(mergedColumn(withColumnsAfterDone(defaultBoard(), "Merged", "Archived"))!.id).toBe("col_archived");
+});
+
+test("mergedColumn falls back to the done-stage column, and to nothing without one", () => {
+  expect(mergedColumn(defaultBoard())!.id).toBe("done");
+  expect(mergedColumn({ columns: [{ id: "c1", name: "Doing", instruction: "", stage: "doing" }], cards: [] })).toBeUndefined();
+});
+
+test("mergedColumn skips a column after Done that isn't a landed one", () => {
+  const b = withColumnsAfterDone(defaultBoard(), "Merged");
+  const odd = { ...b, columns: [...b.columns, { id: "col_redo", name: "Redo", instruction: "", stage: "todo" as const }] };
+  expect(mergedColumn(odd)!.id).toBe("col_merged");
+});
+
+test("landMergedCard lands a card in Merged when the board has one", () => {
+  const b = withColumnsAfterDone(boardWith({ id: "card_a", columnId: "review", assignee }), "Merged");
+  expect(landMergedCard(b, "card_a").cards[0]!.columnId).toBe("col_merged");
 });
 
 test("landMergedCard leaves a card already past done where it is", () => {
@@ -316,6 +343,22 @@ test("a real merge lands the card in done and tells the waiting card it is clear
   const state = (await (await fetch(`${base}/merge-state?cardId=${b}`)).json()) as any;
   expect(state).toMatchObject({ ready: true, waitingOn: [] });
   expect(await (await merge(b)).json()).toMatchObject({ ok: true, branch: "ag-b" });
+  server.stop(true);
+});
+
+test("card-merge with force: true lands a waiting card anyway (the human's override)", async () => {
+  const { server, post, b } = await setup();
+  const res = await post("/action/card-merge", { cardId: b, author: "You", force: true }, { "sec-fetch-site": "same-origin" });
+  expect(await res.json()).toMatchObject({ ok: true, branch: "ag-b" });
+  server.stop(true);
+});
+
+test("a real merge lands the card in the board's Merged column when it has one", async () => {
+  const { server, post, merge, board, a } = await setup();
+  const { columnId } = (await (await post("/action/column-add", { name: "Merged" })).json()) as any;
+  expect(columnId).toBeTruthy();
+  expect(await (await merge(a)).json()).toMatchObject({ ok: true });
+  expect((await board()).cards.find((c: any) => c.id === a).columnId).toBe(columnId);
   server.stop(true);
 });
 

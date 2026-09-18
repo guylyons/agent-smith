@@ -750,12 +750,13 @@ export function makeServer(
             const by = actor.name || "You";
             // Merge order: a card behind an overlapping, unmerged card waits
             // for it. Checked before the queue so a held card never touches git.
-            const waiting = mergeBlockReason(board, cardId);
+            // `force` is the human's override, as on card-assign and spawn.
+            const waiting = body.force === true ? null : mergeBlockReason(board, cardId);
             if (waiting) return json({ ok: false, error: waiting }, 409);
             const r = await mergeWork(where.cwd);
             if (!r.ok) return json(r, 409);
             const note = `Merged ${r.branch} into ${r.base}.`;
-            // Landed for real, so the card goes to done and its file claim is
+            // Landed for real, so the card goes to mergedColumn and its claim is
             // released; each card that was waiting on it is told so on its own
             // card. No await between this read and the write.
             const before = readBoard(dir);
