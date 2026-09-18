@@ -212,8 +212,9 @@ export function buildLaunchInput(
  *  can drive its own ticket either way without stalling on a permission prompt.
  *  Deliberately NOT the spawn/kill/prompt endpoints, or the MCP tools that reach
  *  other sessions: anything that touches another session or starts a new one
- *  stays behind a human approval. */
-export function workerPermissionSettings(serverUrl: string): { permissions: { allow: string[] } } {
+ *  stays behind a human approval. `repoRoot` is the main checkout the worktree
+ *  was made from: the one place the worker may merge its branch into. */
+export function workerPermissionSettings(serverUrl: string, repoRoot: string): { permissions: { allow: string[] } } {
   return {
     permissions: {
       allow: [
@@ -242,6 +243,11 @@ export function workerPermissionSettings(serverUrl: string): { permissions: { al
         "Bash(git log:*)",
         "Bash(git add:*)",
         "Bash(git commit:*)",
+        // After review the worker merges its own branch. Scoped by -C to the
+        // repo this worktree came from, so it can't merge anywhere else; a
+        // rule is a prefix match, so the merge must be run exactly as
+        // `git -C <repoRoot> merge ...`. No push, reset, rebase or checkout.
+        `Bash(git -C ${repoRoot} merge:*)`,
       ],
     },
   };
@@ -276,13 +282,13 @@ export async function spawnAgent(
   const prepared = await prepareLaunch(cwd, { worktree: opts?.worktree, branch: opts?.branch });
   if (!prepared.ok) return { ok: false, error: prepared.error ?? "could not prepare the working area" };
   const launchCwd = prepared.path!;
-  if (prepared.worktreeCreated && opts?.serverUrl) {
+  if (prepared.worktreeCreated && prepared.repoRoot && opts?.serverUrl) {
     try {
       const file = `${launchCwd}/.claude/settings.local.json`;
       // A brand-new worktree can't have local settings yet; don't clobber if
       // something unexpected is there.
       if (!(await Bun.file(file).exists())) {
-        await Bun.write(file, JSON.stringify(workerPermissionSettings(opts.serverUrl), null, 2) + "\n");
+        await Bun.write(file, JSON.stringify(workerPermissionSettings(opts.serverUrl, prepared.repoRoot), null, 2) + "\n");
       }
     } catch { /* best-effort — the agent just gets permission prompts instead */ }
   }

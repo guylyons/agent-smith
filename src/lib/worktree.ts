@@ -5,7 +5,7 @@
 // throws — every path resolves to a { ok, ... } result the caller can surface
 // as a toast.
 import { join, dirname, resolve } from "node:path";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, realpathSync } from "node:fs";
 import { slugify, slugifyBranch } from "./slug";
 import { registerWorktreeTrust } from "./trust";
 
@@ -19,6 +19,9 @@ export type WorktreeResult = {
    *  caller uses it to decide whether writing settings into that directory is
    *  its business (a fresh worktree: yes; the user's own folder: never). */
   worktreeCreated?: boolean;
+  /** For a created worktree: the real (symlink-resolved) path of the main
+   *  checkout it hangs off -- where its branch gets merged. */
+  repoRoot?: string;
   error?: string;
 };
 
@@ -76,7 +79,9 @@ export async function createWorktree(cwd: string, name: string, branchName?: str
   // the old stall behavior, it never fails the worktree we just made.
   registerWorktreeTrust(root, path);
 
-  return { ok: true, path, branch, worktreeCreated: true };
+  let real = root;
+  try { real = realpathSync(root); } catch { /* keep the resolved path */ }
+  return { ok: true, path, branch, worktreeCreated: true, repoRoot: real };
 }
 
 /**
