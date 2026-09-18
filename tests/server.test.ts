@@ -564,17 +564,21 @@ test("a queued item is typed as soon as the session turns idle (no-hook fallback
   sent.length = 0;
   await post("/action/card-comment", { cardId, author: "VOLT", text: "note" });
   expect(sent).toEqual([]);
-  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", crew: { id: "cadence-0001", name: "CADENCE" }, state: "idle" }));
-  // the fs watcher (debounced) notices the file and the next push flushes
-  // Generous budget, not a guess at how long the watcher takes: the loop stops
-  // the moment the push lands, and only a machine busy with another test run
-  // ever gets near the end of it.
-  for (let i = 0; i < 240 && sent.length === 0; i++) await new Promise((r) => setTimeout(r, 50));
+  // The fs watcher (debounced) notices the file and the next push flushes.
+  // Rewritten on a beat rather than once: fs.watch can miss a change made in
+  // the moment right after it is registered — on a machine busy with a second
+  // test run, measurably so — and one missed event would hang this for good.
+  const turnIdle = () => writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", crew: { id: "cadence-0001", name: "CADENCE" }, state: "idle" }));
+  turnIdle();
+  for (let i = 0; i < 80 && sent.length === 0; i++) {
+    await new Promise((r) => setTimeout(r, 50));
+    if (i % 10 === 9) turnIdle();
+  }
   expect(sent.map((s) => s.sessionId)).toEqual([SCRUM]);
   expect(sent[0]!.text).toContain("note");
   expect(((await (await post("/action/inbox-drain", { sessionId: SCRUM })).json()) as any).items).toEqual([]);
   server.stop(true);
-}, 30_000);
+}, 15_000);
 
 // ---- identity: a write is signed by WHO the session is, not a typed name ---
 // Personas hardcode a name, desks get renamed, and the MCP fallback signs as
