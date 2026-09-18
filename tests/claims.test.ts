@@ -188,6 +188,45 @@ test("overlappingClaims: the claim releases once the card reaches a done column"
   expect(overlappingClaims(b, "card_b")).toEqual([]);
 });
 
+/** The default board with one extra stageless column spliced in at `at`. */
+function boardWithStageless(at: number, ...cards: Card[]): Board {
+  const columns = [...defaultBoard().columns];
+  columns.splice(at, 0, { id: "col_x", name: "Merged", instruction: "" });
+  return { columns, cards };
+}
+
+test("overlappingClaims: a stageless column after Done (a user's Merged) has landed, so it releases the claim", () => {
+  // Hit live: a merged card moved on to "Merged" kept blocking every later card
+  // that touched the same file, because Merged had no stage.
+  const b = boardWithStageless(
+    4, // after backlog, in-progress, review, done
+    { id: "card_a", title: "A", columnId: "col_x", assignee, touches: ["src/ui/styles.css"] },
+    { id: "card_b", title: "B", columnId: "backlog", touches: ["src/ui/styles.css"] },
+  );
+  expect(overlappingClaims(b, "card_b")).toEqual([]);
+  expect(claimBlockReason(b, "card_b")).toBeNull();
+});
+
+test("overlappingClaims: a stageless column before Done has not landed, so a staffed card there still claims", () => {
+  const b = boardWithStageless(
+    3, // between review and done
+    { id: "card_a", title: "A", columnId: "col_x", assignee, touches: ["src/ui/styles.css"] },
+    { id: "card_b", title: "B", columnId: "backlog", touches: ["src/ui/styles.css"] },
+  );
+  expect(overlappingClaims(b, "card_b").map((c) => c.cardId)).toEqual(["card_a"]);
+});
+
+test("overlappingClaims: on a board with no done stage, a stageless column keeps today's behaviour", () => {
+  const b: Board = {
+    columns: [{ id: "col_x", name: "Anything", instruction: "" }],
+    cards: [
+      { id: "card_a", title: "A", columnId: "col_x", assignee, touches: ["src/x.ts"] },
+      { id: "card_b", title: "B", columnId: "col_x", touches: ["src/x.ts"] },
+    ],
+  };
+  expect(overlappingClaims(b, "card_b").map((c) => c.cardId)).toEqual(["card_a"]);
+});
+
 test("overlappingClaims: a card never conflicts with itself, so it can be re-staffed", () => {
   const b = boardWith({ id: "card_a", columnId: "in-progress", assignee, touches: ["src/lib/board.ts"] });
   expect(overlappingClaims(b, "card_a")).toEqual([]);
@@ -238,9 +277,12 @@ test("claimBlockReason: two conflicting cards are both named", () => {
 });
 
 test("claimBlockReason: a stageless column is named by its own id", () => {
-  const base = defaultBoard();
+  // Parked sits before Done: a stageless column after Done has landed and
+  // claims nothing, so it would never be named.
+  const columns = [...defaultBoard().columns];
+  columns.splice(3, 0, { id: "parked", name: "Parked", instruction: "" });
   const b: Board = {
-    columns: [...base.columns, { id: "parked", name: "Parked", instruction: "" }],
+    columns,
     cards: [
       { id: "card_a", title: "A", columnId: "parked", assignee, touches: ["src/x.ts"] },
       { id: "card_b", title: "B", columnId: "backlog", touches: ["src/x.ts"] },

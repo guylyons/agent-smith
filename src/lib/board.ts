@@ -491,15 +491,27 @@ export function globsOverlap(a: string, b: string): boolean {
   return globToRegExp(x).test(y) || globToRegExp(y).test(x);
 }
 
+/** Has a card in this column landed? A `done` column, or a stageless one placed
+ *  after a `done` column — the user's own "Merged" or "Archived" past Done is
+ *  where finished work goes next, so nobody should have to stage it by hand. A
+ *  stageless column before Done (or on a board with no Done) has not landed. */
+function isLandedColumn(board: Board, columnId: string): boolean {
+  const at = board.columns.findIndex((c) => c.id === columnId);
+  if (at < 0) return LEGACY_STAGE[columnId] === "done";
+  const stage = columnStage(board.columns[at]!);
+  if (stage) return stage === "done";
+  return board.columns.slice(0, at).some((c) => columnStage(c) === "done");
+}
+
 /** Is this card holding its claim right now? Two things have to be true: it has
  *  been STAFFED (an agent is bound to it, or it sits where work happens or waits
- *  for review), and it has not landed yet (its column is not a `done` stage).
+ *  for review), and it has not landed yet (see isLandedColumn).
  *  A card merely planned in the backlog claims nothing — otherwise a groomed
  *  backlog would block its own cards from ever being picked up. */
 function isClaiming(board: Board, card: Card): boolean {
   if (!card.touches?.length) return false;
+  if (isLandedColumn(board, card.columnId)) return false;
   const stage = columnStage(board.columns.find((c) => c.id === card.columnId) ?? { id: card.columnId, name: "", instruction: "" });
-  if (stage === "done") return false;
   return !!card.assignee || stage === "doing" || stage === "review";
 }
 
