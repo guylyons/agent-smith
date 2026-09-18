@@ -3,7 +3,7 @@
 // for) and a prompt body appended to the session's system prompt at launch.
 // A malformed file is skipped, never fatal — one bad persona must not empty the
 // picker or crash a snapshot.
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import type { AgentStatus } from "../schema";
@@ -57,17 +57,43 @@ export function parsePersona(text: string, stem: string): Persona | null {
   return { ...r.data, prompt };
 }
 
-/** Every valid persona in `dir`, sorted by id. Re-read on each call so editing a
- *  persona file takes effect without restarting the server. */
+// loadPersonas runs on every snapshot (each fs-watch push, /board, /agents, ...),
+// so it caches rather than re-parsing YAML each time. The listing is keyed by the
+// directory's mtime + inode (a file added, removed or renamed moves it); each
+// parse by that file's mtime + size, because an editor that writes in place
+// leaves the directory's mtime alone. A stat is the cheapest way to see a change.
+type DirCache = { key: string; names: string[] };
+const listingCache = new Map<string, DirCache>();
+const parseCache = new Map<string, { key: string; persona: Persona | null }>();
+
+/** Every valid persona in `dir`, sorted by id. Cheap to call repeatedly: only
+ *  a persona file that changed since the last call is re-read, so editing one
+ *  still takes effect without restarting the server. */
 export function loadPersonas(dir: string = PERSONAS_DIR): Persona[] {
-  let names: string[] = [];
-  try { names = readdirSync(dir).filter((f) => f.endsWith(".md")); } catch { return []; }
+  let names: string[];
+  try {
+    const st = statSync(dir);
+    const key = `${st.ino}:${st.mtimeMs}`;
+    const hit = listingCache.get(dir);
+    if (hit && hit.key === key) names = hit.names;
+    else {
+      names = readdirSync(dir).filter((f) => f.endsWith(".md")).sort();
+      listingCache.set(dir, { key, names });
+    }
+  } catch { listingCache.delete(dir); return []; }
   const out: Persona[] = [];
   for (const f of names) {
+    const file = join(dir, f);
     try {
-      const p = parsePersona(readFileSync(join(dir, f), "utf8"), f.slice(0, -3));
-      if (p) out.push(p);
-    } catch { /* unreadable file; skip */ }
+      const st = statSync(file);
+      const key = `${st.mtimeMs}:${st.size}`;
+      let hit = parseCache.get(file);
+      if (!hit || hit.key !== key) {
+        hit = { key, persona: parsePersona(readFileSync(file, "utf8"), f.slice(0, -3)) };
+        parseCache.set(file, hit);
+      }
+      if (hit.persona) out.push(hit.persona);
+    } catch { parseCache.delete(file); /* gone or unreadable; skip */ }
   }
   return out.sort((a, b) => a.id.localeCompare(b.id));
 }

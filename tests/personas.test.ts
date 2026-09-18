@@ -1,6 +1,6 @@
 import { test, expect } from "bun:test";
 import { fixtureDir } from "./fixtures";
-import { mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync, readFileSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { parsePersona, loadPersonas, getPersona, composePrompt, composeIdentityPrompt, PERSONA_ID_RE } from "../src/lib/personas";
 
@@ -233,4 +233,75 @@ test("a persona without a sprite is valid and leaves the desk's sprite alone", (
 
 test("the shipped personas leave the sprite to the crew name", () => {
   for (const p of loadPersonas()) expect(p.sprite, p.id).toBeUndefined();
+});
+
+// loadPersonas runs on every snapshot, so it caches: the directory listing by
+// the dir's mtime, each file's parse by that file's mtime + size. These tests
+// pin mtimes with utimes so "unchanged" is exact, then change content behind
+// the cache's back to prove what was (and wasn't) re-read.
+const T1 = new Date("2020-01-01T00:00:00Z");
+const T2 = new Date("2020-01-02T00:00:00Z");
+const pin = (path: string, t: Date) => utimesSync(path, t, t);
+
+test("loadPersonas does not re-read a persona file whose mtime is unchanged", () => {
+  reset();
+  const file = join(dir, "frontend-ux.md");
+  write("frontend-ux", GOOD);
+  pin(file, T1); pin(dir, T1);
+  expect(loadPersonas(dir)[0].name).toBe("PIXEL");
+  write("frontend-ux", GOOD.replace("PIXEL", "PIXIE")); // same size
+  pin(file, T1); pin(dir, T1);
+  expect(loadPersonas(dir)[0].name).toBe("PIXEL"); // served from cache
+});
+
+test("loadPersonas picks up an in-place edit even when the dir mtime is unchanged", () => {
+  reset();
+  const file = join(dir, "frontend-ux.md");
+  write("frontend-ux", GOOD);
+  pin(file, T1); pin(dir, T1);
+  expect(loadPersonas(dir)[0].name).toBe("PIXEL");
+  write("frontend-ux", GOOD.replace("PIXEL", "PIXIE"));
+  pin(file, T2); pin(dir, T1); // editors that write in place leave the dir alone
+  expect(loadPersonas(dir)[0].name).toBe("PIXIE");
+});
+
+test("loadPersonas re-lists the directory only when its mtime changes", () => {
+  reset();
+  write("frontend-ux", GOOD);
+  pin(join(dir, "frontend-ux.md"), T1); pin(dir, T1);
+  expect(loadPersonas(dir).map((p) => p.id)).toEqual(["frontend-ux"]);
+  write("backend-dev", GOOD.replace("id: frontend-ux", "id: backend-dev"));
+  pin(dir, T1); // listing unchanged as far as the cache can tell
+  expect(loadPersonas(dir).map((p) => p.id)).toEqual(["frontend-ux"]);
+  pin(dir, T2);
+  expect(loadPersonas(dir).map((p) => p.id)).toEqual(["backend-dev", "frontend-ux"]);
+});
+
+test("loadPersonas drops a deleted persona once the dir mtime moves", () => {
+  reset();
+  write("frontend-ux", GOOD);
+  write("backend-dev", GOOD.replace("id: frontend-ux", "id: backend-dev"));
+  pin(dir, T1);
+  expect(loadPersonas(dir)).toHaveLength(2);
+  rmSync(join(dir, "backend-dev.md"));
+  pin(dir, T2);
+  expect(loadPersonas(dir).map((p) => p.id)).toEqual(["frontend-ux"]);
+});
+
+test("loadPersonas hands out a fresh array, so a caller can't corrupt the cache", () => {
+  reset();
+  write("frontend-ux", GOOD);
+  const first = loadPersonas(dir);
+  first.length = 0;
+  expect(loadPersonas(dir)).toHaveLength(1);
+});
+
+test("loadPersonas returns [] for a missing dir and recovers when it appears", () => {
+  const missing = join(dir, "..", "personas-test-missing");
+  rmSync(missing, { recursive: true, force: true });
+  expect(loadPersonas(missing)).toEqual([]);
+  mkdirSync(missing, { recursive: true });
+  writeFileSync(join(missing, "frontend-ux.md"), GOOD);
+  expect(loadPersonas(missing).map((p) => p.id)).toEqual(["frontend-ux"]);
+  rmSync(missing, { recursive: true, force: true });
 });

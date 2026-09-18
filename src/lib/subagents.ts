@@ -24,11 +24,13 @@ function contentArray(entry: Record<string, unknown>): Content[] {
 
 const ACTIVE_MS = 90_000;
 
-/** Derive a subagent's current activity from its transcript tail. Unlike the main
+export type LastTool = { name: string; input?: Record<string, unknown> };
+
+/** The last tool a subagent called, from its transcript tail. Unlike the main
  *  transcript parser, this does NOT skip isSidechain entries — a subagent's whole
- *  transcript is sidechain. */
-export function deriveSubagent(agentId: string, meta: SubagentMeta, lines: string[], mtimeMs: number, now: number): Subagent {
-  let lastTool: { name: string; input?: Record<string, unknown> } | null = null;
+ *  transcript is sidechain. Depends only on the lines, so it can be cached by mtime. */
+export function lastToolOf(lines: string[]): LastTool | null {
+  let lastTool: LastTool | null = null;
   for (const raw of lines) {
     const line = raw.trim();
     if (!line) continue;
@@ -39,6 +41,11 @@ export function deriveSubagent(agentId: string, meta: SubagentMeta, lines: strin
       if (c.type === "tool_use" && typeof c.name === "string") lastTool = { name: c.name, input: c.input };
     }
   }
+  return lastTool;
+}
+
+/** Build the compact view from an already-parsed last tool; `now` decides `active`. */
+export function subagentView(agentId: string, meta: SubagentMeta, lastTool: LastTool | null, mtimeMs: number, now: number): Subagent {
   const active = now - mtimeMs < ACTIVE_MS;
   const doing = lastTool ? humanizeTool(lastTool.name, lastTool.input) : active ? "thinking" : "done";
   return {
@@ -50,4 +57,9 @@ export function deriveSubagent(agentId: string, meta: SubagentMeta, lines: strin
     active,
     updatedAt: mtimeMs,
   };
+}
+
+/** Derive a subagent's current activity from its transcript tail. */
+export function deriveSubagent(agentId: string, meta: SubagentMeta, lines: string[], mtimeMs: number, now: number): Subagent {
+  return subagentView(agentId, meta, lastToolOf(lines), mtimeMs, now);
 }

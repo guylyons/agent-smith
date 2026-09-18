@@ -1,6 +1,6 @@
 import { test, expect } from "bun:test";
 import { fixtureDir } from "./fixtures";
-import { mergeForWrite, scanLiveSessions, freshTranscripts, chooseLive, isEphemeralCwd, readConversation, budgetTotalOf, isClaudeComm, isSessionHostComm, parseProcessTable, processInfoOk, type GhosttyTerminal } from "../src/scan";
+import { mergeForWrite, scanLiveSessions, freshTranscripts, countActiveSubagents, readSubagents, chooseLive, isEphemeralCwd, readConversation, budgetTotalOf, isClaudeComm, isSessionHostComm, parseProcessTable, processInfoOk, type GhosttyTerminal } from "../src/scan";
 import type { AgentStatus } from "../src/schema";
 import { mkdirSync, writeFileSync, rmSync, readFileSync, utimesSync, existsSync } from "node:fs";
 import { join } from "node:path";
@@ -532,4 +532,109 @@ test("mergeForWrite carries the crew the hook set, so a scan pass can't drop the
   const existing = { ...base, crew: { id: "ripley-1", name: "RIPLEY" } };
   expect(mergeForWrite(existing, base, 5).crew).toEqual({ id: "ripley-1", name: "RIPLEY" });
   expect(mergeForWrite(null, base, 5).crew).toBeUndefined();
+});
+
+// The scan tick caches directory listings by the directory's mtime (creating,
+// removing or renaming an entry moves it), and subagent parses by the file's
+// mtime. These tests pin mtimes with utimes so "unchanged" is exact, then change
+// things behind the cache's back to prove what was (and wasn't) re-read.
+const T1 = new Date("2020-01-01T00:00:00Z");
+const T2 = new Date("2020-01-02T00:00:00Z");
+const pin = (path: string, t: Date) => utimesSync(path, t, t);
+const L = (o: object) => JSON.stringify(o);
+
+test("freshTranscripts does not re-list a project dir whose mtime is unchanged", async () => {
+  reset();
+  const now = 10_000_000;
+  const dir = join(projects, "-repo");
+  writeTranscript("-repo", "a", [{ type: "assistant", message: { content: [] } }], 60, now);
+  pin(dir, T1);
+  expect((await freshTranscripts(now)).map((f) => f.split("/").pop())).toEqual(["a.jsonl"]);
+  writeTranscript("-repo", "b", [{ type: "assistant", message: { content: [] } }], 60, now);
+  pin(dir, T1);
+  expect((await freshTranscripts(now)).map((f) => f.split("/").pop())).toEqual(["a.jsonl"]);
+  pin(dir, T2);
+  expect((await freshTranscripts(now)).map((f) => f.split("/").pop()).sort()).toEqual(["a.jsonl", "b.jsonl"]);
+});
+
+test("freshTranscripts does not re-list the projects root whose mtime is unchanged", async () => {
+  reset();
+  const now = 10_000_000;
+  writeTranscript("-repo", "a", [{ type: "assistant", message: { content: [] } }], 60, now);
+  pin(projects, T1);
+  expect(await freshTranscripts(now)).toHaveLength(1);
+  writeTranscript("-repo2", "b", [{ type: "assistant", message: { content: [] } }], 60, now);
+  pin(projects, T1);
+  expect(await freshTranscripts(now)).toHaveLength(1);
+  pin(projects, T2);
+  expect(await freshTranscripts(now)).toHaveLength(2);
+});
+
+test("freshTranscripts still sees an existing transcript go fresh or stale (appends don't move the dir)", async () => {
+  reset();
+  const now = 10_000_000;
+  const dir = join(projects, "-repo");
+  const file = writeTranscript("-repo", "a", [{ type: "assistant", message: { content: [] } }], 3600, now);
+  pin(dir, T1);
+  expect(await freshTranscripts(now)).toEqual([]);
+  utimesSync(file, (now - 5_000) / 1000, (now - 5_000) / 1000); // resumed and written to
+  pin(dir, T1);
+  expect(await freshTranscripts(now)).toEqual([file]);
+});
+
+function writeSub(sessionDir: string, agentId: string, tool: object, mtimeMs: number) {
+  const dir = join(sessionDir, "subagents");
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, `agent-${agentId}.jsonl`);
+  writeFileSync(file, L({ type: "assistant", message: { content: [{ type: "tool_use", ...tool }] } }) + "\n");
+  utimesSync(file, mtimeMs / 1000, mtimeMs / 1000);
+  return file;
+}
+
+test("countActiveSubagents does not re-list a subagents dir whose mtime is unchanged", async () => {
+  reset();
+  const now = 10_000_000;
+  const transcript = writeTranscript("-repo", "s1", [{ type: "assistant", message: { content: [] } }], 0, now);
+  const sessionDir = join(projects, "-repo", "s1");
+  const subdir = join(sessionDir, "subagents");
+  writeSub(sessionDir, "a", { name: "Read", input: {} }, now - 1_000);
+  pin(subdir, T1);
+  expect(await countActiveSubagents(transcript, now)).toBe(1);
+  writeSub(sessionDir, "b", { name: "Read", input: {} }, now - 1_000);
+  pin(subdir, T1);
+  expect(await countActiveSubagents(transcript, now)).toBe(1);
+  pin(subdir, T2);
+  expect(await countActiveSubagents(transcript, now)).toBe(2);
+  // activity is still judged per call from each file's own mtime
+  expect(await countActiveSubagents(transcript, now + 120_000)).toBe(0);
+});
+
+test("readSubagents does not re-read a subagent transcript whose mtime is unchanged", async () => {
+  reset();
+  const now = 10_000_000;
+  const sessionDir = join(projects, "-repo", "s1");
+  const file = writeSub(sessionDir, "a", { name: "Edit", input: { file_path: "/x/one.md" } }, now - 1_000);
+  writeFileSync(join(sessionDir, "subagents", "agent-a.meta.json"), L({ description: "First" }));
+  const [first] = await readSubagents("s1", now);
+  expect(first).toMatchObject({ agentId: "a", description: "First", doing: "editing one.md", active: true });
+  // rewritten behind the cache's back with the same mtime: still served from cache
+  writeSub(sessionDir, "a", { name: "Edit", input: { file_path: "/x/two.md" } }, now - 1_000);
+  const [cached] = await readSubagents("s1", now);
+  expect(cached.doing).toBe("editing one.md");
+  // ...but `active` is recomputed against the new now
+  expect((await readSubagents("s1", now + 120_000))[0].active).toBe(false);
+  // a real write moves the mtime and is picked up
+  utimesSync(file, now / 1000, now / 1000);
+  expect((await readSubagents("s1", now))[0].doing).toBe("editing two.md");
+});
+
+test("readSubagents finds a session again after its project dir changes", async () => {
+  reset();
+  const now = 10_000_000;
+  writeSub(join(projects, "-repo", "s1"), "a", { name: "Read", input: {} }, now - 1_000);
+  expect((await readSubagents("s1", now)).map((s) => s.agentId)).toEqual(["a"]);
+  rmSync(join(projects, "-repo"), { recursive: true, force: true });
+  writeSub(join(projects, "-repo2", "s1"), "b", { name: "Read", input: {} }, now - 1_000);
+  expect((await readSubagents("s1", now)).map((s) => s.agentId)).toEqual(["b"]);
+  expect(await readSubagents("nope", now)).toEqual([]);
 });
