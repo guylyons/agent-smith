@@ -231,9 +231,9 @@ export async function fetchMergeState(cardId: string): Promise<MergeState | null
 
 /** Land this card's branch on the trunk. Real `git merge --no-ff`, run in the
  *  main checkout; the server refuses (and reports) anything it can't do
- *  cleanly, so a failure here is a toast, never a half-finished merge. */
+ *  cleanly, so a failure is never a half-finished merge. No toast here: the
+ *  MERGE key words a refusal itself, since one caused by the branch moving
+ *  since the key lit up reads differently from a conflict (src/lib/mergeRace.ts). */
 export async function mergeCard(cardId: string): Promise<MergeResult> {
-  const r = await post("card-merge", { cardId, author: ME });
-  if (!r.ok) toastError(r.error ?? "could not merge");
-  return r as MergeResult;
+  return (await post("card-merge", { cardId, author: ME })) as MergeResult;
 }
