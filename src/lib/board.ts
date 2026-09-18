@@ -678,6 +678,15 @@ export function mergeReleaseNotes(before: Board, after: Board, mergedId: string)
 }
 
 // ---- validation & persistence --------------------------------------------
+//
+// Why these sanitizers are hand-rolled rather than zod schemas: zod is this
+// codebase's validation idiom (src/schema.ts, and the /action/* body schemas
+// in src/lib/actionBodies.ts), but board.ts is bundled into the browser, and
+// pulling zod in here would ship it to the page for a handful of "keep the
+// field if it's a string" checks. So the split is deliberate: server-only
+// input is validated with zod, anything that must also run in the browser
+// uses these plain functions. A rule fixed on one side (duplicate ids, blank
+// titles, what counts as a session id) should be looked for on the other.
 
 function str(v: unknown): string | null {
   return typeof v === "string" ? v : null;
