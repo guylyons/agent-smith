@@ -1476,6 +1476,9 @@ body{background:transparent}
   color:var(--on-danger);background:var(--clay);
   padding:2px 4px;letter-spacing:.5px;
 }
+/* Waiting behind another card's merge (mergeWaitFlag): the id of the card to
+   land first, in gold like the claim notes in the card modal. */
+.card-flag.card-flag-wait{color:var(--gold);font-size:11px}
 
 /* ---- tube death: STOP takes the agent's window out like a CRT ---------------
    Ending a session used to blink its window out between one frame and the next
