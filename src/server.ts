@@ -17,6 +17,7 @@ import { readMergeState, mergeWork } from "./lib/merge";
 import { saveUpload, resolveUploadPath } from "./lib/uploads";
 import { chooseFolder } from "./lib/chooser";
 import { initialIdle, onConnect, onDisconnect, shouldShutDown, type IdleState } from "./lib/idle";
+import { matchPendingSpawns, sessionsNeedingOpeningPrompt, type PendingSpawn } from "./lib/spawnAssign";
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -105,6 +106,8 @@ export function makeServer(
      *  (see sendFreshPrompt) so each ticket starts clean. Injectable like
      *  deliver. */
     deliverFresh?: (target: AgentStatus, text: string) => Promise<{ ok: boolean; error?: string }>;
+    /** How a new session is launched. Injectable so tests don't drive Ghostty. */
+    spawn?: typeof spawnAgent;
     /** Opt-in, for the stand-alone app window (`bun run app`): called once the
      *  last dashboard window has been shut for `idleGraceMs`, or never opened
      *  within `idleStartupGraceMs`. Left unset, the server serves forever with
@@ -116,7 +119,7 @@ export function makeServer(
   } = {},
 ) {
   const {
-    scan = false, scanIntervalMs = 20_000, deliver = sendPrompt, deliverFresh = sendFreshPrompt,
+    scan = false, scanIntervalMs = 20_000, deliver = sendPrompt, deliverFresh = sendFreshPrompt, spawn = spawnAgent,
     onWindowsClosed, idleGraceMs = 5_000, idleStartupGraceMs = 30_000, idleCheckMs = 1_000,
   } = opts;
   const dir = ensureStatusDir();
@@ -302,11 +305,52 @@ export function makeServer(
     if (clients.delete(send)) idle = onDisconnect(idle, Date.now());
   };
 
+  // ---- spawned-for-a-card, waiting for its session --------------------------
+  // "New agent for this card" can't assign at launch: the session id doesn't
+  // exist yet. The SessionStart hook assigns from AGENT_CARD, but without hooks
+  // nothing does, so /action/spawn records the intent here and each push
+  // applies it once the session shows up (see src/lib/spawnAssign.ts). Any
+  // card-assign on the card settles it first, so a hook's assign (or the
+  // human's) is never written over. In memory: a restart just drops the
+  // intent, leaving the card as unassigned as it was.
+  let pendingSpawns: PendingSpawn[] = [];
+  let settling = false;
+  async function settleSpawns(agents: AgentStatus[]) {
+    if (settling) return;
+    settling = true;
+    try {
+      const opening = new Map<string, string>();
+      for (const id of sessionsNeedingOpeningPrompt(pendingSpawns, agents)) {
+        const first = (await readConversation(id)).messages.find((m) => m.role === "user");
+        if (first) opening.set(id, first.text);
+      }
+      // No await from here on: the match and the writes see one board state.
+      const { matches, keep } = matchPendingSpawns(pendingSpawns, agents, Date.now(), opening);
+      pendingSpawns = keep;
+      let wrote = false;
+      for (const { spawn: p, sessionId } of matches) {
+        const board = readBoard(dir);
+        const card = board.cards.find((k) => k.id === p.cardId);
+        if (!card || card.assignee?.id === sessionId) continue;
+        // The same file-claim gate card-assign applies, unless the spawn was forced.
+        if (!p.force && claimBlockReason(board, p.cardId)) continue;
+        const who = resolveAssignee(dir, sessionId);
+        if (!who) continue;
+        writeBoard(dir, assignCard(board, p.cardId, who));
+        wrote = true;
+      }
+      if (wrote) push();
+    } finally {
+      settling = false;
+    }
+  }
+
   let timer: ReturnType<typeof setTimeout> | null = null;
   const push = () => {
     const snap = snapshot();
     // A session that just went idle may have notes waiting; type them in now.
     if (inbox.size) void flushIdle(snap.agents).catch(() => {});
+    if (pendingSpawns.length) void settleSpawns(snap.agents).catch(() => {});
     for (const send of clients) {
       try {
         send(snap);
@@ -479,7 +523,8 @@ export function makeServer(
           if (!cwd || !task.trim()) return json({ ok: false, error: "folder and task are required" }, 400);
           // The card this agent is being spawned for, if any: rides into the
           // session env so its SessionStart hook self-assigns the card once the
-          // real session id exists.
+          // real session id exists, and is recorded below so the server does
+          // the same when there are no hooks (see pendingSpawns).
           const cardId = typeof body.cardId === "string" && body.cardId.trim() ? body.cardId.trim() : undefined;
           // File-claim gate. Staffing a card whose `touches` overlap those of
           // another active, unmerged card is what puts two agents on a collision
@@ -509,9 +554,18 @@ export function makeServer(
           }
           // Who the new agent is: a roster name no live desk is using, and a
           // crew id it keeps across every /clear (see src/lib/crew.ts).
-          const name = pickName(readSnapshot(dir, Date.now()).agents.map((a) => a.name));
+          const live = readSnapshot(dir, Date.now()).agents;
+          const name = pickName(live.map((a) => a.name));
           const crew = { id: mintCrewId(name), name };
-          return json(await spawnAgent(cwd, task, { model, permissionMode, worktree, branch, persona, serverUrl: url.origin, cardId, crew }));
+          const r = await spawn(cwd, task, { model, permissionMode, worktree, branch, persona, serverUrl: url.origin, cardId, crew });
+          // Bind the card to the new session once it shows up, hooks or not.
+          if (r.ok && cardId && r.cwd) {
+            pendingSpawns.push({
+              cardId, cwd: r.cwd, uniqueCwd: r.worktreeCreated === true, crewId: crew.id, task,
+              before: live.map((a) => a.sessionId), at: Date.now(), force: body.force === true,
+            });
+          }
+          return json(r);
         }
         // There is deliberately no whole-board write: a writer holding a stale
         // board would silently erase whatever landed since it read.
@@ -751,6 +805,7 @@ export function makeServer(
           // card-assign: bind a LIVE session (resolved to its display name so
           // the label survives the session ending), or clear with null.
           if (body.sessionId === null) {
+            pendingSpawns = pendingSpawns.filter((p) => p.cardId !== cardId);
             writeBoard(dir, assignCard(board, cardId, null));
             push();
             return json({ ok: true });
@@ -765,6 +820,7 @@ export function makeServer(
           }
           const resolved = resolveAssignee(dir, body.sessionId);
           if (!resolved) return json({ ok: false, error: "no session with that id" }, 404);
+          pendingSpawns = pendingSpawns.filter((p) => p.cardId !== cardId);
           writeBoard(dir, assignCard(board, cardId, resolved));
           push();
           return json({ ok: true });

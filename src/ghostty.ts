@@ -10,6 +10,9 @@ import type { Crew } from "./lib/crew";
 import { isSessionHostComm } from "./lib/proc";
 
 export type ActionResult = { ok: boolean; error?: string };
+/** A launch also says where it went: the server matches the new session to the
+ *  card it was spawned for by that folder (see src/lib/spawnAssign.ts). */
+export type SpawnResult = ActionResult & { cwd?: string; worktreeCreated?: boolean };
 type Target = Pick<AgentStatus, "tty" | "cwd" | "title">;
 
 function delay(ms: number): Promise<void> {
@@ -200,7 +203,8 @@ export function buildLaunchInput(
   // The card this session was spawned for. The SessionStart hook reads it and
   // self-assigns the card to the real session id (which only exists once the
   // new terminal is running), closing the gap where "new agent for this card"
-  // left the card unassigned. Shell-quoted: it crosses the launch command
+  // left the card unassigned. (Without hooks the server binds it instead,
+  // from the folder this launch returns.) Shell-quoted: it crosses the launch command
   // unsanitized, like the URL above.
   if (opts.cardId) env += `AGENT_CARD=${shq(opts.cardId)} `;
   return `${env}claude${flags} ${shq(task)}\n`;
@@ -273,12 +277,13 @@ export function workerPermissionSettings(serverUrl: string, repoRoot: string): {
  *  `.claude/settings.local.json` as a narrow curl allowlist, so the agent can
  *  move/comment its own card without stalling on a permission prompt. Only a
  *  worktree gets this: writing settings into a user's real folder uninvited is
- *  not this tool's call to make. */
+ *  not this tool's call to make. On success it returns the launch folder and
+ *  whether it is a worktree this call just created. */
 export async function spawnAgent(
   cwd: string,
   task: string,
   opts?: { model?: string; permissionMode?: string; worktree?: string; branch?: string; persona?: string; serverUrl?: string; cardId?: string; crew?: Crew },
-): Promise<ActionResult> {
+): Promise<SpawnResult> {
   const prepared = await prepareLaunch(cwd, { worktree: opts?.worktree, branch: opts?.branch });
   if (!prepared.ok) return { ok: false, error: prepared.error ?? "could not prepare the working area" };
   const launchCwd = prepared.path!;
@@ -308,7 +313,9 @@ export async function spawnAgent(
     return "ok"
   end tell`;
   const out = await osa(script);
-  return out === "ok" ? { ok: true } : { ok: false, error: "could not launch a new terminal (is Ghostty running?)" };
+  return out === "ok"
+    ? { ok: true, cwd: launchCwd, worktreeCreated: prepared.worktreeCreated === true }
+    : { ok: false, error: "could not launch a new terminal (is Ghostty running?)" };
 }
 
 /** Interrupt the session's current turn — equivalent to pressing Esc/Ctrl-C once.
