@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchMergeState, mergeCard, type MergeState } from "./actions";
+import { mergeGate, mergeRefusal } from "../lib/mergeRace";
 import { playKeyClick } from "./sounds";
-import { toast } from "./toast";
+import { toast, toastError } from "./toast";
 
 // A real key on the ticket: once the card's agent has COMMITTED work on its
 // branch, a keycap rises out of the card and landing that work is one press.
@@ -27,8 +28,13 @@ type Phase = "idle" | "armed" | "working" | "merged";
 function useMergeState(cardId: string, enabled: boolean) {
   const [state, setState] = useState<MergeState | null>(null);
 
+  // Re-read now and hand the fresh state back, for the confirming press to
+  // decide on. A failed read keeps what the key already shows — a blip
+  // shouldn't blink the key out of existence under the pointer.
   const reload = useCallback(async () => {
-    setState(await fetchMergeState(cardId));
+    const s = await fetchMergeState(cardId);
+    if (s) setState(s);
+    return s;
   }, [cardId]);
 
   useEffect(() => {
@@ -75,6 +81,15 @@ export function MergeKey({ cardId, hasAssignee }: { cardId: string; hasAssignee:
 
   async function fire() {
     setPhase("working");
+    // The state the key lit up on can be up to a poll old, and another card's
+    // merge may have landed since. Re-read it before sending, and if it moved,
+    // say so here instead of sending a merge the server will refuse.
+    const gate = mergeGate(await reload());
+    if (!gate.go) {
+      setPhase("idle");
+      toastError(gate.message);
+      return;
+    }
     const r = await mergeCard(cardId);
     if (r.ok && r.branch && r.base) {
       setLanded({ branch: r.branch, base: r.base });
@@ -82,7 +97,10 @@ export function MergeKey({ cardId, hasAssignee }: { cardId: string; hasAssignee:
       toast(`Merged ${r.branch} into ${r.base}`);
     } else {
       setPhase("idle");
-      void reload(); // the refusal usually IS the state changing (dirty tree, busy trunk)
+      // The refusal usually IS the state changing in the moment between our
+      // check and the queue (dirty tree, busy trunk) — read it again so the
+      // key and the toast both say what's in the way now.
+      toastError(mergeRefusal(r.error ?? "could not merge", await reload()));
     }
   }
 
