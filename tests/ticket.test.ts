@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { parseTicket } from "../src/lib/ticket";
+import { parseTicket, cardTicket } from "../src/lib/ticket";
 
 test("extracts number from feature branch", () => {
   expect(parseTicket("feature/4412-card-variant")).toBe("#4412");
@@ -24,4 +24,17 @@ test("project-prefixed ticket (MHO-115)", () => {
 });
 test("project-prefixed ticket, lowercase, mid-branch (mho-123)", () => {
   expect(parseTicket("fix/mho-123-x")).toBe("#123");
+});
+
+// A desk's badge when its session holds a card: the card's own ticket, never
+// the branch's (see deskTicket in src/ui/Crew.tsx).
+test("cardTicket takes the ticket from the card title", () => {
+  expect(cardTicket({ id: "card_1119e443", title: "AG-11: Right hand sidebar" })).toBe("AG-11");
+  expect(cardTicket({ id: "card_1119e443", title: "fix ag-7 flicker" })).toBe("AG-7");
+});
+test("cardTicket falls back to a short card id when the title has no ticket", () => {
+  expect(cardTicket({ id: "card_1119e443", title: "Desk badge follows the card" })).toBe("1119e4");
+});
+test("cardTicket ignores ticket-like text glued into a longer word", () => {
+  expect(cardTicket({ id: "card_abcdef12", title: "upgrade v2-3x-11bar" })).toBe("abcdef");
 });
