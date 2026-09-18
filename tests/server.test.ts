@@ -45,43 +45,29 @@ test("GET /events streams a snapshot", async () => {
   server.stop(true);
 });
 
-test("POST /action/board persists the board, visible in the snapshot", async () => {
+test("POST /action/board no longer overwrites the board", async () => {
+  // The whole-board write was removed: a writer holding a stale board would
+  // silently erase whatever landed since it read. Neither a scripted client
+  // (curl sends no sec-fetch-site) nor the page itself may call it.
   reset();
   process.env.AGENT_STATUS_DIR = dir;
   const { makeServer } = await import("../src/server");
   const server = makeServer(0);
-  const board = {
-    columns: [{ id: "c1", name: "Todo", instruction: "do it" }],
-    cards: [{ id: "k1", title: "task", columnId: "c1" }],
-  };
-  const res = await fetch(`http://localhost:${server.port}/action/board`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ board }),
-  });
-  expect((await res.json()).ok).toBe(true);
-  const snap = readSnapshot(dir, Date.now());
-  expect(snap.board.columns.map((c) => c.name)).toEqual(["Todo"]);
-  expect(snap.board.cards.map((c) => c.title)).toEqual(["task"]);
-  server.stop(true);
-});
-
-test("POST /action/board sanitizes a malformed board before storing", async () => {
-  reset();
-  process.env.AGENT_STATUS_DIR = dir;
-  const { makeServer } = await import("../src/server");
-  const server = makeServer(0);
-  const board = {
-    columns: [{ id: "c1", name: "Todo", instruction: "" }],
-    cards: [{ id: "k1", title: "orphan", columnId: "ghost" }], // unknown column -> dropped
-  };
-  const res = await fetch(`http://localhost:${server.port}/action/board`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ board }),
-  });
-  expect((await res.json()).ok).toBe(true);
-  expect(readSnapshot(dir, Date.now()).board.cards).toEqual([]);
+  const post = (path: string, body: object, headers: Record<string, string> = {}) =>
+    fetch(`http://localhost:${server.port}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...headers },
+      body: JSON.stringify(body),
+    });
+  expect((await (await post("/action/column-add", { name: "Keep me" })).json()).ok).toBe(true);
+  const before = readSnapshot(dir, Date.now()).board;
+  const clobber = { columns: [{ id: "c1", name: "Clobbered", instruction: "" }], cards: [] };
+  for (const headers of [{}, { "sec-fetch-site": "same-origin" }] as Record<string, string>[]) {
+    const res = await post("/action/board", { board: clobber }, headers);
+    expect(res.ok).toBe(false);
+    expect((await res.json()).ok).toBe(false);
+  }
+  expect(readSnapshot(dir, Date.now()).board).toEqual(before);
   server.stop(true);
 });
 
