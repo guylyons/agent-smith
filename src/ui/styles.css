@@ -613,6 +613,17 @@
     border:1px dashed var(--bevel);border-radius:var(--radius-sm);
     padding:2px 4px;line-height:1;white-space:nowrap;
   }
+  /* Which project the card is for (repoChip). Solid where .card-unassigned is
+     dashed: it is a fact about the card, not a missing thing. A long repo name
+     ellipsizes rather than pushing the other chips off the row; the tooltip
+     carries the whole name and path. */
+  .card-repo{
+    font-family:var(--mono);font-size:11px;letter-spacing:.5px;
+    color:var(--bone);background:var(--box-lo);
+    border:1px solid var(--bevel);border-radius:var(--radius-sm);
+    padding:2px 4px;line-height:1;white-space:nowrap;
+    max-width:14ch;overflow:hidden;text-overflow:ellipsis;
+  }
   .card-flag{font-size:13px;color:var(--dim);line-height:1}
   /* the assignee's agent sprite, shrunk to a small avatar on the card face */
   .card-avatar{flex:0 0 auto;display:inline-flex;line-height:0}
@@ -1139,6 +1150,15 @@ body{background:transparent}
   color:var(--bone);background:var(--night);border:2px solid var(--bevel);padding:7px 8px;
 }
 .cardmodal-select:focus{outline:none;border-color:var(--gold)}
+/* The repo label: sized like the selects above it, a short name not prose. */
+.cardmodal-repo{
+  align-self:flex-start;width:280px;max-width:100%;box-sizing:border-box;
+  font-family:var(--mono);font-size:14px;
+  color:var(--bone);background:var(--night);border:2px solid var(--bevel);padding:7px 8px;
+}
+.cardmodal-repo:focus{outline:none;border-color:var(--gold)}
+.cardmodal-repo::placeholder{color:var(--dim)}
+.cardmodal-repo-path{overflow-wrap:anywhere}
 .cardmodal-assign-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:2px}
 .cardmodal-send,.cardmodal-spawn{
   cursor:pointer;font-size:12px;letter-spacing:.5px;padding:8px 10px;

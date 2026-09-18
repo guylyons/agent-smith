@@ -2,10 +2,10 @@ import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from
 import type { AgentStatus } from "../schema";
 import type { Board, Card } from "../lib/board";
 import type { Assignee } from "../lib/board";
-import { renameCard, setCardDescription, setCardTouches, assignCard, addComment, deleteComment, moveCard, cardTaskPrompt, claimBlockReason } from "../lib/board";
+import { renameCard, setCardDescription, setCardTouches, setCardRepo, assignCard, addComment, deleteComment, moveCard, cardTaskPrompt, claimBlockReason } from "../lib/board";
 import {
   sendCardTask, uploadImage, ME,
-  renameCardAction, setCardDescriptionAction, setCardTouchesAction, assignCardAction,
+  renameCardAction, setCardDescriptionAction, setCardTouchesAction, setCardRepoAction, assignCardAction,
   addCommentAction, deleteCommentAction, moveCardAction, type Delivery,
 } from "./actions";
 import { ModalBackdrop } from "./Backdrop";
@@ -276,6 +276,19 @@ export function CardModal({
             onCommit={(v) => { if (v) mutate((b) => renameCard(b, card.id, v), () => renameCardAction(card.id, v)); }}
           />
 
+          {/* Which project this card is for. Filled in when an agent is
+              spawned for it; typed here for a card made by hand. Blank clears. */}
+          <div className="cardmodal-row">
+            <label className="pix cardmodal-label" htmlFor="cardmodal-repo">REPO</label>
+            <RepoField
+              value={card.repo ?? ""}
+              path={card.repoPath}
+              onCommit={(v) => {
+                if (v !== (card.repo ?? "")) mutate((b) => setCardRepo(b, card.id, v), () => setCardRepoAction(card.id, v));
+              }}
+            />
+          </div>
+
           {/* Dragging is the fast way to re-stage a card, but it is mouse-only:
               on a touch screen HTML5 drag events never fire at all. A plain
               select is the path that works for touch, keyboard and screen
@@ -528,6 +541,33 @@ function TitleField({ value, onCommit }: { value: string; onCommit: (v: string) 
         if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
       }}
     />
+  );
+}
+
+// The repo label: a one-line field with the same local-draft rule as the title.
+// The full path, when the spawn recorded one, sits under it as a hint.
+function RepoField({ value, path, onCommit }: { value: string; path?: string; onCommit: (v: string) => void }) {
+  const [draft, setDraft] = useState(value);
+  const [editing, setEditing] = useState(false);
+  useEffect(() => { if (!editing) setDraft(value); }, [value, editing]);
+
+  return (
+    <>
+      <input
+        id="cardmodal-repo"
+        className="cardmodal-repo"
+        value={editing ? draft : value}
+        placeholder="Which repo is this for?  e.g. agent-smith"
+        spellCheck={false}
+        onFocus={() => setEditing(true)}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => { setEditing(false); onCommit(draft.trim()); }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
+        }}
+      />
+      {path && <p className="cardmodal-empty cardmodal-repo-path" title={path}>{path}</p>}
+    </>
   );
 }
 

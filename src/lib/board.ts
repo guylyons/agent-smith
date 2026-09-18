@@ -36,6 +36,14 @@ export type Card = {
   // (see overlappingClaims). Opt-in: absent on cards nobody has filled it in for,
   // and a card with none is never blocked and never blocks.
   touches?: string[];
+  // Which project the card belongs to: a short display name (the repo folder's
+  // basename, or whatever a person typed) and, when known, the main checkout's
+  // full path. One board holds cards for several repos, so this is how a card
+  // says which one before anyone is assigned. Filled in when an agent is spawned
+  // for the card; editable by hand. Optional like the rest: an old card without
+  // one loads bare and simply shows no chip.
+  repo?: string;
+  repoPath?: string;
 };
 /** What a column MEANS to the protocol, independent of where it sits. `todo`
  *  is where new cards wait, `doing` is where an agent works, `review` is where
@@ -211,6 +219,27 @@ function cleanTouches(v: unknown): string[] {
     if (t && !out.includes(t)) out.push(t);
   }
   return out;
+}
+
+/** A folder path's last segment, trailing slashes ignored: the repo name the
+ *  board shows for a checkout. Pure string work — this module is in the
+ *  browser bundle, so no node:path. Empty for an empty path or `/`. */
+export function repoName(path: string): string {
+  const parts = path.replace(/[\\/]+$/, "").split(/[\\/]/);
+  return parts[parts.length - 1] ?? "";
+}
+
+/** Label the card with its repo, or clear it with a blank/null name. The path
+ *  is kept only when given: a name typed by hand says nothing about where the
+ *  old path pointed, so it drops rather than goes stale. */
+export function setCardRepo(board: Board, id: string, repo: string | null, path?: string): Board {
+  const name = (repo ?? "").trim();
+  const where = (path ?? "").trim();
+  return mapCard(board, id, (k) => {
+    const { repo: _r, repoPath: _p, ...rest } = k;
+    if (!name) return rest;
+    return where ? { ...rest, repo: name, repoPath: where } : { ...rest, repo: name };
+  });
 }
 
 /** Assign the card to a live agent session, or clear it with `null`. */
@@ -732,6 +761,13 @@ export function sanitizeCard(v: unknown): Card | null {
   if (comments.length) card.comments = comments;
   const touches = cleanTouches(o.touches);
   if (touches.length) card.touches = touches;
+  // A repo needs a name to show; a path on its own is dropped.
+  const repo = str(o.repo)?.trim();
+  if (repo) {
+    card.repo = repo;
+    const repoPath = str(o.repoPath)?.trim();
+    if (repoPath) card.repoPath = repoPath;
+  }
   return card;
 }
 

@@ -10,7 +10,8 @@ import { readOverrides, applyOverrides, setNameOverride, setSpriteOverride } fro
 import { loadPersonas, applyPersonas } from "./lib/personas";
 import { applyCrew, pickName, mintCrewId, findAssigneeSession, isAssigneeSession, addNote, CREW_ID_RE } from "./lib/crew";
 import { sendTaskReadiness } from "./lib/sendTaskReady";
-import { readBoard, writeBoard, boardFile, addCard, moveCard, moveToWorkColumn, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, addColumn, renameColumn, setInstruction, setColumnStage, STAGES, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, sanitizeCard, sanitizeColumn, setCardTouches, claimBlockReason, mergeBlockReason, landMergedCard, mergeReleaseNotes, type Board, type Card, type Column, type Stage } from "./lib/board";
+import { readBoard, writeBoard, boardFile, addCard, moveCard, moveToWorkColumn, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, addColumn, renameColumn, setInstruction, setColumnStage, STAGES, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, sanitizeCard, sanitizeColumn, setCardTouches, setCardRepo, repoName, claimBlockReason, mergeBlockReason, landMergedCard, mergeReleaseNotes, type Board, type Card, type Column, type Stage } from "./lib/board";
+import { mainCheckout } from "./lib/worktree";
 import { ALLOWED_MODELS, ALLOWED_PERMISSION_MODES, focusSession, interruptSession, killAgent, sendPrompt, sendFreshPrompt, spawnAgent } from "./ghostty";
 import { readRepo } from "./repo";
 import { readMergeState, mergeWork, holdForClaims } from "./lib/merge";
@@ -509,7 +510,7 @@ export function makeServer(
           return json({ ok: false, error: "cross-site blocked" }, 403);
         }
         const action = url.pathname.slice("/action/".length);
-        let body: { sessionId?: string | null; name?: string; text?: string; cwd?: string; palette?: number; gear?: string; body?: string; model?: string; permissionMode?: string; worktree?: string; branch?: string; persona?: string; type?: string; dataBase64?: string; cardId?: string; columnId?: string; toColumnId?: string; title?: string; description?: string; author?: string; instruction?: string; toIndex?: number; index?: number; column?: unknown; card?: unknown; cards?: unknown; commentId?: string; as?: string; stage?: string | null; crew?: string; replace?: boolean; touches?: unknown; force?: boolean };
+        let body: { sessionId?: string | null; name?: string; text?: string; cwd?: string; palette?: number; gear?: string; body?: string; model?: string; permissionMode?: string; worktree?: string; branch?: string; persona?: string; type?: string; dataBase64?: string; cardId?: string; columnId?: string; toColumnId?: string; title?: string; description?: string; author?: string; instruction?: string; toIndex?: number; index?: number; column?: unknown; card?: unknown; cards?: unknown; commentId?: string; as?: string; stage?: string | null; crew?: string; replace?: boolean; touches?: unknown; force?: boolean; repo?: string | null };
         try { body = await req.json(); } catch { return json({ ok: false, error: "bad body" }, 400); }
         // pick-folder opens the real macOS folder chooser on the user's screen and
         // hands back the path they picked. Browser-only on purpose: it puts a
@@ -571,6 +572,17 @@ export function makeServer(
               cardId, cwd: r.cwd, uniqueCwd: r.worktreeCreated === true, crewId: crew.id, task,
               before: live.map((a) => a.sessionId), at: Date.now(), force: body.force === true,
             });
+          }
+          // Label the card with the repo it is being worked in, unless someone
+          // already has. The main checkout, not the worktree: the label names the
+          // project, and every worktree of it should read the same.
+          if (r.ok && cardId && !readBoard(dir).cards.find((k) => k.id === cardId)?.repo) {
+            const root = await mainCheckout(cwd);
+            const board = readBoard(dir); // re-read: the git call above yielded
+            if (board.cards.some((k) => k.id === cardId && !k.repo)) {
+              writeBoard(dir, setCardRepo(board, cardId, repoName(root), root));
+              push();
+            }
           }
           return json(r);
         }
@@ -700,8 +712,8 @@ export function makeServer(
             const delivery = await notifyCardEvent(next, cardId, actor, `[THE LINE] ${actor.name} moved "${title}" to "${to.id}".`, { kind: "move", direction });
             return json({ ok: true, delivery });
           }
-          // card-update: edit a card's own text — its title, its description, or
-          // both. Each field is applied only when present, so renaming a card
+          // card-update: edit a card's own text — its title, its description, its
+          // file claim, its repo label. Each field is applied only when present, so renaming a card
           // can't wipe a description written by someone else (and vice versa).
           // Silent by design: text edits don't wake the assignee the way a move
           // or a comment does.
@@ -709,7 +721,12 @@ export function makeServer(
             const hasTitle = typeof body.title === "string";
             const hasDescription = typeof body.description === "string";
             const hasTouches = body.touches !== undefined;
-            if (!hasTitle && !hasDescription && !hasTouches) return json({ ok: false, error: "title, description or touches is required" }, 400);
+            const hasRepo = body.repo !== undefined;
+            if (!hasTitle && !hasDescription && !hasTouches && !hasRepo) return json({ ok: false, error: "title, description, touches or repo is required" }, 400);
+            // repo is the card's project label; "" or null clears it.
+            if (hasRepo && body.repo !== null && typeof body.repo !== "string") {
+              return json({ ok: false, error: "repo must be a string (or null to clear it)" }, 400);
+            }
             // A blank title would leave the card unidentifiable on the board.
             if (hasTitle && !body.title!.trim()) return json({ ok: false, error: "title cannot be blank" }, 400);
             // touches is the card's file claim: a list of paths/globs. An empty
@@ -721,6 +738,7 @@ export function makeServer(
             if (hasTitle) next = renameCard(next, cardId, body.title!.trim());
             if (hasDescription) next = setCardDescription(next, cardId, body.description!);
             if (hasTouches) next = setCardTouches(next, cardId, body.touches as string[]);
+            if (hasRepo) next = setCardRepo(next, cardId, body.repo ?? null);
             writeBoard(dir, next);
             push();
             return json({ ok: true });
