@@ -9,6 +9,7 @@ import type { ChatMessage } from "./lib/conversation";
 import { readOverrides, applyOverrides, setNameOverride, setSpriteOverride } from "./lib/overrides";
 import { loadPersonas, applyPersonas } from "./lib/personas";
 import { applyCrew, pickName, mintCrewId, findAssigneeSession, isAssigneeSession, addNote, CREW_ID_RE } from "./lib/crew";
+import { sendTaskReadiness } from "./lib/sendTaskReady";
 import { readBoard, writeBoard, boardFile, addCard, moveCard, progressCard, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, addColumn, renameColumn, setInstruction, setColumnStage, STAGES, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, sanitizeCard, sanitizeColumn, setCardTouches, claimBlockReason, type Board, type Card, type Column, type Stage } from "./lib/board";
 import { ALLOWED_MODELS, ALLOWED_PERMISSION_MODES, focusSession, interruptSession, killAgent, sendPrompt, sendFreshPrompt, spawnAgent } from "./ghostty";
 import { readRepo } from "./repo";
@@ -710,19 +711,21 @@ export function makeServer(
           // into the assigned live session's terminal. The curl targets in the
           // footer are this very server, taken from the request's own origin.
           if (action === "send-task") {
-            const assignee = card.assignee;
-            if (!assignee) return json({ ok: false, error: "card has no assignee" }, 400);
-            const agent = findAssigneeSession(readSnapshot(dir, Date.now()).agents, assignee);
-            if (!agent) return json({ ok: false, error: `assignee "${assignee.name}" is not a live session` }, 404);
-            // A session waiting on a dialog would take the typed task as
-            // keystrokes ON the dialog (Enter approves it) — refuse instead.
-            if (agent.state === "waiting") {
-              return json({ ok: false, error: `${agent.name} is waiting on a prompt in its terminal — answer that first, then resend` }, 409);
+            // The same readiness rule the SEND TASK button asks
+            // (src/lib/sendTaskReady.ts), so the two can't drift apart.
+            const readiness = sendTaskReadiness(card.assignee, readSnapshot(dir, Date.now()).agents);
+            if (!readiness.ready) {
+              switch (readiness.why) {
+                case "unassigned": return json({ ok: false, error: "card has no assignee" }, 400);
+                case "ended": return json({ ok: false, error: `assignee "${readiness.assignee.name}" is not a live session` }, 404);
+                // A session waiting on a dialog would take the typed task as
+                // keystrokes ON the dialog (Enter approves it) — refuse instead.
+                case "waiting": return json({ ok: false, error: `${readiness.agent.name} is waiting on a prompt in its terminal — answer that first, then resend` }, 409);
+                // And a working one would have its context cleared mid-task.
+                case "working": return json({ ok: false, error: `${readiness.agent.name} is still working — wait for it to go idle (or pause it), then resend` }, 409);
+              }
             }
-            // And a working one would have its context cleared mid-task.
-            if (agent.state === "working") {
-              return json({ ok: false, error: `${agent.name} is still working — wait for it to go idle (or pause it), then resend` }, 409);
-            }
+            const agent = readiness.agent;
             // An agent that already left comments here has worked this card
             // before: its context is about to be cleared, so the footer sends
             // it back to its own notes on the card first.

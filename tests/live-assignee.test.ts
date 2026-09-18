@@ -1,6 +1,6 @@
 // tests/live-assignee.test.ts
 import { test, expect } from "bun:test";
-import { findLiveAssignee } from "../src/ui/liveAssignee";
+import { findLiveAssignee } from "../src/lib/sendTaskReady";
 import type { AgentStatus } from "../src/schema";
 
 const agent = (o: Partial<AgentStatus>): AgentStatus =>

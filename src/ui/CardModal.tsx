@@ -13,7 +13,7 @@ import { MergeKey } from "./MergeKey";
 import { renderMarkdown, imageSrc } from "./markdown";
 import { imagesIn, imageMarkdown, appendImage, removeImage } from "./cardImages";
 import { toast } from "./toast";
-import { findLiveAssignee } from "./liveAssignee";
+import { findLiveAssignee, sendTaskReadiness } from "../lib/sendTaskReady";
 
 // Matches TheLine's: the pure op to paint immediately, plus the one scoped
 // server call that makes it real. See actions.ts for why nothing sends a board.
@@ -47,16 +47,17 @@ function useImageAttach() {
 }
 
 /** Whether SEND TASK can fire, and if not, why — shown as the button's title.
- *  A fresh task clears the agent's context first, so it must be idle: sending
- *  into a working session would wipe its work mid-task, and into a waiting one
- *  would press keys on its dialog. */
+ *  The rule itself is sendTaskReadiness (src/lib/sendTaskReady.ts), the same
+ *  one the server's send-task handler enforces; this only words it. */
 export function sendTaskGate(assigned: Assignee | null | undefined, agents: AgentStatus[]): { enabled: boolean; reason: string } {
-  if (!assigned) return { enabled: false, reason: "Assign a running agent first" };
-  const live = findLiveAssignee(agents, assigned);
-  if (!live) return { enabled: false, reason: `${assigned.name}'s session has ended - assign a running agent` };
-  if (live.state === "working") return { enabled: false, reason: `${live.name} is working - wait for it to go idle (or pause it) before sending a new task` };
-  if (live.state === "waiting") return { enabled: false, reason: `${live.name} is waiting on a prompt in its terminal - answer that first` };
-  return { enabled: true, reason: "Send this card's task to the assigned agent" };
+  const r = sendTaskReadiness(assigned, agents);
+  if (r.ready) return { enabled: true, reason: "Send this card's task to the assigned agent" };
+  switch (r.why) {
+    case "unassigned": return { enabled: false, reason: "Assign a running agent first" };
+    case "ended": return { enabled: false, reason: `${r.assignee.name}'s session has ended - assign a running agent` };
+    case "working": return { enabled: false, reason: `${r.agent.name} is working - wait for it to go idle (or pause it) before sending a new task` };
+    case "waiting": return { enabled: false, reason: `${r.agent.name} is waiting on a prompt in its terminal - answer that first` };
+  }
 }
 
 /** The TOUCHES field is a plain textarea, one path or glob per line — the
@@ -126,7 +127,7 @@ export function CardModal({
   // and labelled so the card still shows who had it.
   const assigned = card.assignee;
   // Matched by crew as well as session id: the same agent comes back under a
-  // new session id after a /clear (see liveAssignee.ts).
+  // new session id after a /clear (see src/lib/sendTaskReady.ts).
   const assignedAgent = findLiveAssignee(agents, assigned);
   const assignedIsLive = !!assignedAgent;
   const gate = sendTaskGate(assigned, agents);

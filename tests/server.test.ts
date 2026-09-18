@@ -435,6 +435,28 @@ test("send-task without a live assignee is refused", async () => {
   server.stop(true);
 });
 
+// The refusals, pinned exactly: status, error text, and nothing delivered.
+for (const [label, setup, status, error] of [
+  ["an ended session", () => rmSync(join(dir, `${WORKER}.json`)), 404, 'assignee "VOLT" is not a live session'],
+  ["a working assignee", () => writeFileSync(join(dir, `${WORKER}.json`), valid({ sessionId: WORKER, name: "VOLT", state: "working" })), 409,
+    "VOLT is still working — wait for it to go idle (or pause it), then resend"],
+  ["a waiting assignee", () => writeFileSync(join(dir, `${WORKER}.json`), valid({ sessionId: WORKER, name: "VOLT", state: "waiting" })), 409,
+    "VOLT is waiting on a prompt in its terminal — answer that first, then resend"],
+] as const) {
+  test(`send-task to ${label} is refused with ${status}`, async () => {
+    const { server, post, sent } = await notifyServer();
+    writeFileSync(join(dir, `${WORKER}.json`), valid({ sessionId: WORKER, name: "VOLT", state: "idle" }));
+    const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
+    await post("/action/card-assign", { cardId, sessionId: WORKER });
+    setup();
+    const res = await post("/action/send-task", { cardId });
+    expect(res.status).toBe(status);
+    expect(await res.json()).toEqual({ ok: false, error });
+    expect(sent.length).toBe(0);
+    server.stop(true);
+  });
+}
+
 test("a worker's card-comment wakes the scrum master, not the worker itself", async () => {
   const { server, post, sent } = await notifyServer();
   writeFileSync(join(dir, `${WORKER}.json`), valid({ sessionId: WORKER, name: "VOLT", state: "idle" }));
