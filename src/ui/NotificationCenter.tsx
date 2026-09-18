@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Snapshot } from "../lib/snapshot";
 import { diffNotifications, type Notif } from "../lib/notifications";
-import { openCard, openAgent } from "./nav";
+import { openCard, openAgent, type CardFocus } from "./nav";
 
 const ME = "You";        // the human's byline, so their own comments never notify
 const CAP = 50;          // most recent N events kept
@@ -28,13 +28,22 @@ function ago(ms: number, now: number): string {
   return `${Math.round(h / 24)}d`;
 }
 
+/** Where on the card a notice should land: the comment it announced, or the
+ *  stage row for a move. A needs-you opens the agent, not a card spot. */
+export function notifFocus(n: Notif): CardFocus | undefined {
+  if (n.kind === "comment" && n.commentId) return { kind: "comment", id: n.commentId };
+  if (n.kind === "move") return { kind: "stage" };
+  return undefined;
+}
+
 const ICON: Record<Notif["kind"], string> = { comment: "💬", "needs-you": "⚠", move: "→" };
 
 /**
  * The header's notification inbox: a bell with an unread count, and a panel of
  * recent events (an agent's comment, an agent needing you, a card moving
- * forward) newest first. Clicking an item opens the card or agent behind it and
- * marks it read. The diff that produces events is the pure diffNotifications;
+ * forward) newest first. Clicking an item opens the card or agent behind it,
+ * lands on the exact comment or stage change (highlighted while the card is
+ * open), and marks it read. The diff that produces events is the pure diffNotifications;
  * this component owns the accumulated list and the read-state (persisted per
  * browser).
  */
@@ -68,7 +77,7 @@ export function NotificationCenter({ snap }: { snap: Snapshot }) {
   function activate(n: Notif): void {
     setRead((r) => { const next = new Set(r).add(n.id); saveRead(next, items); return next; });
     if (n.kind === "needs-you" && n.sessionId) openAgent(n.sessionId);
-    else if (n.cardId) openCard(n.cardId);
+    else if (n.cardId) openCard(n.cardId, notifFocus(n));
     setOpen(false);
   }
 

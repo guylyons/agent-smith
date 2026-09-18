@@ -1362,6 +1362,21 @@ body{background:transparent}
 .comment-del{background:transparent;border:none;color:var(--dim);cursor:pointer;font-size:13px;line-height:1;padding:1px 3px}
 .comment-del:hover{color:var(--clay)}
 .comment-text{font-family:var(--mono);font-size:14px;line-height:1.6;color:var(--bone);word-break:break-word}
+/* What a clicked notification was about: the comment, or the stage it moved to.
+   Held in gold for as long as the card stays open, with a short ring on arrival
+   so the eye finds it (the ring is dropped under reduced motion; the gold stays).
+   The gold border is the focus mark here, so the browser outline is not doubled. */
+.comment.is-target{border-color:var(--gold);background:color-mix(in srgb,var(--gold) 12%,var(--box-lo));animation:target-ring 1.2s ease-out 2}
+.comment.is-target:focus{outline:none}
+.cardmodal-row.is-target .cardmodal-select{border-color:var(--gold);background:color-mix(in srgb,var(--gold) 12%,var(--night));animation:target-ring 1.2s ease-out 2}
+.target-tag{color:var(--gold)}
+@keyframes target-ring{
+  0%{box-shadow:0 0 0 6px color-mix(in srgb,var(--gold) 55%,transparent)}
+  100%{box-shadow:0 0 0 0 transparent}
+}
+@media (prefers-reduced-motion:reduce){
+  .comment.is-target,.cardmodal-row.is-target .cardmodal-select{animation:none}
+}
 .comment-compose{display:flex;flex-direction:column;gap:7px;margin-top:2px}
 .comment-input{
   width:100%;box-sizing:border-box;resize:vertical;min-height:60px;

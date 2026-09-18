@@ -15,6 +15,7 @@ export type Notif = {
   text: string;           // a short human-readable description / snippet
   cardId?: string;        // the card to open, when there is one
   cardTitle?: string;
+  commentId?: string;     // the exact comment to land on, for a comment
   sessionId?: string;     // the agent to open, for a needs-you
 };
 
@@ -51,6 +52,7 @@ export function diffNotifications(prev: Snap | null, curr: Snap, me: string, now
         text: m.text,
         cardId: card.id,
         cardTitle: card.title,
+        commentId: m.id,
       });
     }
   }

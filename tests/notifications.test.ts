@@ -1,5 +1,6 @@
 import { test, expect } from "bun:test";
-import { diffNotifications } from "../src/lib/notifications";
+import { diffNotifications, type Notif } from "../src/lib/notifications";
+import { notifFocus } from "../src/ui/NotificationCenter";
 import type { Board } from "../src/lib/board";
 import type { AgentStatus } from "../src/schema";
 
@@ -28,7 +29,7 @@ test("a new agent comment is surfaced", () => {
   const curr = snap([], board([{ id: "c1", title: "Fix bug", columnId: "backlog", comments: [{ id: "m1", author: "VOLT", text: "Root cause found", at: 5 }] }]));
   const out = diffNotifications(prev, curr, "You", 100);
   expect(out.length).toBe(1);
-  expect(out[0]).toMatchObject({ kind: "comment", cardId: "c1", cardTitle: "Fix bug", who: "VOLT", text: "Root cause found" });
+  expect(out[0]).toMatchObject({ kind: "comment", cardId: "c1", cardTitle: "Fix bug", who: "VOLT", text: "Root cause found", commentId: "m1" });
 });
 
 test("my own comments never notify me", () => {
@@ -80,4 +81,20 @@ test("event ids are stable per event and unique across kinds", () => {
   const ids = diffNotifications(prev, curr, "You", 100).map((n) => n.id);
   expect(new Set(ids).size).toBe(ids.length); // all unique
   expect(ids).toContain("comment:m1"); // comment id is stable across snapshots
+});
+
+// Clicking a notice lands on the exact thing it announced.
+const notif = (o: Partial<Notif>): Notif => ({ id: "x", kind: "comment", at: 0, who: "VOLT", text: "", ...o });
+
+test("a comment notice lands on that comment", () => {
+  expect(notifFocus(notif({ kind: "comment", cardId: "c1", commentId: "m1" }))).toEqual({ kind: "comment", id: "m1" });
+});
+
+test("a move notice lands on the card's stage", () => {
+  expect(notifFocus(notif({ kind: "move", cardId: "c1" }))).toEqual({ kind: "stage" });
+});
+
+test("a needs-you notice, or a comment notice without its id, has no spot on the card", () => {
+  expect(notifFocus(notif({ kind: "needs-you", sessionId: "s1" }))).toBeUndefined();
+  expect(notifFocus(notif({ kind: "comment", cardId: "c1" }))).toBeUndefined();
 });

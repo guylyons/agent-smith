@@ -15,7 +15,7 @@ import type { MergeState, MergeResult } from "../lib/merge";
  *  for a busy one's Stop hook to collect when its turn ends. */
 export type Delivery = { sessionId: string; name: string; via: "typed" | "queued" };
 
-type Result = { ok: boolean; error?: string; path?: string; url?: string; cancelled?: boolean; branch?: string; base?: string; delivery?: Delivery[] };
+type Result = { ok: boolean; error?: string; cardId?: string; path?: string; url?: string; cancelled?: boolean; branch?: string; base?: string; delivery?: Delivery[] };
 
 async function post(action: string, body: object): Promise<Result> {
   try {
@@ -80,7 +80,12 @@ export function restoreColumnAction(column: Column, index: number, cards: Card[]
   void act("column-restore", { column, index, cards });
 }
 
-export function addCardAction(columnId: string, title: string): void { void act("card-add", { columnId, title }); }
+/** Add a card; resolves to the id the server minted, or null if it refused. */
+export async function addCardAction(columnId: string, title: string): Promise<string | null> {
+  const r = await post("card-add", { columnId, title });
+  if (!r.ok) { toastError(r.error ?? "card-add failed"); return null; }
+  return r.cardId ?? null;
+}
 export function renameCardAction(cardId: string, title: string): void { void act("card-update", { cardId, title }); }
 export function setCardDescriptionAction(cardId: string, description: string): void { void act("card-update", { cardId, description }); }
 /** Replace the card's file claim — the paths/globs it is expected to change.
