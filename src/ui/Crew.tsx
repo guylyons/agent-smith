@@ -1,7 +1,8 @@
 import { memo, useEffect, useRef, useState } from "react";
 import type { MouseEvent } from "react";
 import type { AgentStatus } from "../schema";
-import type { Board } from "../lib/board";
+import type { Board, Card } from "../lib/board";
+import { cardTicket } from "../lib/ticket";
 import { Sprite } from "./Sprite";
 import { paletteFor } from "./sprite-data";
 import { focusSession, killAgent } from "./actions";
@@ -101,8 +102,9 @@ function useDyingDesks(agents: AgentStatus[]): { dying: Set<string>; ghosts: { a
 // A fresh snapshot arrives every ~20s with new agent objects; only re-render a
 // card when a field it actually shows changed. `onCard` is the board card this
 // agent is assigned to ("title · column"), computed by Crew so the comparator
-// stays a flat prop check.
-const AgentCard = memo(function AgentCard({ a, onCard, unread, dying, onOpen }: { a: AgentStatus; onCard: string; unread: boolean; dying: boolean; onOpen: (id: string) => void }) {
+// stays a flat prop check. `ticket` is the desk's badge, likewise precomputed
+// (see deskTicket).
+const AgentCard = memo(function AgentCard({ a, onCard, ticket, unread, dying, onOpen }: { a: AgentStatus; onCard: string; ticket: string | null; unread: boolean; dying: boolean; onOpen: (id: string) => void }) {
   const { palette } = paletteFor(a.sessionId, a.role);
   const flashing = useSendFlash(a.sessionId);
   // Killing closes the agent's terminal — irreversible, so the ✕ arms a confirm
@@ -175,7 +177,10 @@ const AgentCard = memo(function AgentCard({ a, onCard, unread, dying, onOpen }: 
         </div>
         {/* only when a ticket exists — the repo line already says where this
             desk is working, so a bare em-dash chip earns nothing */}
-        {a.ticket && <div className="pix ticket" style={{ color: palette.G }}>{a.ticket}</div>}
+        {ticket && (
+          <div className="pix ticket" style={{ color: palette.G }}
+            title={onCard ? "Ticket of the assigned card" : "Ticket from the branch name"}>{ticket}</div>
+        )}
         {/* the board card this agent is assigned to, tying the desk to THE LINE */}
         {onCard && <div className="pix oncard" title={onCard}>▸ {onCard}</div>}
         <div className="doing">{a.doing}</div>
@@ -189,10 +194,10 @@ const AgentCard = memo(function AgentCard({ a, onCard, unread, dying, onOpen }: 
   );
 }, (prev, next) => {
   const x = prev.a, y = next.a;
-  return prev.onOpen === next.onOpen && prev.onCard === next.onCard &&
+  return prev.onOpen === next.onOpen && prev.onCard === next.onCard && prev.ticket === next.ticket &&
     prev.unread === next.unread && prev.dying === next.dying &&
     x.sessionId === y.sessionId && x.name === y.name && x.role === y.role &&
-    x.ticket === y.ticket && x.state === y.state && x.doing === y.doing &&
+    x.state === y.state && x.doing === y.doing &&
     x.waitingReason === y.waitingReason && x.stateSince === y.stateSince &&
     x.cwd === y.cwd && x.branch === y.branch &&
     x.subagents === y.subagents &&
@@ -200,16 +205,32 @@ const AgentCard = memo(function AgentCard({ a, onCard, unread, dying, onOpen }: 
     x.sprite?.body === y.sprite?.body;
 });
 
+/** The board cards assigned to this session — by session id, or by crew id so
+ *  a card follows its agent across a /clear. The label and the badge both read
+ *  the first one, so they always name the same card. */
+function assignedCards(board: Board, sessionId: string, crewId?: string): Card[] {
+  return board.cards.filter((c) => c.assignee && (c.assignee.id === sessionId || (!!crewId && c.assignee.crew === crewId)));
+}
+
 /** "title · column" for the first board card assigned to this session (+N when
  *  it holds more), or "" — precomputed here so the memoized card compares a
  *  string, not the board. */
 export function assignedCardLabel(board: Board, sessionId: string, crewId?: string): string {
-  const mine = board.cards.filter((c) => c.assignee && (c.assignee.id === sessionId || (!!crewId && c.assignee.crew === crewId)));
+  const mine = assignedCards(board, sessionId, crewId);
   if (mine.length === 0) return "";
   const first = mine[0]!;
   const col = board.columns.find((c) => c.id === first.columnId);
   const more = mine.length > 1 ? ` +${mine.length - 1}` : "";
   return `${first.title} · ${col?.name ?? first.columnId}${more}`;
+}
+
+/** The desk's ticket badge. A desk with an assigned card shows that card's
+ *  ticket, so the badge can't disagree with the card title beside it — the
+ *  branch can lag (an agent picks up a new card without switching branches).
+ *  Only a desk with no card falls back to the ticket parsed from its branch. */
+export function deskTicket(board: Board, a: AgentStatus): string | null {
+  const first = assignedCards(board, a.sessionId, a.crew?.id)[0];
+  return first ? cardTicket(first) : a.ticket;
 }
 
 export function Crew({ agents, board, unread, onOpen }: {
@@ -244,6 +265,7 @@ export function Crew({ agents, board, unread, onOpen }: {
           key={a.sessionId}
           a={a}
           onCard={ghost ? "" : assignedCardLabel(board, a.sessionId, a.crew?.id)}
+          ticket={ghost ? a.ticket : deskTicket(board, a)}
           unread={!ghost && unread.has(a.sessionId)}
           dying={ghost || dying.has(a.sessionId)}
           onOpen={onOpen}
