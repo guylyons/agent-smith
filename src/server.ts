@@ -10,7 +10,7 @@ import { readOverrides, applyOverrides, setNameOverride, setSpriteOverride } fro
 import { loadPersonas, applyPersonas } from "./lib/personas";
 import { applyCrew, pickName, mintCrewId, findAssigneeSession, isAssigneeSession, addNote, CREW_ID_RE } from "./lib/crew";
 import { sendTaskReadiness } from "./lib/sendTaskReady";
-import { readBoard, writeBoard, boardFile, addCard, moveCard, moveToWorkColumn, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, addColumn, renameColumn, setInstruction, setColumnStage, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, setCardTouches, setCardRepo, repoName, claimBlockReason, mergeBlockReason, landMergedCard, mergeReleaseNotes, type Board, type Card } from "./lib/board";
+import { readBoard, writeBoard, boardFile, addCard, moveCard, moveToWorkColumn, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, addColumn, renameColumn, setInstruction, setColumnStage, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, setCardTouches, setCardRepo, repoName, claimBlockReason, mergeBlockReason, landMergedCard, mergeReleaseNotes, finishesCard, type Board, type Card } from "./lib/board";
 import { mainCheckout } from "./lib/worktree";
 import { focusSession, interruptSession, killAgent, sendPrompt, sendFreshPrompt, spawnAgent } from "./ghostty";
 import { readRepo } from "./repo";
@@ -427,6 +427,19 @@ export function makeServer(
     return { cwd: st.cwd };
   };
 
+  // A finished card has no more use for its agent: when a card lands in Done
+  // (or past it, on a merge) its assignee's session is ended, the same kill
+  // the desk's ✕ runs. The dashboard sees the move in its next snapshot and
+  // plays the tube death (see finishedAssignees). Best effort — a session
+  // already gone, or a terminal we can't find, just stays as it is.
+  const endFinishedSession = async (before: Board, cardId: string, toColumnId: string): Promise<boolean> => {
+    const card = before.cards.find((k) => k.id === cardId);
+    if (!card?.assignee || !finishesCard(before, card.columnId, toColumnId)) return false;
+    const st = findAssigneeSession(readSnapshot(dir, Date.now()).agents, card.assignee) ?? loadStatus(dir, card.assignee.id);
+    if (!st) return false;
+    try { return (await killAgent(st)).ok; } catch { return false; }
+  };
+
   // ---- POST /action/* handlers ------------------------------------------------
   // One named function per action, wired up in `actionHandlers` below. The
   // CSRF gate and the JSON parse live in dispatchAction (src/lib/actionDispatch.ts),
@@ -649,7 +662,8 @@ export function makeServer(
     // The column id (not display name): unambiguous, and directly
     // reusable by the recipient in a card-move call of its own.
     const delivery = await notifyCardEvent(next, cardId, actor, `[THE LINE] ${actor.name} moved "${title}" to "${to.id}".`, { kind: "move", direction });
-    return json({ ok: true, delivery });
+    const ended = await endFinishedSession(board, cardId, to.id);
+    return json({ ok: true, delivery, ...(ended ? { ended: true } : {}) });
   }
 
   // card-update: edit a card's own text — its title, its description, its
@@ -714,7 +728,8 @@ export function makeServer(
     for (const n of released) next = addComment(next, n.cardId, MERGE_NOTE_AUTHOR, n.text);
     writeBoard(dir, next);
     push();
-    void notifyCardEvent(next, cardId, { ...actor, name: by }, `[THE LINE] ${by} merged "${title}" -- ${note}`, { kind: "move", direction: "forward" });
+    void notifyCardEvent(next, cardId, { ...actor, name: by }, `[THE LINE] ${by} merged "${title}" -- ${note}`, { kind: "move", direction: "forward" })
+      .then(() => { const to = next.cards.find((k) => k.id === cardId)?.columnId; if (to) void endFinishedSession(before, cardId, to); });
     for (const n of released) {
       const t = next.cards.find((k) => k.id === n.cardId)?.title.trim() || "(untitled card)";
       void notifyCardEvent(next, n.cardId, { name: MERGE_NOTE_AUTHOR }, `[THE LINE] ${MERGE_NOTE_AUTHOR} commented on "${t}":\n${n.text}`, { kind: "comment" });

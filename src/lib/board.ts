@@ -542,6 +542,15 @@ function isLandedColumn(board: Board, columnId: string): boolean {
   return board.columns.slice(0, at).some((c) => columnStage(c) === "done");
 }
 
+/** Does moving a card from `fromColumnId` to `toColumnId` finish it? True when
+ *  it lands in Done or a landed column after it (a merge can skip Done) from a
+ *  column before Done. A card already finished, shuffling among those columns,
+ *  is not finished again. Its assignee's session is ended on a finish. */
+export function finishesCard(board: Board, fromColumnId: string, toColumnId: string): boolean {
+  if (!board.columns.some((c) => c.id === toColumnId)) return false;
+  return isLandedColumn(board, toColumnId) && !isLandedColumn(board, fromColumnId);
+}
+
 /** Is this card holding its claim right now? Two things have to be true: it has
  *  been STAFFED (an agent is bound to it, or it sits where work happens or waits
  *  for review), and it has not landed yet (see isLandedColumn).
