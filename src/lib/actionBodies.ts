@@ -215,6 +215,9 @@ export const CardAssignBody = body({
   // null unassigns
   sessionId: sessionId().nullable(),
   force: flag(),
+  // The SessionStart hook binding the card it was spawned for: it never
+  // takes the card from a different agent who is on it and still running.
+  selfAssign: flag(),
 });
 
 export const UploadBody = body({
