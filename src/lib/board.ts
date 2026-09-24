@@ -25,6 +25,12 @@ export type Card = {
   id: string;
   title: string;
   columnId: string;
+  // The card's number, shown as "#42" (added in VERSION 5): the short label
+  // people and agents point at. `id` stays the key every API uses; this is only
+  // a label. Handed out once from the board's counter and never reused, even
+  // after the card is deleted or archived. Absent only on a card from an older
+  // board that numberCards hasn't reached yet.
+  num?: number;
   // Optional detail (added in VERSION 3). Absent on cards that have none, so the
   // on-disk format stays minimal and older boards keep working untouched.
   description?: string;
@@ -57,7 +63,9 @@ export type CardKind = "scrum";
 export type Stage = "todo" | "doing" | "review" | "done";
 export const STAGES: readonly Stage[] = ["todo", "doing", "review", "done"];
 export type Column = { id: string; name: string; instruction: string; stage?: Stage };
-export type Board = { columns: Column[]; cards: Card[] };
+// `nextNum` is the next card number to hand out (see Card.num). Optional so a
+// board written before numbers loads unchanged.
+export type Board = { columns: Column[]; cards: Card[]; nextNum?: number };
 
 // The stock Done column's id. Kept for the default board; anything deciding
 // whether a column is "done" should ask isDoneColumn, which keys off the stage.
@@ -67,7 +75,7 @@ export const DONE_COLUMN_ID = "done";
  *  existed. Only the four ids defaultBoard mints are recognised. */
 const LEGACY_STAGE: Record<string, Stage> = { backlog: "todo", "in-progress": "doing", review: "review", done: "done" };
 
-const VERSION = 4;
+const VERSION = 5;
 
 function genId(prefix: string): string {
   return `${prefix}_${crypto.randomUUID().slice(0, 8)}`;
@@ -140,6 +148,7 @@ export function isDoneColumn(board: Board, columnId: string): boolean {
 
 export function deleteColumn(board: Board, id: string): Board {
   return {
+    ...board,
     columns: board.columns.filter((c) => c.id !== id),
     cards: board.cards.filter((k) => k.columnId !== id),
   };
@@ -154,7 +163,7 @@ export function restoreColumn(board: Board, column: Column, index: number, cards
   const columns = [...board.columns];
   columns.splice(Math.max(0, Math.min(index, columns.length)), 0, column);
   const mine = cards.filter((k) => k.columnId === column.id && !board.cards.some((x) => x.id === k.id));
-  return { columns, cards: [...board.cards, ...mine] };
+  return { ...board, columns, cards: [...board.cards, ...mine] };
 }
 
 export function reorderColumn(board: Board, id: string, toIndex: number): Board {
@@ -169,8 +178,16 @@ export function reorderColumn(board: Board, id: string, toIndex: number): Board 
 
 export function addCard(board: Board, columnId: string, title: string): Board {
   if (!board.columns.some((c) => c.id === columnId)) return board;
-  const card: Card = { id: genId("card"), title, columnId };
-  return { ...board, cards: [...board.cards, card] };
+  const num = nextCardNum(board);
+  const card: Card = { id: genId("card"), num, title, columnId };
+  return { ...board, cards: [...board.cards, card], nextNum: num + 1 };
+}
+
+/** The number the next new card gets: the board's counter, but never one a
+ *  card on the board already holds (a hand-edited file could lag). */
+export function nextCardNum(board: Board): number {
+  const top = Math.max(0, ...board.cards.map((k) => k.num ?? 0));
+  return Math.max(board.nextNum ?? 1, top + 1);
 }
 
 export function renameCard(board: Board, id: string, title: string): Board {
@@ -389,7 +406,7 @@ export function cardTaskFooter(board: Board, id: string, server: string, agentNa
 
   return [
     "-- THE LINE --",
-    `card: ${card.id}`,
+    `card: ${card.id}${card.num ? ` (#${card.num})` : ""}`,
     `columns: ${flow}   (you are in: "${here?.id ?? card.columnId}")`,
     "",
     `You are the assigned agent on this card${who}. This task replaces anything`,
@@ -868,6 +885,7 @@ export function sanitizeCard(v: unknown): Card | null {
   const columnId = str(o.columnId);
   if (id === null || title === null || columnId === null) return null;
   const card: Card = { id, title, columnId };
+  if (Number.isSafeInteger(o.num) && (o.num as number) > 0) card.num = o.num as number;
   const description = str(o.description);
   if (description !== null) card.description = description;
   const assignee = sanitizeAssignee(o.assignee);
@@ -892,7 +910,7 @@ export function sanitizeCard(v: unknown): Card | null {
  *  than crash consumers. Falls back to the default board when unusable. */
 export function sanitizeBoard(input: unknown): Board {
   if (!input || typeof input !== "object" || Array.isArray(input)) return defaultBoard();
-  const raw = input as { columns?: unknown; cards?: unknown };
+  const raw = input as { columns?: unknown; cards?: unknown; nextNum?: unknown };
 
   const columns: Column[] = [];
   const colIds = new Set<string>();
@@ -920,7 +938,9 @@ export function sanitizeBoard(input: unknown): Board {
     }
   }
 
-  return { columns, cards };
+  const board: Board = { columns, cards };
+  if (Number.isSafeInteger(raw.nextNum) && (raw.nextNum as number) > 0) board.nextNum = raw.nextNum as number;
+  return board;
 }
 
 /** Where the board lives inside a status dir. Exported so the server can tell

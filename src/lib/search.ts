@@ -6,6 +6,7 @@
 // rides in the snapshot.
 import type { Snapshot } from "./snapshot";
 import type { Board } from "./board";
+import { cardRef } from "./ticket";
 
 export type SearchKind = "card" | "agent";
 
@@ -132,12 +133,12 @@ export function matchSnippet(query: string, body: string): { snippet: string; ma
 }
 
 /** Concatenate the pieces of a card into one lowercased haystack. */
-function cardHay(board: Board, title: string, description: string, comments: string[], columnName: string): string {
-  return [title, description, columnName, ...comments].join(" ").toLowerCase();
+function cardHay(board: Board, ref: string, title: string, description: string, comments: string[], columnName: string): string {
+  return [ref, title, description, columnName, ...comments].join(" ").toLowerCase();
 }
 
 /** Flatten a live snapshot into searchable items: every board card (matched on
- *  its title, description, comments and column) and every agent desk (matched on
+ *  its id, title, description, comments and column) and every agent desk (matched on
  *  its name, role, ticket, current activity and location). */
 export function buildSearchItems(snap: Snapshot): SearchItem[] {
   const out: SearchItem[] = [];
@@ -151,7 +152,7 @@ export function buildSearchItems(snap: Snapshot): SearchItem[] {
       id: card.id,
       title: card.title,
       subtitle: columnName || undefined,
-      hay: cardHay(snap.board, card.title, card.description ?? "", comments, columnName),
+      hay: cardHay(snap.board, cardRef(card), card.title, card.description ?? "", comments, columnName),
       // The column name is matchable but not worth excerpting — "backlog" as a
       // snippet tells you nothing the subtitle isn't already showing.
       body: flatten([card.description ?? "", ...comments].join(" ")),
