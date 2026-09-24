@@ -27,7 +27,7 @@ import type { z } from "zod";
 import {
   parseBody, SESSION_ID_RE, ColumnRef, CardRef, SessionRef, NoFields, type Signature,
   PickFolderBody, SpawnBody, ColumnAddBody, ColumnUpdateBody, ColumnReorderBody, ColumnRestoreBody,
-  CardRestoreBody, ColumnArchiveBody, CardAddBody, CommentDeleteBody, CardMoveBody, CardUpdateBody, CardMergeBody,
+  CardRestoreBody, ColumnArchiveBody, CardUnarchiveBody, CardAddBody, CommentDeleteBody, CardMoveBody, CardUpdateBody, CardMergeBody,
   CardCommentBody, SendTaskBody, CardAssignBody, UploadBody, CrewNoteBody, RenameBody, SpriteBody, PromptBody,
   MoodNoteAddBody, MoodNoteRestoreBody, MoodNoteRef, MoodNoteUpdateBody, MoodLinkAddBody, MoodLinkRef, MoodLinkUpdateBody,
   MemoryAddBody, MemoryForgetBody, WorktreeCleanupBody,
@@ -698,25 +698,34 @@ export function makeServer(
   // board into .line-archive.json, and put one back (see src/lib/archive.ts).
   // The file gaining the card is written first, so a crash between the two
   // writes leaves a duplicate, never a lost card.
-  function columnArchive(_ctx: Ctx, { olderThanDays }: z.output<typeof ColumnArchiveBody>, board: Board, columnId: string): Response {
+  function columnArchive(_ctx: Ctx, { olderThanDays, cardIds }: z.output<typeof ColumnArchiveBody>, board: Board, columnId: string): Response {
     if (!isLandedColumn(board, columnId)) return json({ ok: false, error: "only a merged column's cards can be archived" }, 400);
     const archive = loadArchiveForWrite(dir);
     if (!archive) return json({ ok: false, error: "the archive file can't be read, so archiving would overwrite it; fix or move .line-archive.json" }, 500);
     const now = Date.now();
-    const ids = archivableIds(board, columnId, now, olderThanDays === undefined ? undefined : olderThanDays * 86_400_000);
-    if (!ids.length) return json({ ok: true, archived: 0 });
+    const only = cardIds && new Set(cardIds);
+    const ids = archivableIds(board, columnId, now, olderThanDays === undefined ? undefined : olderThanDays * 86_400_000)
+      .filter((id) => !only || only.has(id));
+    if (!ids.length) return json({ ok: true, archived: 0, ids });
     const next = archiveCards(board, archive, ids, now);
     writeArchive(dir, next.archive);
     writeBoard(dir, next.board);
     push();
-    return json({ ok: true, archived: ids.length });
+    return json({ ok: true, archived: ids.length, ids });
   }
 
-  function cardUnarchive(_ctx: Ctx, { cardId }: z.output<typeof CardRef>): Response {
+  // cardIds restores a batch in reverse, each to the top, so it lands back in
+  // the order it was archived in.
+  function cardUnarchive(_ctx: Ctx, { cardId, cardIds }: z.output<typeof CardUnarchiveBody>): Response {
     const archive = loadArchiveForWrite(dir);
     if (!archive) return json({ ok: false, error: "the archive file can't be read; fix or move .line-archive.json" }, 500);
-    const next = restoreArchivedCard(readBoard(dir), archive, cardId);
-    if (!next) return json({ ok: false, error: `no archived card: ${cardId}` }, 404);
+    let next: { board: Board; archive: typeof archive } = { board: readBoard(dir), archive };
+    let restored = 0;
+    for (const id of [...(cardIds ?? [cardId])].reverse()) {
+      const r = restoreArchivedCard(next.board, next.archive, id);
+      if (r) { next = r; restored++; }
+    }
+    if (!restored) return json({ ok: false, error: `no archived card: ${cardIds ? cardIds.join(", ") : cardId}` }, 404);
     writeBoard(dir, next.board);
     writeArchive(dir, next.archive);
     push();
@@ -1148,7 +1157,7 @@ export function makeServer(
     "column-restore": withBody(ColumnRestoreBody, columnRestore),
     "card-restore": withBody(CardRestoreBody, cardRestore),
     "column-archive": withColumn(ColumnArchiveBody, columnArchive),
-    "card-unarchive": withBody(CardRef, cardUnarchive),
+    "card-unarchive": withBody(CardUnarchiveBody, cardUnarchive),
     "card-add": withBody(CardAddBody, cardAdd),
     "card-delete": withCard(NoFields, cardDelete),
     "comment-delete": withCard(CommentDeleteBody, commentDelete),

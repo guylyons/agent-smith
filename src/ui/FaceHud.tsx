@@ -36,8 +36,8 @@ function Panel({ value, caption, tone }: { value: string; caption: string; tone?
  * a snapshot actually changes something, and the face is a function of the
  * fleet rather than of the clock.
  */
-export function FaceHud({ agents, board }: { agents: AgentStatus[]; board: Board }) {
-  const { ammo, health, arms, armor, table } = hudStats(agents, board);
+export function FaceHud({ agents, board, archived = 0 }: { agents: AgentStatus[]; board: Board; archived?: number }) {
+  const { ammo, health, arms, armor, table } = hudStats(agents, board, archived);
   const usage = fleetUsage(agents);
 
   const state: FaceState = {
