@@ -20,6 +20,7 @@ import {
   cardMoveTarget,
   setCardDescription,
   assignCard,
+  MAX_REMOVED_CREWS,
   addComment,
   deleteComment,
   cardTaskText,
@@ -31,7 +32,7 @@ import {
   readBoard,
   writeBoard,
   type Board,
-  sanitizeCard, setCardRepo, setCardKind, findScrumCard, scrumBrief,
+  sanitizeCard, setCardRepo, setCardKind, setCardWork, findScrumCard, scrumBrief,
 } from "../src/lib/board";
 
 function tmp(): string {
@@ -857,4 +858,80 @@ test("scrumBrief names the project, or asks for one", () => {
   expect(scrumBrief("shop")).toContain("for **shop**.");
   expect(scrumBrief(undefined)).toContain("(name the project here)");
   expect(scrumBrief("shop")).toContain("backlog");
+});
+
+// card.work: where the card's work lives, recorded when an agent binds to it,
+// so the MERGE key outlives the agent's status file.
+test("setCardWork records a card's folder and branch, and leaves the rest alone", () => {
+  const b = addCard(defaultBoard(), "backlog", "T");
+  const id = b.cards[0]!.id;
+  const next = setCardWork(b, id, { cwd: "/r/wt", branch: "feature", root: "/r" });
+  expect(next.cards[0]!.work).toEqual({ cwd: "/r/wt", branch: "feature", root: "/r" });
+  expect({ ...next.cards[0]!, work: undefined }).toEqual({ ...b.cards[0]!, work: undefined });
+  expect(b.cards[0]!.work).toBeUndefined(); // pure
+});
+
+test("sanitizeCard keeps a valid work record and drops a bad one", () => {
+  const card = { id: "k", title: "S", columnId: "backlog" };
+  expect(sanitizeCard({ ...card, work: { cwd: "/r/wt", branch: "feature", root: "/r" } })?.work).toEqual({ cwd: "/r/wt", branch: "feature", root: "/r" });
+  expect(sanitizeCard({ ...card, work: { cwd: "/r/wt" } })?.work).toEqual({ cwd: "/r/wt" });
+  expect(sanitizeCard({ ...card, work: { branch: "feature" } })).toEqual(card); // no folder, no record
+  expect(sanitizeCard({ ...card, work: { cwd: "", branch: 3 } })).toEqual(card);
+  expect(sanitizeCard({ ...card, work: "nope" })).toEqual(card);
+});
+
+// card.removedCrews: the crews a card was taken off, kept on the card so a
+// server restart still refuses their writes. Written by assignCard itself, so
+// it lands in the same write as the change of hands.
+const A1 = { id: "502d0e8c-8790-4804-b767-0549edfc959c", name: "NOVA", crew: "nova-0001" };
+const A2 = { id: "602d0e8c-8790-4804-b767-0549edfc959c", name: "BISHOP", crew: "bishop-0002" };
+
+test("assignCard records the crew taken off, and drops a crew put back", () => {
+  let b = addCard(defaultBoard(), "backlog", "T");
+  const id = b.cards[0]!.id;
+  b = assignCard(b, id, A1);
+  expect(b.cards[0]!.removedCrews).toBeUndefined(); // nobody taken off yet
+  b = assignCard(b, id, A2);
+  expect(b.cards[0]!.removedCrews).toEqual(["nova-0001"]);
+  b = assignCard(b, id, null);
+  expect(b.cards[0]!.removedCrews).toEqual(["nova-0001", "bishop-0002"]);
+  b = assignCard(b, id, A1);
+  expect(b.cards[0]!.removedCrews).toEqual(["bishop-0002"]);
+  // the same crew under a new session (a /clear) is not a change of hands
+  b = assignCard(b, id, { ...A1, id: "702d0e8c-8790-4804-b767-0549edfc959c" });
+  expect(b.cards[0]!.removedCrews).toEqual(["bishop-0002"]);
+});
+
+test("assignCard leaves removedCrews alone for an assignee with no crew", () => {
+  let b = addCard(defaultBoard(), "backlog", "T");
+  const id = b.cards[0]!.id;
+  b = assignCard(b, id, { id: A1.id, name: "NOVA" });
+  b = assignCard(b, id, null);
+  expect(b.cards[0]!.removedCrews).toBeUndefined();
+});
+
+test("removedCrews keeps only the most recent crews, each once", () => {
+  let b = addCard(defaultBoard(), "backlog", "T");
+  const id = b.cards[0]!.id;
+  for (let i = 0; i < MAX_REMOVED_CREWS + 5; i++) {
+    b = assignCard(b, id, { id: A1.id, name: "X", crew: `crew-${i}` });
+    b = assignCard(b, id, null);
+  }
+  b = assignCard(b, id, { id: A1.id, name: "X", crew: `crew-${MAX_REMOVED_CREWS + 2}` });
+  b = assignCard(b, id, null); // taken off again: moves to the end, not duplicated
+  const list = b.cards[0]!.removedCrews!;
+  expect(list.length).toBe(MAX_REMOVED_CREWS);
+  expect(new Set(list).size).toBe(list.length);
+  expect(list.at(-1)).toBe(`crew-${MAX_REMOVED_CREWS + 2}`);
+  expect(list).not.toContain("crew-0");
+});
+
+test("sanitizeCard keeps valid removed crews and drops bad ones", () => {
+  const card = { id: "k", title: "S", columnId: "backlog" };
+  expect(sanitizeCard({ ...card, removedCrews: ["nova-0001", "bishop-0002"] })?.removedCrews).toEqual(["nova-0001", "bishop-0002"]);
+  expect(sanitizeCard({ ...card, removedCrews: ["nova-0001", 3, "BAD ID", "nova-0001"] })?.removedCrews).toEqual(["nova-0001"]);
+  expect(sanitizeCard({ ...card, removedCrews: [] })).toEqual(card);
+  expect(sanitizeCard({ ...card, removedCrews: "nova-0001" })).toEqual(card);
+  const many = Array.from({ length: MAX_REMOVED_CREWS + 3 }, (_, i) => `crew-${i}`);
+  expect(sanitizeCard({ ...card, removedCrews: many })?.removedCrews).toEqual(many.slice(-MAX_REMOVED_CREWS));
 });

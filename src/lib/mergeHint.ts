@@ -43,6 +43,11 @@ export function mergeHint(board: Board, card: Card, read: MergeRead): MergeHint 
 
   const s = read.state;
   if (s.committed) return null;
+  if (s.worktreeGone && !s.landed) {
+    const text = s.branch ? sentence(s.blocked.charAt(0).toUpperCase() + s.blocked.slice(1))
+      : `This card's worktree was removed. If its work is merged, move it to ${moveTo.name}.`;
+    return { tone: "idle", text, moveTo };
+  }
   if (s.landed) return { tone: "idle", text: `${s.branch} is already in ${s.base}, merged outside the dashboard.`, moveTo };
   return { tone: "idle", text: `Nothing to merge: ${sentence(s.blocked || "no committed work on this branch")}`, moveTo };
 }

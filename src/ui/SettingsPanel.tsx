@@ -127,13 +127,15 @@ function WorktreeSweep() {
 // One place for the display/alert controls. The values live in App (the CRT
 // overlay needs the mode too), so this panel only renders them and reports a
 // patch back — every change applies live, nothing to save.
-export function SettingsPanel({ display, onChange, alertsEnabled, onToggleAlerts, face, onToggleFace, onClose }: {
+export function SettingsPanel({ display, onChange, alertsEnabled, onToggleAlerts, face, onToggleFace, fight, onToggleFight, onClose }: {
   display: Display;
   onChange: (patch: Partial<Display>) => void;
   alertsEnabled: boolean;
   onToggleAlerts: () => void;
   face: boolean;
   onToggleFace: () => void;
+  fight: boolean;
+  onToggleFight: () => void;
   onClose: () => void;
 }) {
   const [uploading, setUploading] = useState(false);
@@ -299,6 +301,12 @@ export function SettingsPanel({ display, onChange, alertsEnabled, onToggleAlerts
           <div className="pix settings-hint">
             How many cards a column shows before it scrolls. NO LIMIT lets the column grow with its stack.
           </div>
+
+          <div className="pix settings-label">THE LINE FIGHT</div>
+          <div className="settings-row">
+            <button className={`deskbtn ${fight ? "on" : ""}`} aria-pressed={fight} onClick={onToggleFight}>🔥 {fight ? "ON" : "OFF"}</button>
+          </div>
+          <div className="pix settings-hint">Ripley and her flamethrower against a xenomorph, in a strip of corridor across the top of THE LINE. A new random round each time. Holds still if your system asks for reduced motion.</div>
 
           <div className="pix settings-label">STATUS BAR</div>
           <div className="settings-row">

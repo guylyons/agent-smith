@@ -103,6 +103,8 @@ export const KEYS = {
   alerts: "aw-alerts",
   lineRows: "aw-line-rows",
   face: "aw-face",
+  // The Ripley-vs-xenomorph strip over THE LINE; ships on (see FightStrip.tsx).
+  fight: "aw-fight",
   drawerWidth: "aw-drawer-w",
   drawerFont: "aw-drawer-font",
   // JSON array of repo folders, most recent first — see recentFolders.ts.

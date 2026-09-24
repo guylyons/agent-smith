@@ -4,7 +4,7 @@ import { fixtureDir } from "./fixtures";
 import { readSnapshot } from "../src/server";
 import { setNameOverride } from "../src/lib/overrides";
 import { markWorktreeOwned } from "../src/lib/worktree";
-import { mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, rmSync, readFileSync, existsSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 
 const dir = fixtureDir("server-test");
@@ -1050,6 +1050,103 @@ test("GET /merge-state explains a card with nowhere to merge from", async () => 
   server.stop(true);
 });
 
+// --- a card remembers where its work lives -----------------------------------
+// The status file goes when the session ends (SessionEnd hook, the scanner's
+// prune), so binding an agent records the card's folder and branch on the card
+// itself, and the MERGE key falls back to that record.
+
+const cardOf = async (base: string, cardId: string) =>
+  ((await (await fetch(`${base}/board`)).json()) as any).board.cards.find((k: any) => k.id === cardId);
+
+test("card-assign records the card's work folder, branch and repo", async () => {
+  const { server, base, post } = await cardApiServer();
+  const cardId = await mergeFixture(post);
+  expect((await cardOf(base, cardId)).work).toEqual({ cwd: join(mergeRepo, "wt"), branch: "feature", root: realpathSync(mergeRepo) });
+  server.stop(true);
+});
+
+test("send-task records the card's work folder and branch too", async () => {
+  const { server, base, post } = await cardApiServer({ deliverFresh: async () => ({ ok: true }) });
+  const cardId = await mergeFixture(post);
+  // Forget the record card-assign made, so only send-task can put it back.
+  const board = JSON.parse(readFileSync(join(dir, ".line.json"), "utf8"));
+  delete board.cards.find((k: any) => k.id === cardId).work;
+  writeFileSync(join(dir, ".line.json"), JSON.stringify(board));
+  writeFileSync(join(dir, `${MERGE_SESSION}.json`), valid({ sessionId: MERGE_SESSION, name: "VOLT", cwd: join(mergeRepo, "wt"), branch: "feature", state: "idle" }));
+  expect(((await (await post("/action/send-task", { cardId })).json()) as any).ok).toBe(true);
+  expect((await cardOf(base, cardId)).work).toEqual({ cwd: join(mergeRepo, "wt"), branch: "feature", root: realpathSync(mergeRepo) });
+  server.stop(true);
+});
+
+test("a spawn bound to its session without hooks records the card's work too", async () => {
+  const { server, base, post } = await cardApiServer({ spawn: async (cwd: string) => ({ ok: true, cwd, worktreeCreated: true }) });
+  await mergeFixture(post); // for its repo and worktree; this card is the other one
+  rmSync(join(dir, `${MERGE_SESSION}.json`));
+  const wt = join(mergeRepo, "wt");
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "Spawned" })).json()) as any;
+  expect((await post("/action/spawn", { cwd: wt, text: "go", cardId })).status).toBe(200);
+  // The new session shows up, as the scanner would write it: no crew, no pid.
+  const SPAWNED = "3e5f7a90-1111-4222-8333-444455556666";
+  writeFileSync(join(dir, `${SPAWNED}.json`), valid({ sessionId: SPAWNED, name: "NEWT", cwd: wt, branch: "feature", state: "idle" }));
+  let card: any;
+  for (let i = 0; i < 40 && !card?.work; i++) {
+    await post("/action/card-comment", { cardId, author: "You", text: "nudge" }); // any write pushes, which settles spawns
+    await Bun.sleep(25);
+    card = await cardOf(base, cardId);
+  }
+  expect(card.assignee?.id).toBe(SPAWNED);
+  expect(card.work).toEqual({ cwd: wt, branch: "feature", root: realpathSync(mergeRepo) });
+  server.stop(true);
+});
+
+test("GET /merge-state still finds the branch once the status file is gone", async () => {
+  const { server, base, post } = await cardApiServer();
+  const cardId = await mergeFixture(post);
+  rmSync(join(dir, `${MERGE_SESSION}.json`));
+  const state = await fetch(`${base}/merge-state?cardId=${cardId}`);
+  expect(state.status).toBe(200);
+  expect(await state.json()).toMatchObject({ branch: "feature", base: "main", ahead: 1, committed: true, ready: true });
+  const p = (await (await fetch(`${base}/merge-preview?cardId=${cardId}`)).json()) as any;
+  expect(p).toMatchObject({ branch: "feature", totalCommits: 1 });
+  server.stop(true);
+});
+
+test("card-merge lands the branch once the status file is gone", async () => {
+  const { server, base, post } = await cardApiServer();
+  const cardId = await mergeFixture(post);
+  rmSync(join(dir, `${MERGE_SESSION}.json`));
+  expect(await (await mergePost(base, { cardId, author: "You" })).json()).toMatchObject({ ok: true, branch: "feature", base: "main" });
+  expect(gitOut(mergeRepo, "show", "main:feature.txt")).toBe("done");
+  server.stop(true);
+});
+
+test("GET /merge-state says plainly when the worktree is gone but its branch is not", async () => {
+  const { server, base, post } = await cardApiServer();
+  const cardId = await mergeFixture(post);
+  rmSync(join(dir, `${MERGE_SESSION}.json`));
+  await git(mergeRepo, "worktree", "remove", "--force", join(mergeRepo, "wt"));
+  const state = await fetch(`${base}/merge-state?cardId=${cardId}`);
+  expect(state.status).toBe(200);
+  expect(await state.json()).toMatchObject({
+    worktreeGone: true, branch: "feature", base: "main", ahead: 1, committed: false,
+    blocked: "this card's worktree was removed, but its branch feature is still in the repo with 1 commit not in main",
+  });
+  server.stop(true);
+});
+
+test("GET /merge-state says plainly when the worktree and its branch are both gone", async () => {
+  const { server, base, post } = await cardApiServer();
+  const cardId = await mergeFixture(post);
+  await git(mergeRepo, "worktree", "remove", "--force", join(mergeRepo, "wt"));
+  await git(mergeRepo, "branch", "-D", "feature");
+  const state = await fetch(`${base}/merge-state?cardId=${cardId}`);
+  expect(state.status).toBe(200);
+  expect(await state.json()).toMatchObject({ worktreeGone: true, branch: "", committed: false, blocked: "this card's worktree was removed" });
+  const p = await fetch(`${base}/merge-preview?cardId=${cardId}`);
+  expect(((await p.json()) as any).error).toBe("this card's worktree was removed");
+  server.stop(true);
+});
+
 test("POST /action/card-merge lands the branch and records it on the card", async () => {
   const { server, base, post } = await cardApiServer();
   const cardId = await mergeFixture(post);
@@ -1583,6 +1680,25 @@ test("an agent put back on a card it was taken off can write again", async () =>
   expect((await post("/action/card-comment", { cardId, author: "RIPLEY", crew: RIPLEY.id, text: "back" })).status).toBe(200);
   // and now BISHOP is the one taken off
   expect((await post("/action/card-comment", { cardId, sessionId: WORKER2, text: "x" })).status).toBe(409);
+  server.stop(true);
+});
+
+// The taken-off list is stored on the card, so a new server instance reading
+// the same board from disk still refuses the removed crew.
+test("after a server restart, a crew taken off the card is still refused", async () => {
+  const first = await reassignSetup();
+  await first.post("/action/card-assign", { cardId: first.cardId, sessionId: WORKER2 });
+  first.server.stop(true);
+  const { makeServer } = await import("../src/server");
+  const server = makeServer(0, { deliver: async () => ({ ok: true }), deliverFresh: async () => ({ ok: true }) });
+  const post = (path: string, body: object) =>
+    fetch(`http://localhost:${server.port}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  for (const sig of [{ as: "assignee", crew: RIPLEY.id }, { author: "RIPLEY", crew: RIPLEY.id }, { sessionId: WORKER }]) {
+    const c = await post("/action/card-comment", { cardId: first.cardId, ...sig, text: "still on it" });
+    expect(c.status).toBe(409);
+    expect(((await c.json()) as any).error).toContain("no longer assigned");
+  }
+  expect((await post("/action/card-comment", { cardId: first.cardId, author: "BISHOP", crew: BISHOP.id, text: "mine" })).status).toBe(200);
   server.stop(true);
 });
 

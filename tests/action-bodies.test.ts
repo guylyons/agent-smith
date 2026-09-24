@@ -163,8 +163,9 @@ test("CardMergeBody / CardCommentBody / SendTaskBody", () => {
 });
 
 test("CardAssignBody: null unassigns, anything else must be a session id", () => {
-  expect(ok(CardAssignBody, { sessionId: null })).toEqual({ sessionId: null, force: false });
-  expect(ok(CardAssignBody, { sessionId: "abc-1", force: true })).toEqual({ sessionId: "abc-1", force: true });
+  expect(ok(CardAssignBody, { sessionId: null })).toEqual({ sessionId: null, force: false, selfAssign: false });
+  expect(ok(CardAssignBody, { sessionId: "abc-1", force: true })).toEqual({ sessionId: "abc-1", force: true, selfAssign: false });
+  expect(ok(CardAssignBody, { sessionId: "abc-1", selfAssign: true }).selfAssign).toBe(true);
   for (const sessionId of [undefined, 5, "../x", ""]) expect(err(CardAssignBody, { sessionId })).toBe("bad sessionId");
 });
 

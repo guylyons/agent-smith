@@ -188,6 +188,9 @@ test("a crew taken off the card can't pin, by card-comment or card-pin", async (
     expect(c.body.error).toContain("no longer assigned");
     const p = await post("/action/card-pin", { cardId, as: "assignee", crew: RIPLEY.id, commentId });
     expect(p.status).toBe(409);
+    // signed by its own session instead: still refused (card.removedCrews)
+    const s = await post("/action/card-pin", { cardId, sessionId: WORKER, commentId });
+    expect(s.status).toBe(409);
     expect(card().pinnedCommentId).toBeUndefined();
   } finally { server.stop(true); }
 });

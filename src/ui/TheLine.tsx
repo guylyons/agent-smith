@@ -16,6 +16,7 @@ import { toast } from "./toast";
 import { onOpenCard, type CardFocus } from "./nav";
 import { CardModal, type SpawnSeed } from "./CardModal";
 import { Sprite } from "./Sprite";
+import { FightStrip } from "./FightStrip";
 import { ArchiveBar } from "./ArchiveBar";
 import { stackMaxHeight } from "./stackCap";
 import { loadRecentFolders, projectFolder } from "./recentFolders";
@@ -54,9 +55,11 @@ type Mutate = (fn: ((b: Board) => Board) | null, send: () => Promise<boolean> | 
 // it against a fresh read and echoes the result back over SSE, so a rename here
 // and an agent's comment there compose instead of overwriting each other.
 export function TheLine({
-  board: incoming, agents, lineRows, onSpawnForCard, archived = 0,
+  board: incoming, agents, lineRows, onSpawnForCard, archived = 0, fight = false,
 }: {
   board: Board; agents: AgentStatus[]; lineRows: number;
+  /** show the Ripley-vs-xenomorph strip across the top (CONFIG > THE LINE FIGHT) */
+  fight?: boolean;
   /** cards in the archive, shown on the Merged column (see ArchiveBar) */
   archived?: number;
   onSpawnForCard: (task: string, cardId: string, seed?: SpawnSeed) => void;
@@ -232,6 +235,7 @@ export function TheLine({
             : "Make a scrum master card (no project folder yet: name it in the card)"}
         >+ SCRUM MASTER</button>
       </div>
+      {fight && <FightStrip />}
       <p className="pix hint">DRAG WORK ACROSS YOUR STAGES · CLICK A CARD TO OPEN IT · EACH STAGE CAN INSTRUCT THE AGENT</p>
       <div className="board">
         {board.columns.map((col, i) => (

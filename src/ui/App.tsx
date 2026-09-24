@@ -12,6 +12,7 @@ import { CommandPalette } from "./CommandPalette";
 import { SettingsPanel } from "./SettingsPanel";
 import { FaceHud } from "./FaceHud";
 import { Toaster } from "./Toaster";
+import { UpdateNotice } from "./UpdateNotice";
 import { Dictation } from "./Dictation";
 import { Notifier } from "./Notifier";
 import { MoodBoard } from "./MoodBoard";
@@ -66,6 +67,8 @@ export function App() {
   // The status face ships on; the toggle is an opt-OUT, so it can't default to
   // false the way an unset alerts key does.
   const [faceEnabled, setFaceEnabled] = useState(true);
+  // The fight strip over THE LINE: on unless switched off, like the face.
+  const [fightEnabled, setFightEnabled] = useState(true);
   // Just the folders live agents are running in; the New Agent dialog merges
   // these with its own remembered history (see recentFolders.ts).
   const liveFolders = [...new Set(snap.agents.map((a) => a.cwd).filter(Boolean))];
@@ -76,12 +79,18 @@ export function App() {
     setDisplay(readDisplay());
     setAlertsEnabled(loadBool(KEYS.alerts));
     setFaceEnabled(loadBoolDefaultOn(KEYS.face));
+    setFightEnabled(loadBoolDefaultOn(KEYS.fight));
   }, []);
 
   function toggleFace() {
     const next = !faceEnabled;
     setFaceEnabled(next);
     saveSetting(KEYS.face, next ? "1" : "0");
+  }
+  function toggleFight() {
+    const next = !fightEnabled;
+    setFightEnabled(next);
+    saveSetting(KEYS.fight, next ? "1" : "0");
   }
 
   const changeDisplay = useCallback((patch: Partial<Display>) => {
@@ -174,7 +183,7 @@ export function App() {
       ) : (
         <>
           <Crew agents={snap.agents} board={snap.board} unread={unread} onOpen={openAgent} />
-          <TheLine board={snap.board} agents={snap.agents} archived={snap.archived} lineRows={display.lineRows} onSpawnForCard={(task, cardId, seed) => setSpawnSeed({ task, cardId, ...seed })} />
+          <TheLine board={snap.board} agents={snap.agents} archived={snap.archived} lineRows={display.lineRows} fight={fightEnabled} onSpawnForCard={(task, cardId, seed) => setSpawnSeed({ task, cardId, ...seed })} />
         </>
       )}
       {selected && selected.sessionId === selectedId && (
@@ -199,11 +208,14 @@ export function App() {
           onToggleAlerts={toggleAlerts}
           face={faceEnabled}
           onToggleFace={toggleFace}
+          fight={fightEnabled}
+          onToggleFight={toggleFight}
           onClose={() => setSettingsOpen(false)}
         />
       )}
       {faceEnabled && <FaceHud agents={snap.agents} board={snap.board} archived={snap.archived} />}
       <Toaster />
+      <UpdateNotice ui={snap.ui} />
       <Dictation />
       <Notifier snap={snap} enabled={alertsEnabled} />
     </>

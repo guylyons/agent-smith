@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync, watch } from "node:fs"
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { parseStatus, type AgentStatus } from "./schema";
-import { buildSnapshot, snapshotEvent, type Snapshot, type Sent } from "./lib/snapshot";
+import { buildSnapshot, snapshotEvent, type Snapshot, type Sent, type UiState } from "./lib/snapshot";
 import { archivableIds, archiveCards, restoreArchivedCard, visibleArchive, readArchive, loadArchiveForWrite, writeArchive, numberCards } from "./lib/archive";
 import { record, forget, compactMemory, memoryView, searchMemory, neighbours, formatResults, readMemory, loadMemoryForWrite, writeMemory, MAX_FACTS, type FactKind } from "./lib/memory";
 import { ensureStatusDir, statusDir } from "./lib/paths";
@@ -14,17 +14,18 @@ import { readOverrides, applyOverrides, setNameOverride, setSpriteOverride } fro
 import { loadPersonas, applyPersonas, spawnName } from "./lib/personas";
 import { applyCrew, applyBoundCrews, readBoundCrews, recordBoundCrew, mintCrewId, findAssigneeSession, isAssigneeSession, isActorSession, scrumHears, addNote, CREW_ID_RE } from "./lib/crew";
 import { sendTaskReadiness } from "./lib/sendTaskReady";
-import { readBoard, writeBoard, boardFile, addCard, moveCard, moveToWorkColumn, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, cardTaskFooter, addColumn, renameColumn, setInstruction, setColumnStage, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, pinComment, setCardTouches, setCardRepo, setCardKind, findScrumCard, cardView, scrumBrief, repoName, claimBlockReason, mergeBlockReason, landMergedCard, mergeReleaseNotes, finishesCard, isLandedColumn, type Board, type Card } from "./lib/board";
+import { readBoard, writeBoard, boardFile, addCard, moveCard, moveToWorkColumn, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, cardTaskFooter, addColumn, renameColumn, setInstruction, setColumnStage, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, pinComment, setCardTouches, setCardRepo, setCardKind, findScrumCard, cardView, scrumBrief, repoName, claimBlockReason, mergeBlockReason, landMergedCard, mergeReleaseNotes, finishesCard, isLandedColumn, setCardWork, type Board, type Card } from "./lib/board";
 import { readMood, writeMood, moodFile, formatMood, addNote as addMoodNote, updateNote, raiseNote, deleteNote, restoreNote, addLink, linkBlockReason, setLinkLabel, deleteLink, type Mood, type MoodLink, type NotePatch } from "./lib/mood";
 import { mainCheckout } from "./lib/worktree";
 import { focusSession, interruptSession, killAgent, sendPrompt, sendFreshPrompt, spawnAgent } from "./ghostty";
 import { readRepo } from "./repo";
-import { readMergeState, readMergePreview, mergeWork, holdForClaims, cleanupMergedWork, planWorktreeCleanup, cleanupMergedWorktrees } from "./lib/merge";
+import { readMergeState, readMergePreview, readWork, readGoneWorktreeState, mergeWork, holdForClaims, cleanupMergedWork, planWorktreeCleanup, cleanupMergedWorktrees } from "./lib/merge";
 import { saveUpload, resolveUploadPath } from "./lib/uploads";
 import { chooseFolder } from "./lib/chooser";
 import { initialIdle, onConnect, onDisconnect, shouldShutDown, type IdleState } from "./lib/idle";
 import { matchPendingSpawns, sessionsNeedingOpeningPrompt, type PendingSpawn } from "./lib/spawnAssign";
 import { dispatchAction, type ActionContext, type ActionHandler } from "./lib/actionDispatch";
+import { rebuildAfterMerge, uiVersion, bunBuild, type Builder } from "./lib/uiBuild";
 import type { z } from "zod";
 import {
   parseBody, SESSION_ID_RE, ColumnRef, CardRef, SessionRef, NoFields, type Signature,
@@ -173,12 +174,15 @@ export function makeServer(
     heartbeatMs?: number;
     /** Where the built UI lives. Injectable so tests needn't build it. */
     distDir?: string;
+    /** How the UI is rebuilt after a MERGE lands a UI change (see
+     *  lib/uiBuild). Injectable so tests needn't run bun build. */
+    buildUi?: Builder;
   } = {},
 ) {
   const {
     scan = false, scanIntervalMs = SCAN_INTERVAL_MS, deliver = sendPrompt, deliverFresh = sendFreshPrompt, spawn = spawnAgent, quit = killAgent,
     onWindowsClosed, idleGraceMs = 5_000, idleStartupGraceMs = 30_000, idleCheckMs = 1_000,
-    heartbeatMs = 5_000, distDir = join(import.meta.dir, "..", "dist"),
+    heartbeatMs = 5_000, distDir = join(import.meta.dir, "..", "dist"), buildUi = bunBuild,
   } = opts;
   const dir = ensureStatusDir();
 
@@ -215,10 +219,14 @@ export function makeServer(
   };
   /** The live view plus each session's queued count, so the human can see a
    *  note is waiting to land rather than wondering whether it was heard. */
+  // The build being served, for dashboards to notice when it changes under
+  // them (see rebuildUiAfterMerge). Read once here; only a rebuild moves it.
+  let ui: UiState = { version: uiVersion(distDir) };
   const snapshot = (): Snapshot => {
     const snap = readSnapshot(dir, Date.now());
     return {
       ...snap,
+      ui,
       agents: snap.agents.map((a) => {
         const n = inbox.get(a.sessionId)?.length ?? 0;
         return n ? { ...a, inbox: n } : a;
@@ -257,16 +265,6 @@ export function makeServer(
   type Unsignable = { error: string; status: number };
   const NO_LONGER_ASSIGNED = "you are no longer assigned to this card; stop work on it";
 
-  /** The crews each card was taken off (by card-assign, or a spawn binding
-   *  someone else), so their later writes can be refused however they sign.
-   *  In memory, like the inbox: a restart forgets it, and a taken-off agent
-   *  still has the stop notice and the "as" check against the assignee. */
-  const takenOff = new Map<string, Set<string>>();
-  const noteTakenOff = (cardId: string, was: Card["assignee"], to: Card["assignee"]) => {
-    if (!was?.crew || was.crew === to?.crew) return;
-    takenOff.set(cardId, (takenOff.get(cardId) ?? new Set()).add(was.crew));
-  };
-
   /** A signature read off a card write, before anyone asks it for anything in
    *  particular. Every write path — move, comment, merge, crew-note — takes the
    *  same four conventions, tried in this order:
@@ -301,11 +299,11 @@ export function makeServer(
    *  human (no crew), the scrum master and any crew never taken off this card
    *  sign as before. */
   function takenOffWriter(body: Signature, k: Card): Unsignable | undefined {
-    const gone = takenOff.get(k.id);
-    if (!gone?.size) return;
+    const gone = k.removedCrews;
+    if (!gone?.length) return;
     const crew = body.crew && CREW_ID_RE.test(body.crew) ? body.crew
       : body.sessionId && validSessionId(body.sessionId) ? resolveAssignee(dir, body.sessionId)?.crew : undefined;
-    if (!crew || !gone.has(crew)) return;
+    if (!crew || !gone.includes(crew)) return;
     const live = k.assignee ? findAssigneeSession(readSnapshot(dir, Date.now()).agents, k.assignee) : undefined;
     if (crew === currentCrew(k, live)) return;
     return { error: NO_LONGER_ASSIGNED, status: 409 };
@@ -449,6 +447,7 @@ export function makeServer(
       const { matches, keep } = matchPendingSpawns(pendingSpawns, agents, Date.now(), opening);
       pendingSpawns = keep;
       let wrote = false;
+      const bound: { cardId: string; who: NonNullable<Card["assignee"]>; cwd: string }[] = [];
       for (const { spawn: p, sessionId } of matches) {
         const board = readBoard(dir);
         const card = board.cards.find((k) => k.id === p.cardId);
@@ -466,10 +465,11 @@ export function makeServer(
         const who = resolveAssignee(dir, sessionId);
         if (!who) continue;
         writeBoard(dir, assignCard(board, p.cardId, who));
-        noteTakenOff(p.cardId, card.assignee, who);
+        bound.push({ cardId: p.cardId, who, cwd: matched?.cwd || p.cwd });
         wrote = true;
       }
       if (wrote) push();
+      for (const b of bound) await recordWork(b.cardId, b.who, b.cwd);
     } finally {
       settling = false;
     }
@@ -525,15 +525,35 @@ export function makeServer(
   // Read from the session's own status FILE rather than the live snapshot,
   // so a card whose agent has finished and gone still knows which branch
   // holds its work — which is exactly when you want to merge it.
-  const cardWorkDir = (cardId: string): { cwd: string } | { error: string; status: number } => {
+  // Once that file is gone too (the session ended, and SessionEnd or the
+  // scanner deleted it), the card's own record of where its work lives
+  // (card.work, written when the agent bound to it) answers instead.
+  const cardWorkDir = (cardId: string): { cwd: string; branch?: string; root?: string } | { error: string; status: number } => {
     const card = readBoard(dir).cards.find((k) => k.id === cardId);
     if (!card) return { error: `unknown card: ${cardId}`, status: 404 };
     if (!card.assignee) return { error: "card has no assignee, so there's no branch to merge", status: 400 };
     // The crew member's current session first (its id moved on with a
     // /clear), then the session the card was bound to.
     const st = findAssigneeSession(readSnapshot(dir, Date.now()).agents, card.assignee) ?? loadStatus(dir, card.assignee.id);
-    if (!st?.cwd) return { error: `no working directory known for ${card.assignee.name}`, status: 404 };
-    return { cwd: st.cwd };
+    const work = card.work;
+    if (st?.cwd && st.cwd !== work?.cwd) return { cwd: st.cwd, branch: st.branch || undefined, root: card.repoPath };
+    if (work) return work;
+    return { error: `no working directory known for ${card.assignee.name}`, status: 404 };
+  };
+
+  // Record where a card's work lives (see Card.work) once an agent is bound to
+  // it. Only while that agent is still the assignee (by crew, so a /clear's new
+  // session id still counts): the git calls yield, and the card may have
+  // changed hands meanwhile. Best effort, like the rest of the bookkeeping.
+  const recordWork = async (cardId: string, who: NonNullable<Card["assignee"]>, cwd: string): Promise<void> => {
+    const work = await readWork(cwd);
+    const board = readBoard(dir); // re-read: the git calls above yielded
+    const card = board.cards.find((k) => k.id === cardId);
+    const a = card?.assignee;
+    if (!a || !(a.crew && who.crew ? a.crew === who.crew : a.id === who.id)) return;
+    if (JSON.stringify(card.work) === JSON.stringify(work)) return;
+    writeBoard(dir, setCardWork(board, cardId, work));
+    push();
   };
 
   // A finished card has no more use for its agent: when a card is moved into
@@ -925,7 +945,31 @@ export function makeServer(
       writeBoard(dir, addComment(readBoard(dir), cardId, MERGE_NOTE_AUTHOR, tidy));
       push();
     }
+    // A change the UI is built from landed in the checkout we serve: rebuild dist/ in the
+    // background, so the merge answers now and the dashboards hear after.
+    void rebuildUiAfterMerge(cardId, r.commit ?? "");
     return json({ ...r, cleanup, ...(quitResult ? { quit: quitResult } : {}) });
+  }
+
+  // After a MERGE: rebuild the UI when the merge changed src/ (or the deps) in the
+  // checkout dist/ is served from (lib/uiBuild decides and builds). A good
+  // build bumps `ui.version`, which open dashboards see as "new version,
+  // reload"; a failed one keeps the old dist and sets `ui.failed` for a toast.
+  // Either way the card says what happened. Never throws.
+  async function rebuildUiAfterMerge(cardId: string, commit: string): Promise<void> {
+    const r = await rebuildAfterMerge(distDir, commit, buildUi).catch((e) => ({ ran: true as const, ok: false, error: String(e) }));
+    if (!r.ran) return;
+    let note: string;
+    if (r.ok) {
+      ui = { version: uiVersion(distDir) };
+      note = "Rebuilt the dashboard UI. Open dashboards will offer a reload.";
+    } else {
+      const error = r.error || "unknown error";
+      ui = { ...ui, failed: { at: Date.now(), error } };
+      note = `UI build failed, so the dashboard still serves the old build: ${error}`;
+    }
+    writeBoard(dir, addComment(readBoard(dir), cardId, MERGE_NOTE_AUTHOR, note));
+    push();
   }
 
   // worktree-cleanup (CONFIG): worktrees merged by hand never went through
@@ -1023,6 +1067,7 @@ export function makeServer(
     // write (moveToWorkColumn is a no-op if it already landed in-progress).
     writeBoard(dir, addComment(moveToWorkColumn(readBoard(dir), cardId), cardId, by, `Sent task to ${agent.name}.`));
     push();
+    if (card.assignee && agent.cwd) await recordWork(cardId, card.assignee, agent.cwd);
     return json({ ok: true });
   }
 
@@ -1034,7 +1079,6 @@ export function makeServer(
       pendingSpawns = pendingSpawns.filter((p) => p.cardId !== cardId);
       const next = assignCard(board, cardId, null);
       writeBoard(dir, next);
-      noteTakenOff(cardId, card.assignee, null);
       push();
       const delivery = await notifyTakenOff(next, card, null, title);
       return json({ ok: true, delivery });
@@ -1048,11 +1092,20 @@ export function makeServer(
     }
     const resolved = resolveAssignee(dir, body.sessionId);
     if (!resolved) return json({ ok: false, error: "no session with that id" }, 404);
+    // A hook's self-assign leaves a card alone that the human has since
+    // handed to someone else who is still running (#109). Same crew is the
+    // same agent, as in notifyTakenOff.
+    const was = card.assignee;
+    if (body.selfAssign && was && !(was.crew && resolved.crew ? was.crew === resolved.crew : was.id === resolved.id)
+        && findAssigneeSession(readSnapshot(dir, Date.now()).agents, was)) {
+      return json({ ok: false, error: `card already has a live assignee (${was.name})` }, 409);
+    }
     pendingSpawns = pendingSpawns.filter((p) => p.cardId !== cardId);
     const next = assignCard(board, cardId, resolved);
     writeBoard(dir, next);
-    noteTakenOff(cardId, card.assignee, resolved);
     push();
+    const cwd = loadStatus(dir, body.sessionId)?.cwd;
+    if (cwd) await recordWork(cardId, resolved, cwd);
     const delivery = await notifyTakenOff(next, card, resolved, title);
     return json({ ok: true, delivery });
   }
@@ -1421,6 +1474,9 @@ export function makeServer(
         if (card && !existsSync(where.cwd) && isLandedColumn(board, card.columnId)) {
           return json(holdForClaims({ ...(await readMergeState("")), blocked: "already merged" }, board, cardId));
         }
+        // Gone before it landed (CLEAN UP, or removed by hand): say that, and
+        // whether the branch it was on is still in the repo.
+        if (!existsSync(where.cwd)) return json(holdForClaims(await readGoneWorktreeState(where.root, where.branch), board, cardId));
         const state = await readMergeState(where.cwd);
         return json(holdForClaims(state, board, cardId));
       }
@@ -1430,6 +1486,7 @@ export function makeServer(
       if (url.pathname === "/merge-preview") {
         const where = cardWorkDir(url.searchParams.get("cardId") ?? "");
         if ("error" in where) return json({ error: where.error }, where.status);
+        if (!existsSync(where.cwd)) return json({ error: "this card's worktree was removed" });
         return json(await readMergePreview(where.cwd));
       }
 
