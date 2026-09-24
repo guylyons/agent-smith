@@ -155,6 +155,11 @@ export function pinCommentAction(cardId: string, commentId: string, pin: boolean
   return act("card-pin", { cardId, commentId, pin, author: ME });
 }
 
+/** Take the WAITING ON YOU flag off a card without replying. */
+export function clearAskAction(cardId: string): Promise<boolean> {
+  return act("card-ask-clear", { cardId, author: ME });
+}
+
 /** The human's byline on comments and moves they make. Agents append with their
  *  own persona name, so a thread reads clearly as a human<->agent exchange. */
 export const ME = "You";

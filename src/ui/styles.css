@@ -1687,6 +1687,25 @@ body{background:transparent}
    word beside the pin so it is not colour or glyph alone. */
 .card-flag.card-flag-pin{color:var(--gold);font-size:12px;letter-spacing:.5px}
 
+/* WAITING ON YOU (card.ask): an agent asked the human a real question. A solid
+   gold fill with dark text, so it outshines every outlined flag near it; the
+   words carry it without the colour. Same chip on the card, the desk, and the
+   header's count, which is a real button (it opens the oldest). */
+.card-flag.card-flag-ask,.desk-ask,.waiting-hud,.ask-tag{
+  background:var(--gold);color:var(--on-accent);font-weight:700;
+  font-size:12px;letter-spacing:.5px;padding:1px 5px;border-radius:var(--radius-sm);
+  white-space:nowrap;
+}
+.desk-ask{display:inline-block;margin-top:9px}
+.waiting-hud{border:2px solid var(--bone);cursor:pointer;font-size:14px;padding:3px 8px;
+  font-family:inherit;box-shadow:0 2px 0 rgba(0,0,0,.5)}
+.waiting-hud:hover{background:var(--bone)}
+.waiting-hud:focus-visible{outline:3px solid var(--bone);outline-offset:2px}
+.cardmodal-ask{background:color-mix(in srgb,var(--gold) 14%,var(--box-lo));border:2px solid var(--gold);
+  padding:8px 10px;display:flex;flex-direction:column;gap:5px;min-width:0}
+.cardmodal-ask .comment-meta{align-items:center}
+.ask-text{max-height:9.6em;overflow-y:auto;white-space:pre-wrap}
+
 /* ---- tube death: STOP takes the agent's window out like a CRT ---------------
    Ending a session used to blink its window out between one frame and the next
    — the most destructive button on screen with the least to show for it. Now it

@@ -2,6 +2,7 @@ import type { Snapshot } from "../lib/snapshot";
 import type { AgentStatus } from "../schema";
 import { UsageMeter } from "./UsageMeter";
 import { NotificationCenter } from "./NotificationCenter";
+import { WaitingOnYou } from "./WaitingOnYou";
 import type { AppView } from "./view";
 
 function projectName(cwd: string): string {
@@ -55,6 +56,7 @@ export function Header({ snap, live, view, onView, onNewAgent, onFind, onSetting
           <span className="caret"></span>
         </div>
         <div className="pix statline">
+          <WaitingOnYou board={board} />
           <span><b>{idle}</b> IDLE</span>
           <span title={`${board.cards.length} on the board, ${archived} archived`}><b>{tasks}</b> TASKS</span>
           {/* The pages: the desks + THE LINE, the big-picture MOOD board, or the GAME map. */}

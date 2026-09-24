@@ -71,7 +71,14 @@ export type Card = {
   // description. Absent when nothing is pinned; dropped on load when it names a
   // comment the card no longer has.
   pinnedCommentId?: string;
+  // An open question for the human: the agent comment that asked it (sent
+  // with "ask":true), who asked and when. The board flags the card WAITING ON
+  // YOU until the human comments on it or clears it by hand. Absent when
+  // nothing is asked; dropped on load when it names a comment the card no
+  // longer has.
+  ask?: CardAsk;
 };
+export type CardAsk = { commentId: string; by: string; at: number };
 export type CardKind = "scrum";
 export type CardWork = { cwd: string; branch?: string; root?: string };
 /** What a column MEANS to the protocol, independent of where it sits. `todo`
@@ -356,6 +363,7 @@ export function deleteComment(board: Board, id: string, commentId: string): Boar
   return mapCard(board, id, (k) => {
     const next = { ...k, comments: (k.comments ?? []).filter((m) => m.id !== commentId) };
     if (next.pinnedCommentId === commentId) delete next.pinnedCommentId;
+    if (next.ask?.commentId === commentId) delete next.ask;
     return next;
   });
 }
@@ -371,6 +379,26 @@ export function pinComment(board: Board, id: string, commentId: string | null): 
     }
     return (k.comments ?? []).some((m) => m.id === commentId) ? { ...k, pinnedCommentId: commentId } : k;
   });
+}
+
+/** Flag one of the card's comments as an open question for the human,
+ *  replacing any earlier one, or clear the flag with `null`. A comment the
+ *  card doesn't have is a no-op. */
+export function setAsk(board: Board, id: string, commentId: string | null): Board {
+  return mapCard(board, id, (k) => {
+    if (commentId === null) {
+      const { ask: _old, ...rest } = k;
+      return rest;
+    }
+    const m = (k.comments ?? []).find((c) => c.id === commentId);
+    return m ? { ...k, ask: { commentId: m.id, by: m.author, at: m.at } } : k;
+  });
+}
+
+/** The cards waiting on the human, oldest question first — the order the
+ *  HUD's count jumps through. */
+export function waitingOnYou<K extends Pick<Card, "ask">>(cards: K[]): (K & { ask: CardAsk })[] {
+  return cards.filter((k): k is K & { ask: CardAsk } => !!k.ask).sort((a, b) => a.ask.at - b.ask.at);
 }
 
 /** The card's pinned comment, if it has one. */
@@ -493,6 +521,8 @@ export function cardTaskFooter(board: Board, id: string, server: string, agentNa
     "post it as a card-comment (same shape as above). Keep comments plain and",
     "short -- write like a quick note to a busy teammate, no jargon or filler,",
     "unless this card asks for more detail.",
+    'Only for a decision the human alone can make (not progress, not a permission',
+    'prompt), add "ask":true to that comment: the card shows WAITING ON YOU until they reply.',
     "STEP 3, when the work is done: post a final card-comment saying what you did",
     'and how you verified it, with "pin":true so it is pinned to the top of the',
     "card as the handoff note the reviewer reads first:",
@@ -913,6 +943,15 @@ function sanitizeWork(v: unknown): CardWork | null {
 
 /** Repair a card's taken-off crews: valid crew ids only, each once (its last
  *  place wins), capped to the most recent MAX_REMOVED_CREWS. */
+function sanitizeAsk(v: unknown, comments: Comment[]): CardAsk | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  const commentId = str(o.commentId);
+  const by = str(o.by);
+  if (!commentId || by === null || !Number.isFinite(o.at)) return null;
+  return comments.some((m) => m.id === commentId) ? { commentId, by, at: o.at as number } : null;
+}
+
 function sanitizeRemovedCrews(v: unknown): string[] {
   if (!Array.isArray(v)) return [];
   const crews = v.filter((c): c is string => typeof c === "string" && CREW_ID.test(c));
@@ -991,6 +1030,8 @@ export function sanitizeCard(v: unknown): Card | null {
   if (removedCrews.length) card.removedCrews = removedCrews;
   const pinned = str(o.pinnedCommentId);
   if (pinned && comments.some((m) => m.id === pinned)) card.pinnedCommentId = pinned;
+  const ask = sanitizeAsk(o.ask, comments);
+  if (ask) card.ask = ask;
   return card;
 }
 

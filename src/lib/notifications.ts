@@ -2,7 +2,7 @@ import type { Board } from "./board";
 import type { AgentStatus } from "../schema";
 
 /** What a notification is about. */
-export type NotifKind = "comment" | "needs-you" | "move";
+export type NotifKind = "comment" | "needs-you" | "move" | "ask";
 
 /** One thing worth telling the human about, derived from a change between two
  *  snapshots. `id` is stable for the underlying event so read-state survives
@@ -23,9 +23,11 @@ type Snap = { agents: AgentStatus[]; board: Board };
 
 /**
  * Diff two consecutive snapshots into notifications for the human. Emits for
- * three things:
+ * four things:
  *
  *  - a new comment an agent posted on any card (never the human's own),
+ *  - a card newly waiting on the human (an agent's comment with "ask":true),
+ *    which stands in for that comment's own notice,
  *  - an agent entering the waiting state (it needs an answer),
  *  - a card moving forward a column (work advanced, e.g. into Review/Done).
  *
@@ -38,12 +40,31 @@ export function diffNotifications(prev: Snap | null, curr: Snap, me: string, now
   if (!prev) return [];
   const out: Notif[] = [];
 
+  // --- cards newly waiting on the human --------------------------------------
+  const prevAsks = new Set(prev.board.cards.flatMap((c) => (c.ask ? [c.ask.commentId] : [])));
+  const asked = new Set<string>();
+  for (const card of curr.board.cards) {
+    if (!card.ask || prevAsks.has(card.ask.commentId)) continue;
+    const m = card.comments?.find((c) => c.id === card.ask!.commentId);
+    asked.add(card.ask.commentId);
+    out.push({
+      id: `ask:${card.ask.commentId}`,
+      kind: "ask",
+      at: card.ask.at,
+      who: card.ask.by,
+      text: `WAITING ON YOU: ${m?.text ?? ""}`,
+      cardId: card.id,
+      cardTitle: card.title,
+      commentId: card.ask.commentId,
+    });
+  }
+
   // --- new agent comments ---------------------------------------------------
   const seen = new Set<string>();
   for (const c of prev.board.cards) for (const m of c.comments ?? []) seen.add(m.id);
   for (const card of curr.board.cards) {
     for (const m of card.comments ?? []) {
-      if (seen.has(m.id) || m.author === me) continue;
+      if (seen.has(m.id) || asked.has(m.id) || m.author === me) continue;
       out.push({
         id: `comment:${m.id}`,
         kind: "comment",

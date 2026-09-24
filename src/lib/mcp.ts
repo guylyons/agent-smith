@@ -322,15 +322,18 @@ export const TOOLS: Tool[] = [
         text: { type: "string", description: "The comment body." },
         author: { type: "string", description: "Who is writing. Leave it out: the board signs it as you." },
         pin: { type: "boolean", description: "Pin this comment to the top of the card as its handoff note, replacing any earlier pin. Send it on your final comment before moving the card to review." },
+        ask: { type: "boolean", description: "Flag the card WAITING ON YOU with this comment as the question. Only for a decision the human alone can make, not progress or a permission prompt. Clears when the human replies on the card." },
       },
       required: ["cardId", "text"],
     },
     async run(args, ctx) {
       const cardId = str(args, "cardId");
       const pin = args.pin === true;
-      const body = { cardId, text: str(args, "text"), ...(pin ? { pin } : {}), ...(await signatureFor(ctx, cardId, optionalStr(args, "author"))) };
+      const ask = args.ask === true;
+      const body = { cardId, text: str(args, "text"), ...(pin ? { pin } : {}), ...(ask ? { ask } : {}), ...(await signatureFor(ctx, cardId, optionalStr(args, "author"))) };
       await request(ctx, "POST", "/action/card-comment", body);
-      return pin ? `Commented on ${body.cardId} and pinned it.` : `Commented on ${body.cardId}.`;
+      const also = [pin && "pinned it", ask && "flagged it waiting on the user"].filter(Boolean).join(" and ");
+      return also ? `Commented on ${body.cardId} and ${also}.` : `Commented on ${body.cardId}.`;
     },
   },
   {
