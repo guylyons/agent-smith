@@ -14,17 +14,20 @@ import { KEYS, loadSetting, saveSetting } from "./settings";
  *  between, few enough that the row doesn't wrap into a wall. */
 export const MAX_RECENT = 8;
 
-/** Most-recent-first, `folder` moved (not duplicated) to the front, capped. */
+/** Most-recent-first, `folder` moved (not duplicated) to the front, capped.
+ *  A worktree launch is remembered as its repo: the worktree is another
+ *  agent's branch and goes away when that agent's work lands. */
 export function pushRecent(list: string[], folder: string, max = MAX_RECENT): string[] {
-  const f = folder.trim();
+  const f = worktreeRoot(folder.trim());
   if (!f) return list.slice(0, max);
   return [f, ...list.filter((p) => p !== f)].slice(0, max);
 }
 
 /** Remembered folders first (that's the history the user built), then whatever
- *  live agents are running in, de-duped and capped. */
+ *  live agents are running in, each as its repo root (an agent in a worktree
+ *  would otherwise add a chip per worktree), de-duped and capped. */
 export function mergeRecent(stored: string[], live: string[], max = MAX_RECENT): string[] {
-  return [...new Set([...stored, ...live])].filter(Boolean).slice(0, max);
+  return [...new Set([...stored, ...live].map(worktreeRoot))].filter(Boolean).slice(0, max);
 }
 
 /** Coerce whatever came back out of storage into a clean string list — a hand
@@ -34,7 +37,9 @@ export function parseRecent(raw: string): string[] {
   try {
     const v: unknown = JSON.parse(raw);
     if (!Array.isArray(v)) return [];
-    return v.filter((p): p is string => typeof p === "string" && !!p.trim()).slice(0, MAX_RECENT);
+    // Older builds saved agents' worktree folders; show those as their repo.
+    const paths = v.filter((p): p is string => typeof p === "string" && !!p.trim()).map(worktreeRoot);
+    return [...new Set(paths)].filter(Boolean).slice(0, MAX_RECENT);
   } catch {
     return [];
   }
