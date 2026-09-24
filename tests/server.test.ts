@@ -1354,3 +1354,91 @@ test("/events sends a keep-alive comment while the board is quiet", async () => 
   expect(seen).toContain(": ping\n\n");
   server.stop(true);
 });
+
+// ---- reassigning a card ------------------------------------------------------
+// card-assign used to tell nobody. The agent taken off a card kept working it,
+// and its footer's `as: "assignee"` then signed its writes with the NEW
+// assignee's name. Now the old assignee is told to stop, and a write that
+// carries the caller's crew id is refused when that crew is no longer on it.
+
+const BISHOP = { id: "bishop-9c1d", name: "BISHOP" };
+
+async function reassignSetup() {
+  const env = await notifyServer();
+  writeFileSync(join(dir, `${WORKER}.json`), valid({ sessionId: WORKER, state: "idle", crew: RIPLEY }));
+  writeFileSync(join(dir, `${WORKER2}.json`), valid({ sessionId: WORKER2, state: "idle", crew: BISHOP }));
+  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", crew: { id: "cadence-0001", name: "CADENCE" }, state: "idle" }));
+  const { cardId } = (await (await env.post("/action/card-add", { columnId: "backlog", title: "Fix bug" })).json()) as any;
+  await env.post("/action/card-assign", { cardId, sessionId: WORKER });
+  env.sent.length = 0;
+  return { ...env, cardId };
+}
+
+test("reassigning A -> B tells A once to stop, and the scrum master FYI", async () => {
+  const { server, post, sent, cardId } = await reassignSetup();
+  expect((await (await post("/action/card-assign", { cardId, sessionId: WORKER2 })).json()).ok).toBe(true);
+  const toA = sent.filter((s) => s.sessionId === WORKER);
+  expect(toA.length).toBe(1);
+  expect(toA[0]!.text.startsWith("[THE LINE]")).toBe(true);
+  expect(toA[0]!.text).toContain("taken off");
+  expect(toA[0]!.text).toContain(cardId);
+  expect(toA[0]!.text).toContain("no reply needed");
+  expect(sent.filter((s) => s.sessionId === SCRUM).length).toBe(1);
+  expect(sent.filter((s) => s.sessionId === WORKER2).length).toBe(0);
+  server.stop(true);
+});
+
+test("unassigning A tells A once to stop", async () => {
+  const { server, post, sent, cardId } = await reassignSetup();
+  expect((await (await post("/action/card-assign", { cardId, sessionId: null })).json()).ok).toBe(true);
+  const toA = sent.filter((s) => s.sessionId === WORKER);
+  expect(toA.length).toBe(1);
+  expect(toA[0]!.text).toContain("taken off");
+  expect(sent.filter((s) => s.sessionId === SCRUM).length).toBe(1);
+  server.stop(true);
+});
+
+test("re-assigning the same agent (or a fresh card) tells nobody", async () => {
+  const { server, post, sent, cardId } = await reassignSetup();
+  await post("/action/card-assign", { cardId, sessionId: WORKER });
+  expect(sent).toEqual([]);
+  const { cardId: other } = (await (await post("/action/card-add", { columnId: "backlog", title: "T2" })).json()) as any;
+  await post("/action/card-assign", { cardId: other, sessionId: WORKER2 });
+  expect(sent).toEqual([]);
+  server.stop(true);
+});
+
+test("after a reassign, A's write signed as: assignee with its crew is refused, not signed as B", async () => {
+  const { server, post, cardId } = await reassignSetup();
+  await post("/action/card-assign", { cardId, sessionId: WORKER2 });
+  const c = await post("/action/card-comment", { cardId, as: "assignee", crew: RIPLEY.id, text: "still on it" });
+  expect(c.status).toBe(409);
+  expect(((await c.json()) as any).error).toContain("no longer assigned");
+  const m = await post("/action/card-move", { cardId, as: "assignee", crew: RIPLEY.id, toColumnId: "review" });
+  expect(m.status).toBe(409);
+  const card = readSnapshot(dir, Date.now()).board.cards[0]!;
+  expect((card.comments ?? []).some((k) => k.text === "still on it")).toBe(false);
+  expect(card.columnId).toBe("backlog");
+  // the new assignee signing the same way is fine, and signs as itself
+  const ok = await post("/action/card-comment", { cardId, as: "assignee", crew: BISHOP.id, text: "mine now" });
+  expect(ok.status).toBe(200);
+  expect(readSnapshot(dir, Date.now()).board.cards[0]!.comments!.at(-1)!.author).toBe("BISHOP");
+  server.stop(true);
+});
+
+test("send-task bakes the agent's crew id into the footer's signed writes", async () => {
+  const { server, post, sent, cardId } = await reassignSetup();
+  await post("/action/send-task", { cardId });
+  expect(sent[0]!.text).toContain(`"as":"assignee","crew":"${RIPLEY.id}"`);
+  server.stop(true);
+});
+
+test("the footer's fallback still works with the crew id left in: author + crew signs as the author", async () => {
+  const { server, post } = await notifyServer();
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
+  expect((await post("/action/card-comment", { cardId, as: "assignee", crew: RIPLEY.id, text: "hi" })).status).toBe(400);
+  const r = await post("/action/card-comment", { cardId, author: "RIPLEY", crew: RIPLEY.id, text: "hi" });
+  expect(r.status).toBe(200);
+  expect(readSnapshot(dir, Date.now()).board.cards[0]!.comments!.at(-1)!.author).toBe("RIPLEY");
+  server.stop(true);
+});
