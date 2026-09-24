@@ -20,6 +20,8 @@ export type PreviewFile = {
 export type MergePreview = {
   branch: string;
   base: string;
+  /** the full SHA every list below was read at ("" when there is no branch) */
+  tip: string;
   /** the first MAX_COMMITS commits, newest first */
   commits: PreviewCommit[];
   /** all commits on branch that base doesn't have — can exceed commits.length */
@@ -52,13 +54,14 @@ export function parseNumstat(out: string): PreviewFile[] {
 
 /** Put git's output together into what the card shows, capped. */
 export function buildPreview(input: {
-  branch: string; base: string; log: string; totalCommits: number; numstat: string;
+  branch: string; base: string; tip?: string; log: string; totalCommits: number; numstat: string;
 }): MergePreview {
   const commits = parseCommits(input.log);
   const files = parseNumstat(input.numstat);
   return {
     branch: input.branch,
     base: input.base,
+    tip: input.tip ?? "",
     commits: commits.slice(0, MAX_COMMITS),
     totalCommits: Math.max(input.totalCommits, commits.length),
     files: files.slice(0, MAX_FILES),

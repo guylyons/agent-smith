@@ -15,10 +15,22 @@ function changedSince(fresh: MergeState): string {
   return `Not merged — this changed since the key lit up: ${fresh.blocked}. Try again once that's cleared.`;
 }
 
-/** The confirming press, given the state re-read just now: send the merge, or
- *  hold it and say why. A failed re-read holds too — nothing was sent. */
-export function mergeGate(fresh: MergeState | null): { go: true } | { go: false; message: string } {
+/** Same words as the server's refusal (BRANCH_MOVED in lib/merge), which this
+ *  browser-safe module can't import. */
+const MOVED = "Not merged — the branch moved since you looked; review again.";
+
+/** What the WHAT WILL LAND preview re-reads on. The tip, not the commit count:
+ *  an amend or rebase keeps the count and changes the work. */
+export function previewKey(s: MergeState): string {
+  return `${s.branch}:${s.tip}`;
+}
+
+/** The confirming press, given the state re-read just now and the tip the
+ *  preview showed (`seen`): send the merge, or hold it and say why. A failed
+ *  re-read holds too — nothing was sent. */
+export function mergeGate(fresh: MergeState | null, seen?: string): { go: true } | { go: false; message: string } {
   if (!fresh) return { go: false, message: "Couldn't re-check the branch, so nothing was merged. Try again." };
+  if (seen && fresh.committed && fresh.tip !== seen) return { go: false, message: MOVED };
   if (fresh.ready) return { go: true };
   return { go: false, message: changedSince(fresh) };
 }

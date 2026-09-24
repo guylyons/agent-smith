@@ -828,7 +828,9 @@ export function makeServer(
     // `force` is the human's override, as on card-assign and spawn.
     const waiting = body.force ? null : mergeBlockReason(board, cardId);
     if (waiting) return json({ ok: false, error: waiting }, 409);
-    const r = await mergeWork(where.cwd);
+    // `tip` is what the human's preview showed; a branch that moved since
+    // is refused inside the queue, so nothing they didn't see can land.
+    const r = await mergeWork(where.cwd, { tip: body.tip });
     if (!r.ok) return json(r, 409);
     const note = `Merged ${r.branch} into ${r.base}.`;
     // Landed for real, so the card goes to mergedColumn and its claim is
