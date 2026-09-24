@@ -42,13 +42,21 @@ test("spawn with a cardId and plain text appends that card's footer", async () =
   } finally { srv.stop(true); }
 });
 
-test("spawn with text that already carries the footer does not add another", async () => {
+// The card modal's "new agent" path sends cardTaskPrompt's full prompt, built
+// in the browser before any agent (or crew id) exists. The server swaps that
+// footer for one naming the new agent and carrying its crew id, so its writes
+// can be refused once it is taken off the card.
+test("spawn with text that already carries the footer replaces it with one carrying the crew", async () => {
   const { srv, dir, post, add, tasks } = await server();
   try {
     const id = await add("Fix it");
     const full = `do the card\n\n${FOOTER}\ncard: ${id}\n...`;
     await post("/action/spawn", { cwd: dir, text: full, cardId: id });
-    expect(tasks[0]).toBe(full);
+    expect(tasks[0]!.startsWith("do the card\n\n")).toBe(true);
+    expect(count(tasks[0]!, FOOTER)).toBe(1);
+    expect(tasks[0]).not.toContain("\n...");
+    expect(tasks[0]).toMatch(/"as":"assignee","crew":"[a-z0-9-]+"/);
+    expect(tasks[0]).not.toMatch(/"as":"assignee",(?!"crew")/);
   } finally { srv.stop(true); }
 });
 

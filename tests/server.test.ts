@@ -1436,6 +1436,30 @@ test("after a reassign, A's write signed as: assignee with its crew is refused, 
   server.stop(true);
 });
 
+// The MCP tools sign on-card writes `as: "assignee"` too. With the crew id
+// from the launch env riding along, a removed agent's MCP write gets the same
+// 409 as the curl footer's, rather than landing under the new assignee's name.
+test("after a reassign, A's MCP comment on its spawned-for card is refused with 409", async () => {
+  const { server, post, cardId } = await reassignSetup();
+  await post("/action/card-assign", { cardId, sessionId: WORKER2 });
+  const { handleMessage } = await import("../src/lib/mcp");
+  const base = `http://localhost:${server.port}`;
+  const posted: { status: number; body: any }[] = [];
+  const api = {
+    async get(path: string) { const r = await fetch(`${base}${path}`); return { status: r.status, body: await r.json() }; },
+    async post(path: string, body: unknown) { const r = await post(path, body as object); const out = { status: r.status, body: await r.json() }; posted.push(out); return out; },
+  };
+  const res = (await handleMessage(
+    { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "card_comment", arguments: { cardId, text: "still on it" } } },
+    { api, url: base, card: cardId, crew: RIPLEY.id },
+  )) as any;
+  expect(posted[0]!.status).toBe(409);
+  expect(res.result.isError).toBe(true);
+  expect(res.result.content[0].text).toContain("no longer assigned");
+  expect((readSnapshot(dir, Date.now()).board.cards[0]!.comments ?? []).some((k) => k.text === "still on it")).toBe(false);
+  server.stop(true);
+});
+
 test("send-task bakes the agent's crew id into the footer's signed writes", async () => {
   const { server, post, sent, cardId } = await reassignSetup();
   await post("/action/send-task", { cardId });
