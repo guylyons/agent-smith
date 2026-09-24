@@ -12,6 +12,7 @@ import { matchChat } from "./lib/chatsearch";
 import type { ChatMessage } from "./lib/conversation";
 import { readOverrides, applyOverrides, setNameOverride, setSpriteOverride } from "./lib/overrides";
 import { loadPersonas, applyPersonas, spawnName } from "./lib/personas";
+import { parseMentions, matchMentions } from "./lib/mentions";
 import { applyCrew, applyBoundCrews, readBoundCrews, recordBoundCrew, mintCrewId, findAssigneeSession, isAssigneeSession, isActorSession, scrumHears, addNote, CREW_ID_RE } from "./lib/crew";
 import { sendTaskReadiness } from "./lib/sendTaskReady";
 import { readBoard, writeBoard, boardFile, addCard, moveCard, moveToWorkColumn, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, cardTaskFooter, addColumn, renameColumn, setInstruction, setColumnStage, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, pinComment, setAsk, setCardTouches, setCardRepo, setCardKind, findScrumCard, cardView, scrumBrief, repoName, claimBlockReason, mergeBlockReason, landMergedCard, mergeReleaseNotes, finishesCard, isLandedColumn, setCardWork, type Board, type Card } from "./lib/board";
@@ -401,18 +402,59 @@ export function makeServer(
     const out: Delivery[] = [];
     for (const a of agents) {
       if (isActor(a)) continue;
-      const isAssignee = isAssigneeSession(card.assignee, a);
-      if (isAssignee) {
+      if (isAssigneeSession(card.assignee, a)) {
         if (opts.kind === "move" && opts.direction !== "back") continue;
         const ask = opts.kind === "move"
           ? "(reply expected: this is rework -- pick the card back up and answer on it with a card-comment)"
           : "(reply expected: answer on the card with a card-comment)";
         out.push(await deliverTo(a, `${text}\n${ask}`));
-      } else if (a.persona === "scrum-master" && scrumHears(board, a, card)) {
+      } else if (isCardScrum(board, card, a)) {
         out.push(await deliverTo(a, `${text}\n(FYI, no reply needed unless it raises a problem or asks you something)`));
       }
     }
     return out;
+  }
+
+  /** A scrum master that hears this card's events (see notifyCardEvent). */
+  function isCardScrum(board: Board, card: Card, a: AgentStatus): boolean {
+    return a.persona === "scrum-master" && scrumHears(board, a, card);
+  }
+
+  // @mentions in a comment: each live agent a mention names (see
+  // lib/mentions) is asked for a reply on this card, unless it wrote the
+  // comment, already heard it from notifyCardEvent (assignee, scrum master),
+  // or was taken off this card (its reply would be refused). Every mention is
+  // reported back with what happened, so the sender knows it landed.
+  type MentionDelivery = { mention: string; name: string; sessionId: string; via: Delivery["via"] | "already" | "self" | "removed" };
+  async function notifyMentions(
+    board: Board, card: Card, actor: Actor, title: string, text: string, origin: string,
+  ): Promise<{ mentions: MentionDelivery[]; unmatched: string[] }> {
+    const { agents } = readSnapshot(dir, Date.now());
+    const { hits, unmatched } = matchMentions(parseMentions(text), agents);
+    const mentions: MentionDelivery[] = [];
+    for (const { mention, agent: a } of hits) {
+      const report = (via: MentionDelivery["via"]) => mentions.push({ mention, name: a.name, sessionId: a.sessionId, via });
+      if (isActorSession(actor, a)) report("self");
+      else if (isAssigneeSession(card.assignee, a) || isCardScrum(board, card, a)) report("already");
+      else if (a.crew && card.removedCrews?.includes(a.crew.id)) report("removed");
+      else report((await deliverTo(a, mentionNotice(card, actor, title, text, a, origin))).via);
+    }
+    return { mentions, unmatched };
+  }
+
+  /** What a mentioned agent reads: the comment, and exactly how to answer on
+   *  the card signed as itself (not "as":"assignee", which is the worker's
+   *  signature and would be refused). ASCII-only, like notifyCardEvent. */
+  function mentionNotice(card: Card, actor: Actor, title: string, text: string, a: AgentStatus, origin: string): string {
+    const asker = isHuman(actor) ? "" : `@${actor.name} `;
+    const body = JSON.stringify({ cardId: card.id, author: a.crew?.name ?? a.name, ...(a.crew ? { crew: a.crew.id } : {}), text: `${asker}<your answer>` });
+    return [
+      `[THE LINE] ${nameForAgents(actor.name)} mentioned you on "${title}" (${card.id}):`,
+      text,
+      "(reply expected: answer on that card with a card-comment signed as yourself --",
+      `  curl -s -X POST ${origin}/action/card-comment -H 'content-type: application/json' -d '${body}'`,
+      "Replying does not make you the card's worker: do not move the card or take it on, then carry on with your own work.)",
+    ].join("\n");
   }
   const clients = new Set<(s: Snapshot) => void>();
 
@@ -995,7 +1037,7 @@ export function makeServer(
     return json({ ok: true, ...(await cleanupMergedWorktrees(repos, live, body.remove)) });
   }
 
-  async function cardComment(_ctx: Ctx, body: z.output<typeof CardCommentBody>, card: Card, board: Board, title: string): Promise<Response> {
+  async function cardComment({ url }: Ctx, body: z.output<typeof CardCommentBody>, card: Card, board: Board, title: string): Promise<Response> {
     const cardId = card.id;
     const actor = resolveActor(card, body);
     if ("error" in actor) return json({ ok: false, error: actor.error }, actor.status);
@@ -1016,7 +1058,8 @@ export function makeServer(
     writeBoard(dir, next);
     push();
     const delivery = await notifyCardEvent(next, cardId, actor, `[THE LINE] ${nameForAgents(actor.name)} commented on "${title}":\n${text}`, { kind: "comment" });
-    return json({ ok: true, delivery, ...((body.pin || body.ask) && added ? { commentId: added.id } : {}) });
+    const { mentions, unmatched } = await notifyMentions(next, next.cards.find((k) => k.id === cardId) ?? card, actor, title, text, url.origin);
+    return json({ ok: true, delivery, mentions, unmatched, ...((body.pin || body.ask) && added ? { commentId: added.id } : {}) });
   }
 
   // card-ask-clear: take the WAITING ON YOU flag off by hand, for a question

@@ -1538,6 +1538,22 @@ body{background:transparent}
   .comment.is-target,.cardmodal-row.is-target .cardmodal-select{animation:none}
 }
 .comment-compose{display:flex;flex-direction:column;gap:7px;margin-top:2px}
+/* @ autocomplete under the comment box. The highlighted row gets a marker as
+   well as the colour, so the pick is visible without colour. */
+.comment-inputwrap{position:relative}
+.mention-list{
+  position:absolute;left:0;top:100%;z-index:5;margin-top:2px;min-width:220px;max-width:100%;
+  background:var(--night);border:2px solid var(--gold);padding:3px 0;
+  font-family:var(--mono);font-size:15px;
+}
+.mention-list[hidden]{display:none}
+.mention-opt{display:flex;gap:10px;align-items:baseline;padding:4px 10px 4px 18px;cursor:pointer;color:var(--bone);position:relative}
+.mention-opt.on{background:var(--box-lo);color:var(--gold)}
+.mention-opt.on::before{content:"\25B8";position:absolute;left:6px}
+.mention-opt-hint{color:var(--dim);font-size:13px}
+/* A mention in a comment: a chip. Its "@NAME" text says what it is, the
+   outline and colour just help the eye find it. */
+.mention{color:var(--gold);background:var(--box-lo);border:1px solid var(--gold);border-radius:2px;padding:0 3px;white-space:nowrap}
 .comment-input{
   width:100%;box-sizing:border-box;resize:vertical;min-height:60px;
   font-family:var(--mono);font-size:15px;line-height:1.6;

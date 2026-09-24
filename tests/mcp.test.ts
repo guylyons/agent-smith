@@ -106,6 +106,28 @@ test("card_comment passes ask through only when true", async () => {
   expect(calls[1]!.body).not.toHaveProperty("ask");
 });
 
+test("card_comment says who each mention reached and which names matched nobody", async () => {
+  const { api } = fakeApi({ "/action/card-comment": { status: 200, body: { ok: true, delivery: [],
+    mentions: [
+      { mention: "DALLAS", name: "DALLAS", sessionId: "s1", via: "typed" },
+      { mention: "ripley-3f2a", name: "RIPLEY", sessionId: "s2", via: "already" },
+      { mention: "ASH", name: "ASH", sessionId: "s3", via: "removed" },
+    ],
+    unmatched: ["BOB"] } } });
+  const text = (await call("card_comment", { cardId: "card_1", text: "@DALLAS @ripley-3f2a @ASH @BOB ?" }, api)).result.content[0].text;
+  expect(text).toContain("Commented on card_1.");
+  expect(text).toContain("@DALLAS: sent to DALLAS");
+  expect(text).toContain("@ripley-3f2a: RIPLEY already gets this card's comments");
+  expect(text).toContain("@ASH: ASH was taken off this card, not asked");
+  expect(text).toContain("No live agent matched: @BOB");
+});
+
+test("card_comment with no mentions says nothing about them", async () => {
+  const { api } = fakeApi();
+  const text = (await call("card_comment", { cardId: "card_1", text: "done" }, api)).result.content[0].text;
+  expect(text).toBe("Commented on card_1.");
+});
+
 test("card_comment uses an explicit author when given one", async () => {
   const { api, calls } = fakeApi();
   await call("card_comment", { cardId: "card_1", author: "CADENCE", text: "hi" }, api);

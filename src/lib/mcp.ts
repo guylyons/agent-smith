@@ -70,6 +70,23 @@ async function request(ctx: Ctx, method: "GET" | "POST", path: string, body?: un
   return res.body;
 }
 
+/** One line per @mention in a card-comment reply, then the names that
+ *  matched no live agent, so the sender knows whether the ask landed. */
+function mentionLines(res: any): string[] {
+  const said: Record<string, (name: string) => string> = {
+    typed: (n) => `sent to ${n}`,
+    queued: (n) => `queued for ${n} (busy), lands when its turn ends`,
+    already: (n) => `${n} already gets this card's comments`,
+    self: () => "that is you, not sent",
+    removed: (n) => `${n} was taken off this card, not asked`,
+  };
+  const lines = (Array.isArray(res?.mentions) ? res.mentions : [])
+    .map((m: any) => `@${m.mention}: ${(said[m.via] ?? (() => String(m.via)))(m.name)}`);
+  const unmatched: string[] = Array.isArray(res?.unmatched) ? res.unmatched : [];
+  if (unmatched.length) lines.push(`No live agent matched: ${unmatched.map((u) => `@${u}`).join(", ")}`);
+  return lines;
+}
+
 /** Who to sign a move or comment on `cardId` as. An explicit name (the
  *  AGENT_WORKSHOP_AUTHOR env, or an `author` argument) wins. On the card this
  *  session was spawned for, it is the assignee. Otherwise the live agent
@@ -314,7 +331,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "card_comment",
-    description: "Post a comment on a card. Keep it plain and short — a quick note to a busy teammate. The other side of the card (assignee or scrum master) is woken with it.",
+    description: "Post a comment on a card. Keep it plain and short — a quick note to a busy teammate. The other side of the card (assignee or scrum master) is woken with it. Write @NAME (a live agent's name or crew id) to ask that teammate too: they get it with a reply expected, and the result says who each mention reached.",
     inputSchema: {
       type: "object",
       properties: {
@@ -331,9 +348,10 @@ export const TOOLS: Tool[] = [
       const pin = args.pin === true;
       const ask = args.ask === true;
       const body = { cardId, text: str(args, "text"), ...(pin ? { pin } : {}), ...(ask ? { ask } : {}), ...(await signatureFor(ctx, cardId, optionalStr(args, "author"))) };
-      await request(ctx, "POST", "/action/card-comment", body);
+      const res = await request(ctx, "POST", "/action/card-comment", body);
       const also = [pin && "pinned it", ask && "flagged it waiting on the user"].filter(Boolean).join(" and ");
-      return also ? `Commented on ${body.cardId} and ${also}.` : `Commented on ${body.cardId}.`;
+      const done = also ? `Commented on ${body.cardId} and ${also}.` : `Commented on ${body.cardId}.`;
+      return [done, ...mentionLines(res)].join("\n");
     },
   },
   {

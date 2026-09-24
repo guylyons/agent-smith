@@ -50,6 +50,11 @@ test("deliveryToast with nobody to tell says the comment was only saved", () => 
   expect(deliveryToast([])).toBe("No running agent to notify - comment saved");
 });
 
+test("deliveryToast names the @mentions that matched no live agent", () => {
+  expect(deliveryToast([{ sessionId: "a", name: "DALLAS", via: "typed" }], ["BOB"])).toBe("Notified DALLAS - no live agent named @BOB");
+  expect(deliveryToast([], ["BOB", "ASH"])).toBe("No running agent to notify - comment saved - no live agent named @BOB, @ASH");
+});
+
 // ---- the file-claim field and gate ----------------------------------------
 
 const assignee = { id: "11111111-2222-4333-8444-555555555555", name: "VOLT" };
