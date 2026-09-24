@@ -5,18 +5,19 @@ import type { Board, Column, Card, Stage } from "../lib/board";
 import {
   renameColumn, setInstruction, setColumnStage, deleteColumn, reorderColumn,
   deleteCard, restoreCard, moveCard, restoreColumn, cardMoveTarget, STAGES,
-  mergeBlockers, mergeBlockReason,
+  mergeBlockers, mergeBlockReason, repoName,
 } from "../lib/board";
 import {
   addColumnAction, renameColumnAction, setInstructionAction, setColumnStageAction, deleteColumnAction,
-  reorderColumnAction, restoreColumnAction, addCardAction, moveCardAction,
+  reorderColumnAction, restoreColumnAction, addCardAction, addScrumCardAction, moveCardAction,
   deleteCardAction, restoreCardAction, ME,
 } from "./actions";
 import { toast } from "./toast";
 import { onOpenCard, type CardFocus } from "./nav";
-import { CardModal } from "./CardModal";
+import { CardModal, type SpawnSeed } from "./CardModal";
 import { Sprite } from "./Sprite";
 import { stackMaxHeight } from "./stackCap";
+import { loadRecentFolders, projectFolder } from "./recentFolders";
 import { findLiveAssignee } from "../lib/sendTaskReady";
 import { displayState } from "../lib/liveness";
 import {
@@ -44,7 +45,7 @@ export function TheLine({
   board: incoming, agents, lineRows, onSpawnForCard,
 }: {
   board: Board; agents: AgentStatus[]; lineRows: number;
-  onSpawnForCard: (task: string, cardId: string) => void;
+  onSpawnForCard: (task: string, cardId: string, seed?: SpawnSeed) => void;
 }) {
   const [board, setBoard] = useState(incoming);
   const [addingCol, setAddingCol] = useState(false);
@@ -81,6 +82,26 @@ export function TheLine({
     mutate(null, () => addColumnAction("")); // blank name -> its input auto-focuses
   }
 
+  // The project a new scrum master card is for: the folder you last launched an
+  // agent in, else one a live agent is working in. The name and path are baked
+  // into the card's starter brief; both stay editable in the card.
+  const scrumFolder = projectFolder(loadRecentFolders(), agents.map((a) => a.cwd));
+  const scrumRepo = scrumFolder ? repoName(scrumFolder) : "";
+
+  // Make the project's scrum master card in the backlog and open it for editing.
+  // The server keeps one per project, so pressing this again just opens it.
+  function onAddScrum() {
+    const col = board.columns.find((c) => c.stage === "todo") ?? board.columns[0];
+    if (!col) return;
+    mutate(null, () => {
+      void addScrumCardAction(col.id, scrumRepo || undefined, scrumFolder || undefined).then((r) => {
+        if (!r) return;
+        if (r.existing) toast(`${scrumRepo || "This project"} already has a scrum master card. Opened it.`);
+        showCard(r.id, r.existing ? undefined : { kind: "new" });
+      });
+    });
+  }
+
   // The card behind an open modal, resolved fresh each render so live edits (and
   // SSE echoes) flow in. If it's deleted while open, the modal closes itself.
   const openCard = openCardId ? board.cards.find((c) => c.id === openCardId) ?? null : null;
@@ -112,7 +133,16 @@ export function TheLine({
 
   return (
     <section className="win line">
-      <h2 className="pix">THE LINE</h2>
+      <div className="line-head">
+        <h2 className="pix">THE LINE</h2>
+        <button
+          className="pix add-scrum"
+          onClick={onAddScrum}
+          title={scrumRepo
+            ? `Make the scrum master card for ${scrumRepo} (${scrumFolder})`
+            : "Make a scrum master card (no project folder yet: name it in the card)"}
+        >+ SCRUM MASTER</button>
+      </div>
       <p className="pix hint">DRAG WORK ACROSS YOUR STAGES · CLICK A CARD TO OPEN IT · EACH STAGE CAN INSTRUCT THE AGENT</p>
       <div className="board">
         {board.columns.map((col, i) => (
@@ -423,7 +453,7 @@ function CardView({
 
   return (
     <div
-      className={`card${dropBefore ? " drop-before" : ""}${dropAfterLast ? " drop-after" : ""}${unread ? " has-unread" : ""}`}
+      className={`card${card.kind === "scrum" ? " card-scrum" : ""}${dropBefore ? " drop-before" : ""}${dropAfterLast ? " drop-after" : ""}${unread ? " has-unread" : ""}`}
       role="button"
       tabIndex={0}
       draggable
@@ -456,6 +486,7 @@ function CardView({
       onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData(CARD_MIME, card.id); }}
     >
       <div className="card-main">
+        {card.kind === "scrum" && <span className="card-kind">★ SCRUM MASTER</span>}
         <span className="card-title-text">{card.title || "Untitled"}</span>
         <div className="card-meta">
           {/* Staffing always says something. An unstaffed card used to just omit

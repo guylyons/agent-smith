@@ -16,6 +16,10 @@ import { toast } from "./toast";
 import type { CardFocus } from "./nav";
 import { findLiveAssignee, sendTaskReadiness } from "../lib/sendTaskReady";
 
+/** What the New Agent dialog starts with when a card asks for an agent, beyond
+ *  its task: a persona to preselect and the folder to launch in. */
+export type SpawnSeed = { persona?: string; folder?: string };
+
 // Matches TheLine's: the pure op to paint immediately, plus the one scoped
 // server call that makes it real. See actions.ts for why nothing sends a board.
 type Mutate = (fn: ((b: Board) => Board) | null, send: () => void) => void;
@@ -125,7 +129,7 @@ export function CardModal({
   /** what to land on: a notice's comment or stage change (highlighted for as
    *  long as the card stays open), or the description of a card just made */
   focus?: CardFocus | null;
-  onSpawnForCard: (task: string, cardId: string) => void; onClose: () => void;
+  onSpawnForCard: (task: string, cardId: string, seed?: SpawnSeed) => void; onClose: () => void;
 }) {
   // The assignee is a live agent session: its assignee.id is the sessionId. If
   // that session is no longer in the snapshot it has ended — we keep it selected
@@ -267,8 +271,10 @@ export function CardModal({
 
   // Spawn a fresh agent seeded with this card's task (persona/model/worktree
   // chosen in the New Agent modal). Closes the card so the modal is unobstructed.
+  // A scrum master card is staffed by a scrum master, in its own project.
   function spawnForCard() {
-    onSpawnForCard(cardTaskPrompt(board, card.id, location.origin), card.id);
+    const seed = card.kind === "scrum" ? { persona: "scrum-master", folder: card.repoPath } : undefined;
+    onSpawnForCard(cardTaskPrompt(board, card.id, location.origin), card.id, seed);
     onClose();
   }
 
@@ -305,6 +311,7 @@ export function CardModal({
       >
         <div className="cardmodal-head">
           <span className="pix cardmodal-crumb">IN {columnName || "—"}</span>
+          {card.kind === "scrum" && <span className="card-kind">★ SCRUM MASTER</span>}
           <button className="cardmodal-x" title="Close" onClick={close}>✕</button>
         </div>
 

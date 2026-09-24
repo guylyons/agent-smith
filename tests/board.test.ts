@@ -31,6 +31,7 @@ import {
   readBoard,
   writeBoard,
   type Board,
+  sanitizeCard, setCardRepo, setCardKind, findScrumCard, scrumBrief,
 } from "../src/lib/board";
 
 function tmp(): string {
@@ -809,4 +810,23 @@ test("cardTaskPrompt sends a returning agent to its own comments first, and only
   expect(again).toContain("You have worked this card before");
   expect(/^[\x00-\x7f]*$/.test(again)).toBe(true);
   expect(cardTaskPrompt(b, "k1", "http://x", "RIPLEY")).not.toContain("worked this card before");
+});
+
+test("scrum cards: kind survives sanitizing, one per project is findable", () => {
+  expect(sanitizeCard({ id: "k", title: "S", columnId: "backlog", kind: "scrum" })?.kind).toBe("scrum");
+  expect(sanitizeCard({ id: "k", title: "S", columnId: "backlog", kind: "boss" })).toEqual({ id: "k", title: "S", columnId: "backlog" });
+  let b = addCard(defaultBoard(), "backlog", "Scrum");
+  const id = b.cards[0]!.id;
+  b = setCardRepo(setCardKind(b, id, "scrum"), id, "shop");
+  expect(findScrumCard(b, "shop")?.id).toBe(id);
+  expect(findScrumCard(b, "blog")).toBeUndefined();
+  expect(findScrumCard(b, undefined)).toBeUndefined();
+  expect(setCardKind(b, id, null).cards[0]!.kind).toBeUndefined();
+});
+
+test("scrumBrief names the project, or asks for one", () => {
+  expect(scrumBrief("shop", "/src/shop")).toContain("You are the scrum master for **shop** (`/src/shop`).");
+  expect(scrumBrief("shop")).toContain("for **shop**.");
+  expect(scrumBrief(undefined)).toContain("(name the project here)");
+  expect(scrumBrief("shop")).toContain("backlog");
 });

@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { pushRecent, mergeRecent, parseRecent, MAX_RECENT } from "../src/ui/recentFolders";
+import { pushRecent, mergeRecent, parseRecent, MAX_RECENT, projectFolder, worktreeRoot } from "../src/ui/recentFolders";
 import { folderLabels, launchSummary } from "../src/ui/NewAgentModal";
 
 test("pushRecent moves a folder to the front instead of duplicating it", () => {
@@ -40,4 +40,17 @@ test("launchSummary spells out each worktree/branch combination", () => {
 test("launchSummary warns rather than pretending an unusable name works", () => {
   expect(launchSummary("!!!", "")).toContain("no letters or numbers");
   expect(launchSummary("", "///")).toContain("no letters or numbers");
+});
+
+test("worktreeRoot maps an agent's worktree back to its repo", () => {
+  expect(worktreeRoot("/src/shop/.claude/worktrees/fix-cart")).toBe("/src/shop");
+  expect(worktreeRoot("/src/shop/.claude/worktrees/fix-cart/")).toBe("/src/shop");
+  expect(worktreeRoot("/src/shop")).toBe("/src/shop");
+});
+
+test("projectFolder prefers the last launch, then a live agent's repo", () => {
+  expect(projectFolder(["/a", "/b"], ["/c"])).toBe("/a");
+  expect(projectFolder([], ["", "/c/.claude/worktrees/x"])).toBe("/c");
+  expect(projectFolder(["/d/.claude/worktrees/y"], [])).toBe("/d");
+  expect(projectFolder([], [])).toBe("");
 });

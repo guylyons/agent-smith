@@ -40,6 +40,19 @@ export function parseRecent(raw: string): string[] {
   }
 }
 
+/** The project a live agent's folder belongs to: an agent in a worktree runs
+ *  in <repo>/.claude/worktrees/<name>, and the project is the <repo>. */
+export function worktreeRoot(folder: string): string {
+  return folder.replace(/[\\/]\.claude[\\/]worktrees[\\/][^\\/]+[\\/]?$/, "");
+}
+
+/** The one folder to call "the current project": the most recent launch, else
+ *  the first live agent's, as its repo root (a launch can be into a worktree
+ *  too), or "" when there is nothing to go on. */
+export function projectFolder(stored: string[], live: string[]): string {
+  return [...stored, ...live].map(worktreeRoot).find(Boolean) ?? "";
+}
+
 export function loadRecentFolders(): string[] {
   return parseRecent(loadSetting(KEYS.recentFolders, "[]"));
 }

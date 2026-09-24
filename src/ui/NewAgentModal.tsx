@@ -48,9 +48,10 @@ export function launchSummary(worktree: string, branch: string): string {
 }
 
 export function NewAgentModal({
-  liveFolders, onClose, initialTask = "", initialFolder, cardId,
+  liveFolders, onClose, initialTask = "", initialFolder, initialPersona = "", cardId,
 }: {
-  liveFolders: string[]; onClose: () => void; initialTask?: string; initialFolder?: string; cardId?: string;
+  liveFolders: string[]; onClose: () => void; initialTask?: string; initialFolder?: string;
+  initialPersona?: string; cardId?: string;
 }) {
   // The remembered history is the source of the button row; live agents' folders
   // are merged on top so a session someone else started is one click away too.
@@ -87,7 +88,7 @@ export function NewAgentModal({
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState(false);
   const [personas, setPersonas] = useState<PersonaInfo[]>([]);
-  const [persona, setPersona] = useState("");
+  const [persona, setPersona] = useState(initialPersona);
 
   // Auto-fill the worktree name from the task until the user edits the field
   // themselves. Leaving it blank launches in the folder (today's behavior).
