@@ -4,6 +4,7 @@ import type { Board } from "../lib/board";
 import { Sprite } from "./Sprite";
 import mapUrl from "./nostromo.png";
 import { hashFlag } from "./view";
+import { inStateFor, isStaleIdle } from "./inState";
 import {
   MAP_W, MAP_H, ROOMS, ROOM_IDS, placeAll, pathBetween, pathLength, pointAlong, spotFor, sleepers, cargoCount, roomsOverlay,
   type Pt, type RoomId, type Placement,
@@ -132,6 +133,9 @@ export function GameView({ agents, board, onOpen, onOpenCard }: {
   const pods = ROOMS.hypersleep.spots.length;
   const cargo = cargoCount(board);
   const showRooms = useHashFlag("rooms");
+  // Read per render, like the crew grid: snapshots re-render the map often
+  // enough that minute-grained times stay current.
+  const now = Date.now();
 
   return (
     <section className="game" aria-label="Ship map: each agent stands where its work is. Click one to open its conversation.">
@@ -163,13 +167,15 @@ export function GameView({ agents, board, onOpen, onOpenCard }: {
             const p = at.get(keyOf(a));
             const room = placed.get(a.sessionId)?.room;
             if (!p || !room) return null;
-            const label = `${a.name}, ${ROOMS[room].label.toLowerCase()}, ${stateText(a)}${a.doing ? `: ${a.doing}` : ""}`;
+            const dur = inStateFor(a.stateSince, now);
+            const state = `${stateText(a)}${dur ? ` · ${dur}` : ""}`;
+            const label = `${a.name}, ${ROOMS[room].label.toLowerCase()}, ${stateText(a)}${dur ? ` for ${dur}` : ""}${a.doing ? `: ${a.doing}` : ""}`;
             return (
-              <button key={keyOf(a)} className={`game-agent is-${a.state}`} style={{ ...pct(p), zIndex: Math.round(p.y) }}
-                aria-label={label} onClick={() => onOpen(a.sessionId)}>
+              <button key={keyOf(a)} className={`game-agent is-${a.state}${isStaleIdle(a, now) ? " is-stale" : ""}`}
+                style={{ ...pct(p), zIndex: Math.round(p.y) }} aria-label={label} onClick={() => onOpen(a.sessionId)}>
                 <Sprite sessionId={a.sessionId} role={a.role} name={a.name} state={a.state} override={a.sprite} />
                 {a.state === "waiting" && <span className="pix bubble" aria-hidden="true">{a.waitingReason === "question" ? "?" : "!"}</span>}
-                <span className="pix game-tag" aria-hidden="true"><b>{a.name}</b>{a.doing && <span>{a.doing}</span>}</span>
+                <span className="pix game-tag" aria-hidden="true"><b>{a.name} · {state}</b>{a.doing && <span>{a.doing}</span>}</span>
               </button>
             );
           })}
