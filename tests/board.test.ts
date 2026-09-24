@@ -466,6 +466,16 @@ test("cardTaskPrompt is pure ASCII outside the card's own text", () => {
   expect(/^[\x00-\x7f]*$/.test(p)).toBe(true);
 });
 
+test("cardTaskPrompt tells the worker to land in review without holding or merging", () => {
+  let b = defaultBoard();
+  b = addCard(b, "backlog", "Fix login bug");
+  const p = cardTaskPrompt(b, b.cards[0]!.id, SRV);
+  // a worker once sat in in-progress waiting on a browser check whose tools had dropped
+  expect(p).toContain('"Not checked: ..."');
+  expect(p.replace(/\s+/g, " ")).toContain(`move the card to "review" anyway`);
+  expect(p).toContain("Do not merge your branch. Merging is the human's call.");
+});
+
 test("cardTaskPrompt reflects the card's current column", () => {
   let b = defaultBoard();
   b = addCard(b, "backlog", "Fix login bug");
