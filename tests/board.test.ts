@@ -31,7 +31,7 @@ import {
   readBoard,
   writeBoard,
   type Board,
-  sanitizeCard, setCardRepo, setCardKind, findScrumCard, scrumBrief,
+  sanitizeCard, setCardRepo, setCardKind, setCardWork, findScrumCard, scrumBrief,
 } from "../src/lib/board";
 
 function tmp(): string {
@@ -848,4 +848,24 @@ test("scrumBrief names the project, or asks for one", () => {
   expect(scrumBrief("shop")).toContain("for **shop**.");
   expect(scrumBrief(undefined)).toContain("(name the project here)");
   expect(scrumBrief("shop")).toContain("backlog");
+});
+
+// card.work: where the card's work lives, recorded when an agent binds to it,
+// so the MERGE key outlives the agent's status file.
+test("setCardWork records a card's folder and branch, and leaves the rest alone", () => {
+  const b = addCard(defaultBoard(), "backlog", "T");
+  const id = b.cards[0]!.id;
+  const next = setCardWork(b, id, { cwd: "/r/wt", branch: "feature", root: "/r" });
+  expect(next.cards[0]!.work).toEqual({ cwd: "/r/wt", branch: "feature", root: "/r" });
+  expect({ ...next.cards[0]!, work: undefined }).toEqual({ ...b.cards[0]!, work: undefined });
+  expect(b.cards[0]!.work).toBeUndefined(); // pure
+});
+
+test("sanitizeCard keeps a valid work record and drops a bad one", () => {
+  const card = { id: "k", title: "S", columnId: "backlog" };
+  expect(sanitizeCard({ ...card, work: { cwd: "/r/wt", branch: "feature", root: "/r" } })?.work).toEqual({ cwd: "/r/wt", branch: "feature", root: "/r" });
+  expect(sanitizeCard({ ...card, work: { cwd: "/r/wt" } })?.work).toEqual({ cwd: "/r/wt" });
+  expect(sanitizeCard({ ...card, work: { branch: "feature" } })).toEqual(card); // no folder, no record
+  expect(sanitizeCard({ ...card, work: { cwd: "", branch: 3 } })).toEqual(card);
+  expect(sanitizeCard({ ...card, work: "nope" })).toEqual(card);
 });

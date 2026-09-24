@@ -54,8 +54,15 @@ export type Card = {
   // the one card per project that briefs a scrum master (see scrumBrief). The
   // board draws it in its own colour so it never reads as just another ticket.
   kind?: CardKind;
+  // Where the card's work lives: the folder its agent works in, the branch
+  // checked out there and the repo's main checkout. Recorded each time an agent
+  // binds to the card (spawn, card-assign, send-task), because the agent's
+  // status file is deleted when its session ends, and the MERGE key still has
+  // to find the branch after that. Absent on a card no agent has worked.
+  work?: CardWork;
 };
 export type CardKind = "scrum";
+export type CardWork = { cwd: string; branch?: string; root?: string };
 /** What a column MEANS to the protocol, independent of where it sits. `todo`
  *  is where new cards wait, `doing` is where an agent works, `review` is where
  *  finished work lands for a human, `done` is finished. A column with no stage
@@ -304,6 +311,11 @@ export function scrumBrief(repo: string | undefined, repoPath?: string): string 
 /** Assign the card to a live agent session, or clear it with `null`. */
 export function assignCard(board: Board, id: string, assignee: Assignee | null): Board {
   return mapCard(board, id, (k) => ({ ...k, assignee }));
+}
+
+/** Record where a card's work lives (see Card.work). */
+export function setCardWork(board: Board, id: string, work: CardWork): Board {
+  return mapCard(board, id, (k) => ({ ...k, work }));
 }
 
 /** Append a comment authored by `author`. No-op on empty/whitespace text so a
@@ -836,6 +848,21 @@ function sanitizeAssignee(v: unknown): Assignee | null {
   return crew !== null && CREW_ID.test(crew) ? { id, name, crew } : { id, name };
 }
 
+/** Repair a card's work record: needs a folder; branch and root ride along
+ *  when they are non-empty strings. */
+function sanitizeWork(v: unknown): CardWork | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  const cwd = str(o.cwd)?.trim();
+  if (!cwd) return null;
+  const work: CardWork = { cwd };
+  const branch = str(o.branch)?.trim();
+  if (branch) work.branch = branch;
+  const root = str(o.root)?.trim();
+  if (root) work.root = root;
+  return work;
+}
+
 /** Repair a comment list, dropping any entry missing a valid id/author/text/at.
  *  The file is one an agent may hand-edit, so a bad comment is skipped rather
  *  than allowed to break the card. */
@@ -902,6 +929,8 @@ export function sanitizeCard(v: unknown): Card | null {
     if (repoPath) card.repoPath = repoPath;
   }
   if (o.kind === "scrum") card.kind = "scrum";
+  const work = sanitizeWork(o.work);
+  if (work) card.work = work;
   return card;
 }
 
