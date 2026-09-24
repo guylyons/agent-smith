@@ -10,6 +10,7 @@ import { ConversationDrawer } from "./ConversationDrawer";
 import { NewAgentModal } from "./NewAgentModal";
 import { CommandPalette } from "./CommandPalette";
 import { SettingsPanel } from "./SettingsPanel";
+import { MemoryPanel } from "./MemoryPanel";
 import { FaceHud } from "./FaceHud";
 import { Toaster } from "./Toaster";
 import { UpdateNotice } from "./UpdateNotice";
@@ -29,6 +30,7 @@ export function App() {
   const [spawnSeed, setSpawnSeed] = useState<{ task?: string; cardId?: string; persona?: string; folder?: string } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [memoryOpen, setMemoryOpen] = useState(false);
   const [alertsEnabled, setAlertsEnabled] = useState(false);
   // Which page is up: the workshop (desks + THE LINE), the MOOD board or the
   // GAME map. Kept in the URL hash, so a reload, a bookmark and the back
@@ -175,7 +177,7 @@ export function App() {
       <Backdrop />
       <Crt mode={display.crt} />
       <TubeBevel mode={display.bevel} />
-      <Header snap={snap} live={live} view={view} onView={setView} onNewAgent={() => setSpawnSeed({})} onFind={() => setPaletteOpen(true)} onSettings={() => setSettingsOpen(true)} />
+      <Header snap={snap} live={live} view={view} onView={setView} onNewAgent={() => setSpawnSeed({})} onFind={() => setPaletteOpen(true)} onMemory={() => setMemoryOpen(true)} onSettings={() => setSettingsOpen(true)} />
       {view === "mood" ? (
         <MoodBoard mood={snap.mood} board={snap.board} onOpenCard={openCard} />
       ) : view === "game" ? (
@@ -200,6 +202,7 @@ export function App() {
         />
       )}
       {paletteOpen && <CommandPalette snap={snap} onClose={() => setPaletteOpen(false)} />}
+      {memoryOpen && <MemoryPanel cards={snap.board.cards} onClose={() => setMemoryOpen(false)} />}
       {settingsOpen && (
         <SettingsPanel
           display={display}
