@@ -9,7 +9,7 @@ import { runExclusive } from "../src/lib/merge-queue";
 
 const facts = (over: Partial<MergeFacts> = {}): MergeFacts => ({
   repo: true, branch: "ag-6", base: "main", ahead: 2, dirty: false,
-  rootBranch: "main", rootDirty: false, ...over,
+  rootBranch: "main", rootDirty: false, baseCheckedOut: true, ...over,
 });
 
 test("committed work on a branch, everything clean, is ready to merge", () => {
@@ -42,6 +42,16 @@ test("a main checkout that is busy holds the key, and says how", () => {
   expect(mergeVerdict(facts({ rootBranch: "other" }))).toMatchObject({ committed: true, ready: false });
   expect(mergeVerdict(facts({ rootBranch: "other" })).blocked).toMatch(/on other, not main/);
   expect(mergeVerdict(facts({ rootDirty: true })).blocked).toMatch(/main checkout has uncommitted/);
+});
+
+test("a detached main checkout with the trunk checked out nowhere merges without it", () => {
+  // jj keeps git's HEAD detached and its working copy reads as dirty to git.
+  expect(mergeVerdict(facts({ rootBranch: "", rootDirty: true, baseCheckedOut: false })))
+    .toEqual({ committed: true, ready: true, blocked: "" });
+});
+
+test("a detached main checkout still holds the key when the trunk is checked out elsewhere", () => {
+  expect(mergeVerdict(facts({ rootBranch: "", baseCheckedOut: true })).blocked).toMatch(/detached HEAD, not main/);
 });
 
 // --- against throwaway repos ------------------------------------------------
@@ -208,4 +218,46 @@ test("a fresh branch with no commits of its own is not landed", async () => {
   await git(root, "worktree", "add", "-q", "-b", "ag-new", wt, "HEAD");
   const s = await readMergeState(wt);
   expect(s).toMatchObject({ ahead: 0, committed: false, landed: false, blocked: "nothing committed on ag-new yet" });
+});
+
+// --- a detached main checkout (jj keeps git's HEAD this way) ----------------
+
+async function out(cwd: string, ...args: string[]): Promise<string> {
+  const p = Bun.spawn(["git", "-C", cwd, ...args], { stdout: "pipe", stderr: "ignore" });
+  return (await new Response(p.stdout).text()).trim();
+}
+
+test("mergeWork lands on main without touching a detached, dirty main checkout", async () => {
+  const root = await freshRepo();
+  const wt = await workOn(root, "ag-jj", "feature.txt", "hello\n");
+  await git(root, "checkout", "-q", "--detach");
+  writeFileSync(join(root, "README"), "jj working copy\n");
+  const head = await out(root, "rev-parse", "HEAD");
+
+  expect(await readMergeState(wt)).toMatchObject({ ready: true, baseCheckedOut: false });
+  const r = await mergeWork(wt);
+  expect(r).toMatchObject({ ok: true, branch: "ag-jj", base: "main" });
+
+  expect(await out(root, "log", "-1", "--pretty=%s", "main")).toBe("Merge branch 'ag-jj'");
+  expect((await out(root, "rev-list", "--parents", "-1", "main")).split(" ")).toHaveLength(3);
+  expect(await out(root, "show", "main:feature.txt")).toBe("hello");
+  // The checkout is exactly as it was: same HEAD, edit still there.
+  expect(await out(root, "rev-parse", "HEAD")).toBe(head);
+  expect(await out(root, "status", "--porcelain", "--untracked-files=no")).toBe("M README");
+  expect(await readMergeState(wt)).toMatchObject({ ahead: 0, committed: false, landed: true });
+});
+
+test("a conflict against a detached main checkout is refused and main does not move", async () => {
+  const root = await freshRepo();
+  const wt = await workOn(root, "ag-jjc", "clash.txt", "from the branch\n");
+  writeFileSync(join(root, "clash.txt"), "from main\n");
+  await git(root, "add", "-A");
+  await git(root, "commit", "-q", "-m", "main writes clash");
+  await git(root, "checkout", "-q", "--detach");
+  const before = await out(root, "rev-parse", "main");
+
+  const r = await mergeWork(wt);
+  expect(r.ok).toBe(false);
+  expect(r.error).toMatch(/could not merge ag-jjc into main/);
+  expect(await out(root, "rev-parse", "main")).toBe(before);
 });

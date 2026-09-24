@@ -7,7 +7,7 @@ import { mergeGate, mergeRefusal } from "../src/lib/mergeRace";
 import type { MergeState } from "../src/lib/merge";
 
 const state = (o: Partial<MergeState> = {}): MergeState => ({
-  repo: true, branch: "ag-6", base: "main", ahead: 2, dirty: false, rootBranch: "main", rootDirty: false,
+  repo: true, branch: "ag-6", base: "main", ahead: 2, dirty: false, rootBranch: "main", rootDirty: false, baseCheckedOut: true,
   committed: true, ready: true, blocked: "", merging: false, ...o,
 });
 

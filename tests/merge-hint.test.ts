@@ -13,7 +13,7 @@ const withMerged = (): Board => {
 const state = (over: Partial<MergeState> = {}): MergeRead => ({
   kind: "state",
   state: {
-    repo: true, branch: "ag-6", base: "main", ahead: 0, dirty: false, rootBranch: "main", rootDirty: false,
+    repo: true, branch: "ag-6", base: "main", ahead: 0, dirty: false, rootBranch: "main", rootDirty: false, baseCheckedOut: true,
     committed: false, ready: false, blocked: "nothing committed on ag-6 yet", merging: false, ...over,
   },
 });
