@@ -5,7 +5,7 @@ import { test, expect } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { fixtureDir } from "./fixtures";
 import { writeBoard, type Board } from "../src/lib/board";
-import { memoryFile } from "../src/lib/memory";
+import { memoryFile, writeMemory, remember, emptyMemory, MAX_FACTS, MAX_LINKS, MAX_TAGS, BODY_MAX, BY_MAX } from "../src/lib/memory";
 
 const dir = fixtureDir("memory-endpoint");
 
@@ -90,5 +90,43 @@ test("GET /memory?id= returns a node and its neighbours", async () => {
   expect(body.node.title).toBe("Lock the merge queue");
   expect(body.neighbours.map((n) => n.id)).toEqual([node.id]);
   expect((await fetch(`${base}/memory?id=mem_00000000`)).status).toBe(404);
+  server.stop(true);
+});
+
+test("memory-add reports a fact compaction dropped as not kept, and writes nothing", async () => {
+  const { server, post } = await start();
+  let m = emptyMemory();
+  for (let i = 0; i < MAX_FACTS; i++) m = remember(m, { kind: "decision", title: `decision ${i}` }, Date.now()).memory;
+  writeMemory(dir, m);
+  const before = readFileSync(memoryFile(dir), "utf8");
+  const res = await post("/action/memory-add", { kind: "note", title: "a late note" });
+  expect(res.status).toBe(409);
+  const out = (await res.json()) as { ok: boolean; dropped?: boolean; error?: string };
+  expect(out.ok).toBe(false);
+  expect(out.dropped).toBe(true);
+  expect(out.error).toMatch(/not kept/);
+  expect(readFileSync(memoryFile(dir), "utf8")).toBe(before);
+  server.stop(true);
+});
+
+test("memory-add refuses too many links or tags, or an oversized body or author", async () => {
+  const { server, post } = await start();
+  const links = Array.from({ length: 10_000 }, (_, i) => `file:f${i}.ts`);
+  const cases: [object, RegExp][] = [
+    [{ links }, /links/],
+    [{ links: links.slice(0, MAX_LINKS + 1) }, /links/],
+    [{ tags: Array.from({ length: MAX_TAGS + 1 }, (_, i) => `t${i}`) }, /tags/],
+    [{ body: "x".repeat(BODY_MAX + 1) }, /body/],
+    [{ author: "A".repeat(BY_MAX + 1) }, /author/],
+  ];
+  for (const [extra, why] of cases) {
+    const res = await post("/action/memory-add", { kind: "note", title: "t", ...extra });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as any).error).toMatch(why);
+  }
+  expect(() => readFileSync(memoryFile(dir), "utf8")).toThrow();
+  // at the cap is fine
+  const ok = await post("/action/memory-add", { kind: "note", title: "t", links: links.slice(0, MAX_LINKS) });
+  expect(ok.status).toBe(200);
   server.stop(true);
 });

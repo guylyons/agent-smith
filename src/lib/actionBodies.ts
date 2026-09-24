@@ -17,6 +17,7 @@
 import { z } from "zod";
 import { STAGES, sanitizeCard, sanitizeColumn, type Card, type Column, type Stage } from "./board";
 import { MOOD_KINDS, sanitizeNote, type MoodKind, type MoodNote } from "./mood";
+import { BODY_MAX, BY_MAX, MAX_LINKS, MAX_TAGS } from "./memory";
 import { ALLOWED_MODELS, ALLOWED_PERMISSION_MODES } from "../ghostty";
 
 /** A body's fields, or the message of the first rule it broke. A body that
@@ -300,12 +301,15 @@ export const MoodLinkUpdateBody = body({ label: text() });
 
 /** kind and title are judged by remember(), which words the refusal. */
 const strings = () => z.array(z.unknown()).catch([]).transform((a) => a.filter((x): x is string => typeof x === "string"));
+/** A list refused past `max` items, so a runaway caller gets a 400 rather
+ *  than a silent cut. */
+const cappedStrings = (max: number, message: string) => strings().refine((a) => a.length <= max, { error: message });
 export const MemoryAddBody = body({
   kind: text(),
   title: text(),
-  body: text(),
-  tags: strings(),
-  links: strings(),
-  author: trimmed(),
+  body: text().refine((s) => s.length <= BODY_MAX, { error: `body is over ${BODY_MAX} characters` }),
+  tags: cappedStrings(MAX_TAGS, `at most ${MAX_TAGS} tags`),
+  links: cappedStrings(MAX_LINKS, `at most ${MAX_LINKS} links`),
+  author: trimmed().refine((s) => s.length <= BY_MAX, { error: `author is over ${BY_MAX} characters` }),
 });
 export const MemoryForgetBody = body({ id: trimmed() });

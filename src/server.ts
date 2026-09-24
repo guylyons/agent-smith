@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { parseStatus, type AgentStatus } from "./schema";
 import { buildSnapshot, snapshotEvent, type Snapshot, type Sent } from "./lib/snapshot";
 import { archivableIds, archiveCards, restoreArchivedCard, visibleArchive, readArchive, loadArchiveForWrite, writeArchive, numberCards } from "./lib/archive";
-import { remember, forget, compactMemory, memoryView, searchMemory, neighbours, formatResults, readMemory, loadMemoryForWrite, writeMemory, type FactKind } from "./lib/memory";
+import { record, forget, compactMemory, memoryView, searchMemory, neighbours, formatResults, readMemory, loadMemoryForWrite, writeMemory, MAX_FACTS, type FactKind } from "./lib/memory";
 import { ensureStatusDir, statusDir } from "./lib/paths";
 import { sandboxLeakWarning } from "./lib/sandbox";
 import { scanLiveSessions, readConversation, readSubagents } from "./scan";
@@ -1086,13 +1086,17 @@ export function makeServer(
     const memory = loadMemoryForWrite(dir);
     if (!memory) return json({ ok: false, error: MEMORY_UNREADABLE }, 500);
     const now = Date.now();
-    let r: ReturnType<typeof remember>;
+    let r: ReturnType<typeof record>;
     try {
-      r = remember(memory, { kind: body.kind as FactKind, title: body.title, body: body.body, tags: body.tags, links: body.links, by: body.author || undefined }, now);
+      r = record(memory, { kind: body.kind as FactKind, title: body.title, body: body.body, tags: body.tags, links: body.links, by: body.author || undefined }, now);
     } catch (e) {
       return json({ ok: false, error: e instanceof Error ? e.message : String(e) }, 400);
     }
-    writeMemory(dir, compactMemory(r.memory, now));
+    // Compaction evicted the new fact itself: say so, and leave the file be.
+    if (r.dropped) {
+      return json({ ok: false, dropped: true, error: `not kept: memory is full (${MAX_FACTS} facts), every one of them kept ahead of a new ${body.kind}; forget an old fact to make room` }, 409);
+    }
+    writeMemory(dir, r.memory);
     return json({ ok: true, node: r.node });
   }
 

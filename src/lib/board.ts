@@ -431,6 +431,7 @@ export function cardTaskFooter(board: Board, id: string, server: string, agentNa
     'in place of "as":"assignee".',
     'If a call is rejected with "you are no longer assigned to this card", you',
     "were taken off it: stop work on it and do not write to it again.",
+    "Before you plan, search the team memory (memory_search) for past gotchas.",
     "STEP 2: do the work. Whenever you find or decide something worth knowing,",
     "post it as a card-comment (same shape as above). Keep comments plain and",
     "short -- write like a quick note to a busy teammate, no jargon or filler,",

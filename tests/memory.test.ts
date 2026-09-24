@@ -10,6 +10,7 @@ import {
   emptyMemory, remember, forget, sanitizeMemory, normalizeLink, cardNodes, memoryView,
   searchMemory, neighbours, compactMemory, summarize, formatResults,
   readMemory, loadMemoryForWrite, writeMemory, memoryFile, MAX_FACTS, COMPACT_AFTER_MS, SUMMARY_MAX,
+  record, MAX_LINKS, MAX_TAGS, BY_MAX, BODY_MAX,
 } from "../src/lib/memory";
 
 const DAY = 86_400_000;
@@ -171,6 +172,67 @@ test("over the cap, compaction evicts old notes before decisions", () => {
   expect(c.nodes).toHaveLength(MAX_FACTS);
   expect(c.nodes.some((n) => n.title === "oldest decision")).toBe(true);
   expect(c.nodes.some((n) => n.title === "note 0")).toBe(false);
+});
+
+// A fact compaction evicts on the way in must not be reported as kept: with
+// the store full of higher-ranked facts, a new note is the first to go.
+function fullOfDecisions() {
+  let m = emptyMemory();
+  for (let i = 0; i < MAX_FACTS; i++) m = remember(m, { kind: "decision", title: `decision ${i}` }, NOW).memory;
+  return m;
+}
+
+test("record says dropped when compaction evicts the new fact, and leaves the memory as it was", () => {
+  const full = fullOfDecisions();
+  const r = record(full, { kind: "note", title: "a late note" }, NOW + 1);
+  expect(r.dropped).toBe(true);
+  expect(r.memory.nodes.some((n) => n.title === "a late note")).toBe(false);
+  expect(r.memory.nodes).toHaveLength(MAX_FACTS);
+});
+
+test("record keeps a fact that outranks what it evicts, and compacts", () => {
+  let m = remember(emptyMemory(), { kind: "note", title: "old note" }, 1).memory;
+  for (let i = 1; i < MAX_FACTS; i++) m = remember(m, { kind: "decision", title: `decision ${i}` }, NOW).memory;
+  const r = record(m, { kind: "decision", title: "the new one" }, NOW + 1);
+  expect(r.dropped).toBe(false);
+  expect(r.memory.nodes.some((n) => n.id === r.node.id)).toBe(true);
+  expect(r.memory.nodes.some((n) => n.title === "old note")).toBe(false);
+  expect(r.memory.nodes).toHaveLength(MAX_FACTS);
+});
+
+// ---- caps per fact -----------------------------------------------------------
+
+const manyLinks = (n: number) => Array.from({ length: n }, (_, i) => `file:src/f${i}.ts`);
+const manyTags = (n: number) => Array.from({ length: n }, (_, i) => `t${i}`);
+
+test("remember caps links and tags per fact, even across same-title updates", () => {
+  let m = remember(emptyMemory(), { kind: "note", title: "busy", links: manyLinks(MAX_LINKS + 50), tags: manyTags(MAX_TAGS + 5) }, NOW).memory;
+  expect(m.nodes[0]!.links).toHaveLength(MAX_LINKS);
+  expect(m.nodes[0]!.tags).toHaveLength(MAX_TAGS);
+  // an update merges old links in; the total stays capped and the new link is kept
+  m = remember(m, { kind: "note", title: "busy", links: ["repo:fresh"], tags: ["fresh"] }, NOW + 1).memory;
+  expect(m.nodes[0]!.links).toHaveLength(MAX_LINKS);
+  expect(m.nodes[0]!.links).toContain("repo:fresh");
+  expect(m.nodes[0]!.tags).toHaveLength(MAX_TAGS);
+  expect(m.nodes[0]!.tags).toContain("fresh");
+});
+
+test("remember caps by and body length", () => {
+  const { node } = remember(emptyMemory(), { kind: "note", title: "t", body: "x".repeat(BODY_MAX + 10), by: "Y".repeat(BY_MAX + 10) }, NOW);
+  expect(node.body).toHaveLength(BODY_MAX);
+  expect(node.by).toHaveLength(BY_MAX);
+});
+
+test("sanitizeMemory caps links, tags, by and body in a hand-edited file", () => {
+  const m = sanitizeMemory({ nodes: [{
+    id: "mem_00000001", kind: "note", title: "big", at: NOW,
+    links: manyLinks(50_000), tags: manyTags(1000), by: "Z".repeat(10_000), body: "b".repeat(BODY_MAX * 3),
+  }] });
+  const n = m.nodes[0]!;
+  expect(n.links).toHaveLength(MAX_LINKS);
+  expect(n.tags).toHaveLength(MAX_TAGS);
+  expect(n.by).toHaveLength(BY_MAX);
+  expect(n.body).toHaveLength(BODY_MAX);
 });
 
 test("the view compacts old cards too, without touching the stored memory", () => {

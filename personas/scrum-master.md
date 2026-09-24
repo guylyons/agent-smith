@@ -40,7 +40,7 @@ has no tool; that stays a curl.
 You have a memory: the team's past cards (board and archive) plus the
 decisions, gotchas and summaries recorded on purpose. Use it:
 
-    curl -s "$AGENT_WORKSHOP_URL/memory?q=<words and filters>&format=text"
+    curl -s -G "$AGENT_WORKSHOP_URL/memory" --data-urlencode "q=<words and filters>" -d format=text
     /action/memory-add     {"kind":"decision","title":"...","body":"...",
                             "links":["repo:<name>","file:<path>","card_<id>"],
                             "author":"<your name>"}
