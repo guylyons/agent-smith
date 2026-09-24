@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { parseStatus, type AgentStatus } from "./schema";
 import { buildSnapshot, snapshotEvent, type Snapshot, type Sent } from "./lib/snapshot";
 import { archivableIds, archiveCards, restoreArchivedCard, visibleArchive, readArchive, loadArchiveForWrite, writeArchive } from "./lib/archive";
+import { remember, forget, compactMemory, memoryView, searchMemory, neighbours, formatResults, readMemory, loadMemoryForWrite, writeMemory, type FactKind } from "./lib/memory";
 import { ensureStatusDir, statusDir } from "./lib/paths";
 import { scanLiveSessions, readConversation, readSubagents } from "./scan";
 import { matchChat } from "./lib/chatsearch";
@@ -16,7 +17,7 @@ import { readMood, writeMood, moodFile, formatMood, addNote as addMoodNote, upda
 import { mainCheckout } from "./lib/worktree";
 import { focusSession, interruptSession, killAgent, sendPrompt, sendFreshPrompt, spawnAgent } from "./ghostty";
 import { readRepo } from "./repo";
-import { readMergeState, readMergePreview, mergeWork, holdForClaims, cleanupMergedWork } from "./lib/merge";
+import { readMergeState, readMergePreview, mergeWork, holdForClaims, cleanupMergedWork, planWorktreeCleanup, cleanupMergedWorktrees } from "./lib/merge";
 import { saveUpload, resolveUploadPath } from "./lib/uploads";
 import { chooseFolder } from "./lib/chooser";
 import { initialIdle, onConnect, onDisconnect, shouldShutDown, type IdleState } from "./lib/idle";
@@ -29,6 +30,7 @@ import {
   CardRestoreBody, ColumnArchiveBody, CardAddBody, CommentDeleteBody, CardMoveBody, CardUpdateBody, CardMergeBody,
   CardCommentBody, SendTaskBody, CardAssignBody, UploadBody, CrewNoteBody, RenameBody, SpriteBody, PromptBody,
   MoodNoteAddBody, MoodNoteRestoreBody, MoodNoteRef, MoodNoteUpdateBody, MoodLinkAddBody, MoodLinkRef, MoodLinkUpdateBody,
+  MemoryAddBody, MemoryForgetBody, WorktreeCleanupBody,
 } from "./lib/actionBodies";
 
 function json(body: unknown, status = 200): Response {
@@ -134,6 +136,12 @@ const MERGE_NOTE_AUTHOR = "THE LINE";
 const envScanMs = Number(process.env.AGENT_SCAN_INTERVAL_MS);
 const SCAN_INTERVAL_MS = envScanMs > 0 ? envScanMs : 20_000;
 
+/** Shown at / when dist/ hasn't been built yet. */
+const UNBUILT_PAGE = `<!doctype html><meta charset="utf-8"><title>Agent Smith</title>
+<body style="font:14px ui-monospace,monospace;padding:2em">
+<p>The dashboard UI hasn't been built yet.</p>
+<p>Run <code>bun run build</code> in this checkout, then reload.</p>`;
+
 export function makeServer(
   port: number,
   opts: {
@@ -161,12 +169,14 @@ export function makeServer(
     idleCheckMs?: number;
     /** How often /events sends a keep-alive comment (see the stream below). */
     heartbeatMs?: number;
+    /** Where the built UI lives. Injectable so tests needn't build it. */
+    distDir?: string;
   } = {},
 ) {
   const {
     scan = false, scanIntervalMs = SCAN_INTERVAL_MS, deliver = sendPrompt, deliverFresh = sendFreshPrompt, spawn = spawnAgent, quit = killAgent,
     onWindowsClosed, idleGraceMs = 5_000, idleStartupGraceMs = 30_000, idleCheckMs = 1_000,
-    heartbeatMs = 5_000,
+    heartbeatMs = 5_000, distDir = join(import.meta.dir, "..", "dist"),
   } = opts;
   const dir = ensureStatusDir();
 
@@ -853,6 +863,23 @@ export function makeServer(
     return json({ ...r, cleanup, ...(quitResult ? { quit: quitResult } : {}) });
   }
 
+  // worktree-cleanup (CONFIG): worktrees merged by hand never went through
+  // MERGE, so nothing removed them. The repos are the ones the board and the
+  // agents point at; every agent on the desk counts as live, so its worktree
+  // stays. A preview is read-only; removing is the human's confirm from the
+  // dashboard, as MERGE is.
+  async function worktreeCleanup({ req }: Ctx, body: z.output<typeof WorktreeCleanupBody>): Promise<Response> {
+    const board = readBoard(dir);
+    const agents = readSnapshot(dir, Date.now()).agents;
+    const repos = [...board.cards.map((k) => k.repoPath ?? ""), ...agents.map((a) => a.cwd)];
+    const live = agents.map((a) => a.cwd);
+    if (!body.remove) return json({ ok: true, ...(await planWorktreeCleanup(repos, live)) });
+    if (req.headers.get("sec-fetch-site") !== "same-origin") {
+      return json({ ok: false, error: "cleaning up worktrees is a human's call — use CONFIG in the dashboard" }, 403);
+    }
+    return json({ ok: true, ...(await cleanupMergedWorktrees(repos, live, body.remove)) });
+  }
+
   async function cardComment(_ctx: Ctx, body: z.output<typeof CardCommentBody>, card: Card, board: Board, title: string): Promise<Response> {
     const cardId = card.id;
     const actor = resolveActor(card, body);
@@ -981,6 +1008,36 @@ export function makeServer(
     return json(r, r.ok ? 200 : 400);
   }
 
+  // ---- memory-*: the team memory (src/lib/memory.ts) ---------------------------
+  // Read, change and write with no await between, so two writers can't
+  // interleave; compacted on every write so the file stays small. A memory
+  // file that is there but unreadable is refused, never overwritten.
+
+  const MEMORY_UNREADABLE = "the memory file can't be read, so writing would overwrite it; fix or move .line-memory.json";
+
+  function memoryAdd(_ctx: Ctx, body: z.output<typeof MemoryAddBody>): Response {
+    const memory = loadMemoryForWrite(dir);
+    if (!memory) return json({ ok: false, error: MEMORY_UNREADABLE }, 500);
+    const now = Date.now();
+    let r: ReturnType<typeof remember>;
+    try {
+      r = remember(memory, { kind: body.kind as FactKind, title: body.title, body: body.body, tags: body.tags, links: body.links, by: body.author || undefined }, now);
+    } catch (e) {
+      return json({ ok: false, error: e instanceof Error ? e.message : String(e) }, 400);
+    }
+    writeMemory(dir, compactMemory(r.memory, now));
+    return json({ ok: true, node: r.node });
+  }
+
+  function memoryForget(_ctx: Ctx, { id }: z.output<typeof MemoryForgetBody>): Response {
+    const memory = loadMemoryForWrite(dir);
+    if (!memory) return json({ ok: false, error: MEMORY_UNREADABLE }, 500);
+    const next = forget(memory, id);
+    if (!next) return json({ ok: false, error: `no memory: ${id}` }, 404);
+    writeMemory(dir, compactMemory(next, Date.now()));
+    return json({ ok: true });
+  }
+
   // ---- mood-*: the MOOD board (src/lib/mood.ts) -------------------------------
   // The same discipline as card-*: each action names the one note or link it
   // changes and applies it to a fresh read, so the human dragging a note and
@@ -1102,7 +1159,10 @@ export function makeServer(
     "send-task": withCard(SendTaskBody, sendTask),
     "card-assign": withCard(CardAssignBody, cardAssign),
     "upload": withBody(UploadBody, upload),
+    "worktree-cleanup": withBody(WorktreeCleanupBody, worktreeCleanup),
     "crew-note": withBody(CrewNoteBody, crewNote),
+    "memory-add": withBody(MemoryAddBody, memoryAdd),
+    "memory-forget": withBody(MemoryForgetBody, memoryForget),
     "mood-note-add": withBody(MoodNoteAddBody, moodNoteAdd),
     "mood-note-update": withMoodNote(MoodNoteUpdateBody, moodNoteUpdate),
     "mood-note-delete": withMoodNote(NoFields, moodNoteDelete),
@@ -1193,6 +1253,26 @@ export function makeServer(
       if (url.pathname === "/archive") {
         const board = readBoard(dir);
         return json({ cards: visibleArchive(board, readArchive(dir)) });
+      }
+
+      // the team memory: recorded facts plus every card, searched by keyword
+      // and filter (see searchMemory). `?id=` is one node and its neighbours;
+      // `?format=text` is the digest the MCP memory tools return.
+      if (url.pathname === "/memory") {
+        const now = Date.now();
+        const view = memoryView(readMemory(dir), readBoard(dir), readArchive(dir), now);
+        const id = url.searchParams.get("id");
+        if (id !== null) {
+          const node = view.find((n) => n.id === id);
+          if (!node) return json({ error: `no memory: ${id}` }, 404);
+          const near = neighbours(view, id);
+          if (url.searchParams.get("format") === "text") return new Response(formatResults([node, ...near]), { headers: { "content-type": "text/plain; charset=utf-8" } });
+          return json({ node, neighbours: near });
+        }
+        const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit")) || 20));
+        const results = searchMemory(view, url.searchParams.get("q") ?? "", { limit, now });
+        if (url.searchParams.get("format") === "text") return new Response(formatResults(results), { headers: { "content-type": "text/plain; charset=utf-8" } });
+        return json({ results });
       }
 
       // one card + the column list — what a worker re-reads its ticket with
@@ -1286,8 +1366,12 @@ export function makeServer(
 
       // static
       const path = url.pathname === "/" ? "/index.html" : url.pathname;
-      const file = Bun.file(join(import.meta.dir, "..", "dist", path));
+      const file = Bun.file(join(distDir, path));
       if (await file.exists()) return new Response(file);
+      // dist/ isn't tracked, so a fresh worktree's `bun run dev` serves before
+      // anything is built. Say so, rather than a bare "not found" that reads
+      // as a broken route.
+      if (path === "/index.html") return new Response(UNBUILT_PAGE, { status: 503, headers: { "content-type": "text/html; charset=utf-8" } });
       return new Response("not found", { status: 404 });
     },
   });

@@ -1706,6 +1706,7 @@ body{background:transparent}
 
 /* ---- settings: background upload + dim -------------------------------------- */
 .settings-bgfile{margin-top:8px}
+.settings-sweep{margin:4px 0 0;padding-left:18px;max-height:180px;overflow:auto;font-size:13px;line-height:1.6;color:var(--dim);overflow-wrap:anywhere}
 .settings-bgpreview{
   height:84px;margin-top:8px;
   background-size:cover;background-position:center;

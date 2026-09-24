@@ -367,3 +367,44 @@ test("card_read shows a card's file claim, and says so when there is none", asyn
     .toContain("touches: src/lib/board.ts");
   expect(formatCard(board as any, "card_1")).toContain("touches: (none)");
 });
+
+// ---- memory_*: the team memory (src/lib/memory.ts) ---------------------------
+
+test("memory_search asks /memory with the query and formats the results", async () => {
+  const node = { id: "mem_1234abcd", kind: "decision", title: "One merge at a time", at: 0, links: ["repo:agent-smith"] };
+  const { api, calls } = fakeApi({ "/memory?q=repo%3Aagent-smith+merge&limit=5": { status: 200, body: { results: [node] } } });
+  const res = await call("memory_search", { query: "repo:agent-smith merge", limit: 5 }, api);
+  expect(calls[0]).toEqual({ method: "GET", path: "/memory?q=repo%3Aagent-smith+merge&limit=5" });
+  expect(res.result.content[0].text).toContain("mem_1234abcd");
+  expect(res.result.content[0].text).toContain("One merge at a time");
+});
+
+test("memory_search with an id shows that node and its neighbours", async () => {
+  const node = { id: "card:card_1", kind: "card", title: "Fix login", at: 0 };
+  const near = { id: "mem_1234abcd", kind: "gotcha", title: "Cookie path", at: 0 };
+  const { api, calls } = fakeApi({ "/memory?id=card%3Acard_1": { status: 200, body: { node, neighbours: [near] } } });
+  const text = (await call("memory_search", { id: "card:card_1" }, api)).result.content[0].text;
+  expect(calls[0]!.path).toBe("/memory?id=card%3Acard_1");
+  expect(text).toContain("Fix login");
+  expect(text).toContain("Cookie path");
+});
+
+test("memory_add posts the fact signed with our name", async () => {
+  const { api, calls } = fakeApi({ "/action/memory-add": { status: 200, body: { ok: true, node: { id: "mem_1234abcd", kind: "note", title: "t", at: 0 } } } });
+  const res = await call("memory_add", { kind: "note", title: "t", body: "b", links: ["repo:x"], tags: ["y"] }, api);
+  expect(calls.at(-1)).toEqual({ method: "POST", path: "/action/memory-add", body: { kind: "note", title: "t", body: "b", links: ["repo:x"], tags: ["y"], author: "ANVIL" } });
+  expect(res.result.content[0].text).toContain("mem_1234abcd");
+});
+
+test("memory_add without a title is a tool error and posts nothing", async () => {
+  const { api, calls } = fakeApi();
+  const res = await call("memory_add", { kind: "note" }, api);
+  expect(res.result.isError).toBe(true);
+  expect(calls).toEqual([]);
+});
+
+test("memory_forget posts the id", async () => {
+  const { api, calls } = fakeApi();
+  await call("memory_forget", { id: "mem_1234abcd" }, api);
+  expect(calls).toEqual([{ method: "POST", path: "/action/memory-forget", body: { id: "mem_1234abcd" } }]);
+});

@@ -1476,3 +1476,41 @@ test("the footer's fallback still works with the crew id left in: author + crew 
   expect(readSnapshot(dir, Date.now()).board.cards[0]!.comments!.at(-1)!.author).toBe("RIPLEY");
   server.stop(true);
 });
+
+test("GET / before the UI is built says to build it, not a bare not found", async () => {
+  // A fresh worktree's `bun run dev` serves before dist/ exists; the window
+  // then showed only "not found", which read as a broken route.
+  reset();
+  process.env.AGENT_STATUS_DIR = dir;
+  const distDir = join(dir, "no-dist");
+  const { makeServer } = await import("../src/server");
+  const server = makeServer(0, { distDir });
+  try {
+    const res = await fetch(`http://localhost:${server.port}/`);
+    expect(res.status).toBe(503);
+    expect(res.headers.get("content-type")).toContain("text/html");
+    expect(await res.text()).toContain("bun run build");
+    // a missing asset is still a plain 404
+    const asset = await fetch(`http://localhost:${server.port}/nope.js`);
+    expect(asset.status).toBe(404);
+  } finally {
+    server.stop(true);
+  }
+});
+
+test("GET / serves dist/index.html once built", async () => {
+  reset();
+  process.env.AGENT_STATUS_DIR = dir;
+  const distDir = join(dir, "dist");
+  mkdirSync(distDir, { recursive: true });
+  writeFileSync(join(distDir, "index.html"), "<p>built</p>");
+  const { makeServer } = await import("../src/server");
+  const server = makeServer(0, { distDir });
+  try {
+    const res = await fetch(`http://localhost:${server.port}/`);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("<p>built</p>");
+  } finally {
+    server.stop(true);
+  }
+});

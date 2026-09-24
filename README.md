@@ -245,6 +245,7 @@ Sixteen tools, named for what they do (the six `mood_*` ones are covered under [
 | `agents_list` | The live sessions — the only things a card can be assigned to |
 | `crew_note` | Add a line to (or rewrite) your own notes — see [Crew](#crew) |
 | `mood_read`, `mood_note_add`, `mood_note_update`, `mood_note_delete`, `mood_link`, `mood_unlink` | Read and write the [MOOD board](#the-mood-board) |
+| `memory_search`, `memory_add`, `memory_forget` | Search and write the [team memory](#team-memory) |
 
 Writes go through the dashboard's HTTP actions, not the board file, so an MCP
 write is exactly as safe as the `curl` it replaces: applied against a fresh read,
@@ -311,6 +312,28 @@ on the open page live, like the board's.
 
 Stored in `~/.agent-status/.mood.json`. Your pan and zoom are remembered per
 browser.
+
+## Team memory
+
+What was done before and why, for the scrum master or any agent. It is a small
+graph: **cards** (every card on the board and in the archive, read live, never
+copied) plus **facts** agents record on purpose (`decision`, `gotcha`, `note`,
+`summary`), stored in `.line-memory.json` next to `.line.json`. A node links to
+cards, other facts, and hubs like `repo:agent-smith`, `file:src/lib/merge.ts`
+or `person:VASQUEZ`; nodes sharing a file or card are neighbours.
+
+Search is plain keywords plus filters, no dependencies or API calls:
+`kind:decision,gotcha`, `repo:`, `file:` (a path or a folder), `person:`,
+`tag:`, `card:`, `near:<id>` (linked nodes), `since:14d`. `GET /memory?q=...`
+returns JSON (`&format=text` for a digest, `?id=<node>` for one node and its
+neighbours); `POST /action/memory-add {"kind","title","body","links","tags","author"}`
+records a fact (same kind and title again updates it) and
+`POST /action/memory-forget {"id"}` removes one.
+
+It stays lean by itself: every write compacts it. A fact untouched for 30 days
+keeps only its first sentence; past 400 facts the oldest notes go first,
+decisions and summaries last. Old cards show compacted the same way, but their
+full text stays in the archive.
 
 ## The agent pane
 
