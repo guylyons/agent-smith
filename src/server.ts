@@ -136,6 +136,12 @@ const MERGE_NOTE_AUTHOR = "THE LINE";
 const envScanMs = Number(process.env.AGENT_SCAN_INTERVAL_MS);
 const SCAN_INTERVAL_MS = envScanMs > 0 ? envScanMs : 20_000;
 
+/** Shown at / when dist/ hasn't been built yet. */
+const UNBUILT_PAGE = `<!doctype html><meta charset="utf-8"><title>Agent Smith</title>
+<body style="font:14px ui-monospace,monospace;padding:2em">
+<p>The dashboard UI hasn't been built yet.</p>
+<p>Run <code>bun run build</code> in this checkout, then reload.</p>`;
+
 export function makeServer(
   port: number,
   opts: {
@@ -163,12 +169,14 @@ export function makeServer(
     idleCheckMs?: number;
     /** How often /events sends a keep-alive comment (see the stream below). */
     heartbeatMs?: number;
+    /** Where the built UI lives. Injectable so tests needn't build it. */
+    distDir?: string;
   } = {},
 ) {
   const {
     scan = false, scanIntervalMs = SCAN_INTERVAL_MS, deliver = sendPrompt, deliverFresh = sendFreshPrompt, spawn = spawnAgent, quit = killAgent,
     onWindowsClosed, idleGraceMs = 5_000, idleStartupGraceMs = 30_000, idleCheckMs = 1_000,
-    heartbeatMs = 5_000,
+    heartbeatMs = 5_000, distDir = join(import.meta.dir, "..", "dist"),
   } = opts;
   const dir = ensureStatusDir();
 
@@ -1358,8 +1366,12 @@ export function makeServer(
 
       // static
       const path = url.pathname === "/" ? "/index.html" : url.pathname;
-      const file = Bun.file(join(import.meta.dir, "..", "dist", path));
+      const file = Bun.file(join(distDir, path));
       if (await file.exists()) return new Response(file);
+      // dist/ isn't tracked, so a fresh worktree's `bun run dev` serves before
+      // anything is built. Say so, rather than a bare "not found" that reads
+      // as a broken route.
+      if (path === "/index.html") return new Response(UNBUILT_PAGE, { status: 503, headers: { "content-type": "text/html; charset=utf-8" } });
       return new Response("not found", { status: 404 });
     },
   });
