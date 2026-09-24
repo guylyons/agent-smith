@@ -100,7 +100,9 @@ export const SpawnBody = body({
   cardId: maybeTrimmed(),
   force: flag(),
   model: oneOf(ALLOWED_MODELS),
-  permissionMode: oneOf(ALLOWED_PERMISSION_MODES),
+  // "default" is the old name of "manual" — mapped rather than dropped, since
+  // a spawn with no mode from outside the browser falls back to auto.
+  permissionMode: z.preprocess((v) => (v === "default" ? "manual" : v), oneOf(ALLOWED_PERMISSION_MODES)),
   // Blank means "none". The worktree name is slugged inside createWorktree,
   // so it is passed on as typed.
   worktree: maybeTrimmed(),
