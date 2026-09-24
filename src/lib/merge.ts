@@ -24,6 +24,9 @@ export type MergeFacts = {
   base: string;
   /** commits on `branch` that `base` doesn't have */
   ahead: number;
+  /** the full SHA `branch` points at ("" when there is no branch). An amend or
+   *  rebase can keep `ahead` the same; this is what says the work changed. */
+  tip: string;
   /** uncommitted changes in the agent's working tree */
   dirty: boolean;
   /** the branch the MAIN checkout is sitting on — where the merge would run */
@@ -145,6 +148,12 @@ async function mergedInto(cwd: string, branch: string, base: string): Promise<bo
   return merges.stdout.split("\n").some((line) => line.split(" ").slice(2).includes(tip.stdout));
 }
 
+/** The full SHA `ref` names, or "" when it names nothing. */
+async function revParse(cwd: string, ref: string): Promise<string> {
+  const r = await git(cwd, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
+  return r.code === 0 ? r.stdout : "";
+}
+
 /** Is `refs/heads/<base>` the checked-out branch of any worktree? */
 async function checkedOutAnywhere(root: string, base: string): Promise<boolean> {
   if (!base) return false;
@@ -153,7 +162,7 @@ async function checkedOutAnywhere(root: string, base: string): Promise<boolean> 
 }
 
 const NOT_A_REPO: MergeState = {
-  repo: false, branch: "", base: "", ahead: 0, dirty: false, rootBranch: "", rootDirty: false, baseCheckedOut: false,
+  repo: false, branch: "", base: "", ahead: 0, tip: "", dirty: false, rootBranch: "", rootDirty: false, baseCheckedOut: false,
   committed: false, ready: false, blocked: "not a git repository", merging: false,
 };
 
@@ -168,13 +177,14 @@ async function factsFor(cwd: string, root: string): Promise<MergeFacts> {
   const baseCheckedOut = await checkedOutAnywhere(root, base);
   let ahead = 0;
   let landed = false;
+  const tip = branch ? await revParse(cwd, branch) : "";
   if (branch && base && branch !== base) {
     const count = await git(cwd, ["rev-list", "--count", `${base}..${branch}`]);
     ahead = count.code === 0 ? Number.parseInt(count.stdout, 10) || 0 : 0;
     if (ahead === 0) landed = await mergedInto(cwd, branch, base);
   }
 
-  return { repo: true, branch, base, ahead, dirty, rootBranch, rootDirty, baseCheckedOut, landed };
+  return { repo: true, branch, base, ahead, tip, dirty, rootBranch, rootDirty, baseCheckedOut, landed };
 }
 
 /** Everything the card needs to know about landing this work. Best-effort: a
@@ -202,30 +212,36 @@ export async function readMergeState(cwd: string): Promise<MergeState> {
  * lists them) and the files they change against the merge base
  * (`base...branch`, as `git diff --stat` counts them). Read-only. A branch
  * with nothing to land reads as an empty preview; a git failure as `error`,
- * one line, for the card to say instead of the list.
+ * one line, for the card to say instead of the list. Everything is read at
+ * one tip SHA, which the preview carries: that is what the human saw, and
+ * what a merge of it must still find (see mergeWork's `tip`).
  */
 export async function readMergePreview(cwd: string): Promise<MergePreview | { error: string }> {
   if (!cwd) return { error: "no working directory for this card" };
   const root = await repoRoot(cwd);
   if (!root) return { error: "not a git repository" };
   const [branch, base] = await Promise.all([currentBranch(cwd), pickBase(root)]);
-  const empty = buildPreview({ branch, base, log: "", totalCommits: 0, numstat: "" });
-  if (!branch || !base || branch === base) return empty;
+  const tip = branch ? await revParse(cwd, branch) : "";
+  const empty = buildPreview({ branch, base, tip, log: "", totalCommits: 0, numstat: "" });
+  if (!branch || !base || branch === base || !tip) return empty;
 
   const [count, log, stat] = await Promise.all([
-    git(cwd, ["rev-list", "--count", `${base}..${branch}`]),
-    git(cwd, ["log", `--max-count=${MAX_COMMITS}`, "--format=%h%x09%s", `${base}..${branch}`]),
-    git(cwd, ["diff", "--numstat", "--no-color", `${base}...${branch}`]),
+    git(cwd, ["rev-list", "--count", `${base}..${tip}`]),
+    git(cwd, ["log", `--max-count=${MAX_COMMITS}`, "--format=%h%x09%s", `${base}..${tip}`]),
+    git(cwd, ["diff", "--numstat", "--no-color", `${base}...${tip}`]),
   ]);
   const failed = [count, log, stat].find((r) => r.code !== 0);
   if (failed) {
     const why = failed.stderr.split("\n").find((l) => l.trim()) ?? "";
     return { error: `git could not read ${branch}: ${why || "unknown error"}` };
   }
-  return buildPreview({ branch, base, log: log.stdout, totalCommits: Number.parseInt(count.stdout, 10) || 0, numstat: stat.stdout });
+  return buildPreview({ branch, base, tip, log: log.stdout, totalCommits: Number.parseInt(count.stdout, 10) || 0, numstat: stat.stdout });
 }
 
 export type MergeResult = { ok: boolean; branch?: string; base?: string; error?: string };
+
+/** The refusal for a merge of a tip that is no longer the branch's. */
+export const BRANCH_MOVED = "the branch moved since you looked; review again";
 
 /**
  * Land the branch `cwd` is on into the trunk, in the MAIN checkout — a real
@@ -233,8 +249,12 @@ export type MergeResult = { ok: boolean; branch?: string; base?: string; error?:
  * anything `readMergeState` says isn't ready rather than half-doing it, and a
  * conflicted merge is aborted so the user's checkout is never left mid-merge
  * by a button press.
+ *
+ * `tip` is the branch tip SHA the human reviewed. When given, a branch that
+ * points anywhere else now (a new commit, an amend, a rebase) is refused, and
+ * what lands is that SHA — not whatever the branch name reaches a moment later.
  */
-export async function mergeWork(cwd: string): Promise<MergeResult> {
+export async function mergeWork(cwd: string, opts: { tip?: string } = {}): Promise<MergeResult> {
   const root = await repoRoot(cwd);
   if (!root) return { ok: false, error: "not a git repository" };
 
@@ -246,12 +266,15 @@ export async function mergeWork(cwd: string): Promise<MergeResult> {
     // which would count our own queue slot as "a merge in progress" and refuse.
     // The facts are current, so whatever landed ahead of us is already seen.
     const facts = await factsFor(cwd, root);
+    if (opts.tip && facts.tip !== opts.tip) return { ok: false, error: BRANCH_MOVED };
     const verdict = mergeVerdict(facts);
     if (!verdict.ready) return { ok: false, error: verdict.blocked || "nothing to merge" };
 
-    if (!facts.rootBranch && !facts.baseCheckedOut) return mergeDetached(root, facts.branch, facts.base);
+    if (!facts.rootBranch && !facts.baseCheckedOut) return mergeDetached(root, facts.branch, facts.base, facts.tip);
 
-    const merge = await git(root, ["merge", "--no-ff", "--no-edit", facts.branch]);
+    // Merge the SHA just checked, named as the branch, so a commit landing on
+    // the branch between that check and this line can't ride along.
+    const merge = await git(root, ["merge", "--no-ff", "-m", `Merge branch '${facts.branch}'`, facts.tip]);
     if (merge.code !== 0) {
       await git(root, ["merge", "--abort"]);
       const why = (merge.stdout || merge.stderr).split("\n").find((l) => l.trim()) ?? "";
@@ -265,9 +288,9 @@ export async function mergeWork(cwd: string): Promise<MergeResult> {
  *  for a repo whose main checkout is detached and has no worktree on the
  *  trunk. jj keeps a colocated repo like that, and picks up the moved trunk
  *  on its next command. The ref only moves if it is still where we read it. */
-async function mergeDetached(root: string, branch: string, base: string): Promise<MergeResult> {
+async function mergeDetached(root: string, branch: string, base: string, tip: string): Promise<MergeResult> {
   const refused = (why: string): MergeResult => ({ ok: false, error: `could not merge ${branch} into ${base} — ${why || "merge it by hand"}` });
-  const [baseTip, branchTip] = await Promise.all([git(root, ["rev-parse", base]), git(root, ["rev-parse", branch])]);
+  const [baseTip, branchTip] = await Promise.all([git(root, ["rev-parse", base]), git(root, ["rev-parse", tip])]);
   if (baseTip.code !== 0 || branchTip.code !== 0) return refused(baseTip.stderr || branchTip.stderr);
 
   // Exit 1 is a conflict; the output then names the conflicted paths.

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchMergeRead, mergeCard, type MergeState } from "./actions";
-import { mergeGate, mergeRefusal } from "../lib/mergeRace";
+import { mergeGate, mergeRefusal, previewKey } from "../lib/mergeRace";
 import { mergeHint, type MergeRead } from "../lib/mergeHint";
 import type { Board, Card } from "../lib/board";
 import { playKeyClick } from "./sounds";
@@ -78,6 +78,8 @@ export function MergeKey({ board, card, hasAssignee, onMove }: {
   // should push the cap in for as long as the key is down, same as a finger.
   const [down, setDown] = useState(false);
   const [landed, setLanded] = useState<{ branch: string; base: string } | null>(null);
+  // The tip SHA of the WHAT WILL LAND list on screen — what the human reviewed.
+  const [shownTip, setShownTip] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Disarm on a timeout, and whenever the card's git state changes underneath
@@ -86,7 +88,7 @@ export function MergeKey({ board, card, hasAssignee, onMove }: {
     if (phase !== "armed") return;
     timer.current = setTimeout(() => setPhase("idle"), ARM_MS);
     return () => { if (timer.current) clearTimeout(timer.current); };
-  }, [phase, state?.ahead, state?.branch]);
+  }, [phase, state?.tip, state?.branch]);
 
   // A merged key stays latched with its own legend for the life of the modal:
   // the state behind it now says "nothing to merge", and blinking the key out
@@ -103,16 +105,20 @@ export function MergeKey({ board, card, hasAssignee, onMove }: {
 
   async function fire() {
     setPhase("working");
+    // What the human reviewed: the preview's tip, or the key's own if the
+    // preview couldn't be read. The server refuses the merge if the branch no
+    // longer points there, so an unseen commit can't land.
+    const seen = shownTip ?? state?.tip;
     // The state the key lit up on can be up to a poll old, and another card's
     // merge may have landed since. Re-read it before sending, and if it moved,
     // say so here instead of sending a merge the server will refuse.
-    const gate = mergeGate(await reload());
+    const gate = mergeGate(await reload(), seen);
     if (!gate.go) {
       setPhase("idle");
       toastError(gate.message);
       return;
     }
-    const r = await mergeCard(cardId);
+    const r = await mergeCard(cardId, seen);
     if (r.ok && r.branch && r.base) {
       setLanded({ branch: r.branch, base: r.base });
       setPhase("merged");
@@ -155,7 +161,7 @@ export function MergeKey({ board, card, hasAssignee, onMove }: {
   return (
     <>
     {/* What pressing the key would land, while there's still something to. */}
-    {!landed && state && <MergePreview cardId={cardId} refresh={`${state.branch}:${state.ahead}`} />}
+    {!landed && state && <MergePreview cardId={cardId} refresh={previewKey(state)} onShown={setShownTip} />}
     <div className={`mergekey phase-${phase}${ready ? "" : " is-held"}`}>
       <div className="mergekey-deck">
         <span className={`mergekey-led${ready || phase !== "idle" ? " on" : ""}`} aria-hidden="true" />
