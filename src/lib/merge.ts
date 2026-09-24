@@ -10,6 +10,7 @@ import { dirname, join, resolve } from "node:path";
 import { existsSync, realpathSync } from "node:fs";
 import { runExclusive, pending } from "./merge-queue";
 import { mergeBlockers, mergeBlockReason, type Board } from "./board";
+import { buildPreview, MAX_COMMITS, type MergePreview } from "./mergePreview";
 
 /** The trunk we merge into, first one that exists. */
 const BASES = ["main", "master"] as const;
@@ -193,6 +194,35 @@ export async function readMergeState(cwd: string): Promise<MergeState> {
     return { ...facts, ...verdict, ready: false, blocked: "a merge is in progress — try again in a moment", merging };
   }
   return { ...facts, ...verdict, merging };
+}
+
+/**
+ * What a merge would land, for the card to show above its MERGE key: the
+ * commits on the branch that the trunk lacks (`base..branch`, as `git log`
+ * lists them) and the files they change against the merge base
+ * (`base...branch`, as `git diff --stat` counts them). Read-only. A branch
+ * with nothing to land reads as an empty preview; a git failure as `error`,
+ * one line, for the card to say instead of the list.
+ */
+export async function readMergePreview(cwd: string): Promise<MergePreview | { error: string }> {
+  if (!cwd) return { error: "no working directory for this card" };
+  const root = await repoRoot(cwd);
+  if (!root) return { error: "not a git repository" };
+  const [branch, base] = await Promise.all([currentBranch(cwd), pickBase(root)]);
+  const empty = buildPreview({ branch, base, log: "", totalCommits: 0, numstat: "" });
+  if (!branch || !base || branch === base) return empty;
+
+  const [count, log, stat] = await Promise.all([
+    git(cwd, ["rev-list", "--count", `${base}..${branch}`]),
+    git(cwd, ["log", `--max-count=${MAX_COMMITS}`, "--format=%h%x09%s", `${base}..${branch}`]),
+    git(cwd, ["diff", "--numstat", "--no-color", `${base}...${branch}`]),
+  ]);
+  const failed = [count, log, stat].find((r) => r.code !== 0);
+  if (failed) {
+    const why = failed.stderr.split("\n").find((l) => l.trim()) ?? "";
+    return { error: `git could not read ${branch}: ${why || "unknown error"}` };
+  }
+  return buildPreview({ branch, base, log: log.stdout, totalCommits: Number.parseInt(count.stdout, 10) || 0, numstat: stat.stdout });
 }
 
 export type MergeResult = { ok: boolean; branch?: string; base?: string; error?: string };

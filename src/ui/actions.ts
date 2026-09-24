@@ -11,6 +11,7 @@ import type { ChatMessage, QuestionOption, Question, PendingQuestion, BlockingTo
 import type { Subagent } from "../lib/subagents";
 import type { RepoInfo } from "../repo";
 import type { MergeState, MergeResult } from "../lib/merge";
+import type { MergePreview } from "../lib/mergePreview";
 
 /** Where a card event went: typed into an idle agent's terminal now, or queued
  *  for a busy one's Stop hook to collect when its turn ends. */
@@ -261,6 +262,19 @@ export async function fetchMergeRead(cardId: string): Promise<{ state: MergeStat
     const body = (await res.json().catch(() => null)) as (MergeState & { error?: string }) | null;
     if (!res.ok || !body) return { error: body?.error || `the server answered ${res.status}` };
     return { state: body };
+  } catch {
+    return { error: "the dashboard server didn't answer" };
+  }
+}
+
+/** What a MERGE of this card would land (commits + changed files), or the
+ *  one-line reason it couldn't be read. */
+export async function fetchMergePreview(cardId: string): Promise<{ preview: MergePreview } | { error: string }> {
+  try {
+    const res = await fetch(`/merge-preview?cardId=${encodeURIComponent(cardId)}`);
+    const body = (await res.json().catch(() => null)) as (MergePreview & { error?: string }) | null;
+    if (!res.ok || !body || body.error) return { error: body?.error || `the server answered ${res.status}` };
+    return { preview: body };
   } catch {
     return { error: "the dashboard server didn't answer" };
   }

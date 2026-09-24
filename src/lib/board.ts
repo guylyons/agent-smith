@@ -342,13 +342,21 @@ export function cardView(board: Board, id: string): { card: Card; columns: Colum
  *  so two agents (or an agent and the UI) can never clobber each other's write.
  *
  *  Empty string for an unknown card (nothing to send). */
-export function cardTaskPrompt(board: Board, id: string, server: string, agentName?: string, opts: { workedBefore?: boolean } = {}): string {
+export function cardTaskPrompt(board: Board, id: string, server: string, agentName?: string, opts: FooterOpts = {}): string {
   return [cardTaskText(board, id), cardTaskFooter(board, id, server, agentName, opts)].filter(Boolean).join("\n\n");
 }
 
 /** The "-- THE LINE --" protocol footer on its own, for a caller that already
  *  has the task text (a spawn by curl sends plain text; see spawnSession). */
-export function cardTaskFooter(board: Board, id: string, server: string, agentName?: string, opts: { workedBefore?: boolean } = {}): string {
+export type FooterOpts = {
+  workedBefore?: boolean;
+  /** The agent's crew id, when known. Rides along with "as":"assignee" so the
+   *  server can refuse a write from an agent taken off the card, rather than
+   *  sign it with the new assignee's name. */
+  crew?: string;
+};
+
+export function cardTaskFooter(board: Board, id: string, server: string, agentName?: string, opts: FooterOpts = {}): string {
   const card = board.cards.find((k) => k.id === id);
   if (!card) return "";
   const flow = board.columns.map((c) => c.id).join(" -> ");
@@ -361,7 +369,8 @@ export function cardTaskFooter(board: Board, id: string, server: string, agentNa
   const who = agentName ? `, ${agentName}` : "";
   const post = (path: string, json: string) =>
     `  curl -s -X POST ${server}${path} -H 'content-type: application/json' -d '${json}'`;
-  const comment = (text: string) => post("/action/card-comment", `{"cardId":"${card.id}","as":"assignee","text":"${text}"}`);
+  const sign = opts.crew ? `"as":"assignee","crew":"${opts.crew}"` : `"as":"assignee"`;
+  const comment = (text: string) => post("/action/card-comment", `{"cardId":"${card.id}",${sign},"text":"${text}"}`);
 
   // STEP 1 is a move only when the card isn't already where work happens — a
   // task re-sent to a card in progress must not push it forward before starting.
@@ -374,7 +383,7 @@ export function cardTaskFooter(board: Board, id: string, server: string, agentNa
     : [
         `STEP 1, before any other work, move this card to "${work.id}" and say you`,
         "picked it up:",
-        post("/action/card-move", `{"cardId":"${card.id}","as":"assignee","toColumnId":"${work.id}"}`),
+        post("/action/card-move", `{"cardId":"${card.id}",${sign},"toColumnId":"${work.id}"}`),
         comment("Picked this up. <one line on your plan>"),
       ];
 
@@ -403,6 +412,8 @@ export function cardTaskFooter(board: Board, id: string, server: string, agentNa
     'If a call signed "as":"assignee" is rejected with "card has no',
     'assignee to sign as", resend the same call with "author":"<your name>"',
     'in place of "as":"assignee".',
+    'If a call is rejected with "you are no longer assigned to this card", you',
+    "were taken off it: stop work on it and do not write to it again.",
     "STEP 2: do the work. Whenever you find or decide something worth knowing,",
     "post it as a card-comment (same shape as above). Keep comments plain and",
     "short -- write like a quick note to a busy teammate, no jargon or filler,",
