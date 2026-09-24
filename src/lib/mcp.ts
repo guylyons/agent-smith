@@ -39,7 +39,7 @@ export type Ctx = {
  *  assignee and `sessionId` to that session's current desk name — both by
  *  identity, so a rename or a persona can never mis-sign a comment. A bare
  *  `author` is the last resort. */
-export type Signature = { as: "assignee" } | { sessionId: string } | { author: string };
+export type Signature = { as: "assignee"; crew?: string } | { sessionId: string } | { author: string };
 
 /** Signed on a comment when we can't tell which agent we are. */
 const UNKNOWN_AUTHOR = "Claude";
@@ -78,7 +78,9 @@ async function request(ctx: Ctx, method: "GET" | "POST", path: string, body?: un
 export async function signatureFor(ctx: Ctx, cardId: string, author?: string): Promise<Signature> {
   const explicit = (author ?? ctx.author)?.trim();
   if (explicit) return { author: explicit };
-  if (ctx.card && ctx.card === cardId) return { as: "assignee" };
+  // Our crew id rides along, so a write from us after we were taken off the
+  // card is refused (409) instead of signed with the new assignee's name.
+  if (ctx.card && ctx.card === cardId) return ctx.crew ? { as: "assignee", crew: ctx.crew } : { as: "assignee" };
   if (ctx.resolvedSignature) return ctx.resolvedSignature;
   let sig: Signature = { author: UNKNOWN_AUTHOR };
   if (ctx.cwd) {
