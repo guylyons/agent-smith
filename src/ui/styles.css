@@ -602,9 +602,16 @@
   .card.drop-before{box-shadow:inset 0 0 0 2px rgba(110,140,224,.5),0 3px 0 rgba(0,0,0,.5),0 -5px 0 -2px var(--gold)}
   .card.drop-after{box-shadow:inset 0 0 0 2px rgba(110,140,224,.5),0 3px 0 rgba(0,0,0,.5),0 7px 0 -2px var(--gold)}
   .card:hover{border-color:var(--gold)}
-  .card:focus{border-color:var(--gold)}
+  .card:has(.card-open:focus){border-color:var(--gold)}
   .card:active{cursor:grabbing}
   .card-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
+  /* The card's "open" control is a real button filling the card; it draws
+     nothing of its own, the card around it does. */
+  .card-open{
+    align-items:stretch;text-align:left;padding:0;margin:0;
+    background:none;border:none;color:inherit;font:inherit;cursor:inherit;
+  }
+  .card-open:not(:disabled):active{transform:none}
   .card-title-text{
     font-family:var(--mono);font-size:15px;line-height:1.45;color:var(--bone);
     padding:3px 4px;word-break:break-word;
@@ -671,7 +678,7 @@
     border-color:var(--scrum);
     background:linear-gradient(color-mix(in srgb,var(--scrum) 16%,transparent),color-mix(in srgb,var(--scrum) 16%,transparent)),var(--box);
   }
-  .card.card-scrum:hover,.card.card-scrum:focus{border-color:var(--gold)}
+  .card.card-scrum:hover,.card.card-scrum:has(.card-open:focus){border-color:var(--gold)}
   .card-kind{
     align-self:flex-start;
     font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:calc(.5px + var(--track));
@@ -1998,9 +2005,11 @@ body{background:transparent}
 :where(button,[role="button"],a[href],select,summary):focus-visible{
   outline:3px solid var(--gold);outline-offset:2px;
 }
-/* A board card is a focusable div whose focus style is the same gold border as
-   its hover — so the keyboard gets its own, unmistakable ring. */
-.card:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+/* A board card's focus lands on its open button, but the ring belongs around
+   the whole card, not the button's contents: the card's focus style is the same
+   gold border as its hover, so the keyboard gets its own, unmistakable ring. */
+.card-open:focus-visible{outline:none}
+.card:has(.card-open:focus-visible){outline:3px solid var(--gold);outline-offset:2px}
 
 /* ---- press ----
    Every button dips a pixel. The one that floats over the page on a hard drop

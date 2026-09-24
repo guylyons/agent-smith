@@ -331,7 +331,7 @@ function ColumnView({
         ))}
       </div>
 
-      <AddCard mutate={mutate} columnId={column.id} onCreated={(id) => onOpenCard(id, { kind: "new" })} />
+      <AddCard mutate={mutate} columnId={column.id} columnName={column.name} onCreated={(id) => onOpenCard(id, { kind: "new" })} />
     </div>
   );
 }
@@ -467,33 +467,19 @@ function CardView({
     });
   }
 
+  // The card is a plain container: a real <button> for "open" and the delete
+  // button beside it, never one inside the other. A div role="button" wrapping
+  // the ✕ swallowed Enter on the ✕ (its keydown bubbled up and opened the card)
+  // and read to a screen reader as one long name ending in "Delete card". The
+  // container keeps the mouse click (anywhere on the card opens it) and drag.
   return (
     <div
       className={`card${card.kind === "scrum" ? " card-scrum" : ""}${dropBefore ? " drop-before" : ""}${dropAfterLast ? " drop-after" : ""}${unread ? " has-unread" : ""}`}
-      role="button"
-      tabIndex={0}
       draggable
       title={unread
         ? `${unread} unread comment${unread > 1 ? "s" : ""} · Enter opens · Alt+arrows move it`
         : "Enter opens · Alt+arrows move it"}
       onClick={onOpen}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); return; }
-        // Alt+arrows move the card: left/right between stages, up/down within
-        // the stack. Alt keeps them clear of the browser's own arrow scrolling.
-        if (!e.altKey || e.metaKey || e.ctrlKey) return;
-        const dir = KEY_DIR[e.key];
-        if (!dir) return;
-        e.preventDefault();
-        onMoveByKey(dir);
-        // The board re-renders around the move, so hold focus on this card to
-        // keep a run of moves going instead of dumping focus back to the body.
-        // In a capped column the card can land past the fold, and refocusing an
-        // element that never lost focus scrolls nothing — so bring it back into
-        // view by hand, or the card you're moving disappears under you.
-        const el = e.currentTarget;
-        requestAnimationFrame(() => { el.focus(); el.scrollIntoView({ block: "nearest" }); });
-      }}
       onDragOver={(e) => {
         e.preventDefault();
         const r = e.currentTarget.getBoundingClientRect();
@@ -501,10 +487,29 @@ function CardView({
       }}
       onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData(CARD_MIME, card.id); }}
     >
-      <div className="card-main">
+      {/* Enter and Space are the button's own; its click bubbles to the card's
+          onClick, which opens it. */}
+      <button
+        type="button"
+        className="card-main card-open"
+        aria-label={cardName(card, assignedAgent ? "live" : card.assignee ? "ended" : "none", unread, commentCount)}
+        onKeyDown={(e) => {
+          const dir = cardKeyMove(e, e.target === e.currentTarget);
+          if (!dir) return;
+          e.preventDefault();
+          onMoveByKey(dir);
+          // The board re-renders around the move, so hold focus on this card to
+          // keep a run of moves going instead of dumping focus back to the body.
+          // In a capped column the card can land past the fold, and refocusing an
+          // element that never lost focus scrolls nothing — so bring it back into
+          // view by hand, or the card you're moving disappears under you.
+          const el = e.currentTarget;
+          requestAnimationFrame(() => { el.focus(); el.scrollIntoView({ block: "nearest" }); });
+        }}
+      >
         {card.kind === "scrum" && <span className="card-kind">★ SCRUM MASTER</span>}
         <span className="card-title-text">{card.title || "Untitled"}</span>
-        <div className="card-meta">
+        <span className="card-meta">
           {/* Staffing always says something. An unstaffed card used to just omit
               the avatar, which reads as "nothing here" — the same as a card whose
               footer is empty for other reasons. A chip makes "nobody is on this"
@@ -521,18 +526,21 @@ function CardView({
           {mergeWait && <span className="card-flag card-flag-wait" title={mergeWait.title}>{mergeWait.label}</span>}
           {mergeNext && <span className="card-flag card-flag-wait card-flag-next" title={mergeNext.title}>{mergeNext.label}</span>}
           {/* Unread turns the count into "N NEW" and colours it, so a thread
-              you've already read never looks the same as one that's moved on. */}
+              you've already read never looks the same as one that's moved on.
+              Not a live region: every unread card on the board would announce
+              on each re-render. */}
           {commentCount > 0 && (
             unread
-              ? <span className="card-flag card-flag-unread" role="status"
+              ? <span className="card-flag card-flag-unread"
                       title={`${unread} unread of ${commentCount} comment${commentCount > 1 ? "s" : ""}`}>
                   💬 {unread} NEW
                 </span>
               : <span className="card-flag" title={`${commentCount} comment${commentCount > 1 ? "s" : ""}`}>💬 {commentCount}</span>
           )}
-        </div>
-      </div>
+        </span>
+      </button>
       <button
+        type="button"
         className="card-del"
         title="Delete card"
         aria-label={`Delete card "${card.title || "Untitled"}"`}
@@ -540,6 +548,37 @@ function CardView({
       >✕</button>
     </div>
   );
+}
+
+/** A card's accessible name: its title, then who is on it and what's new —
+ *  what the face shows, in words. The chips inside the open button are only
+ *  pictures and initials, so the name has to carry them. */
+export function cardName(
+  card: Pick<Card, "title" | "kind" | "assignee">,
+  staffing: "live" | "ended" | "none",
+  unread: number,
+  commentCount: number,
+): string {
+  const parts = [card.title || "Untitled"];
+  if (card.kind === "scrum") parts.push("scrum master");
+  if (card.assignee && staffing !== "none") {
+    parts.push(staffing === "ended" ? `${card.assignee.name} (session ended)` : card.assignee.name);
+  } else parts.push("unassigned");
+  if (unread) parts.push(`${unread} new comment${unread > 1 ? "s" : ""}`);
+  else if (commentCount) parts.push(`${commentCount} comment${commentCount > 1 ? "s" : ""}`);
+  return parts.join(", ");
+}
+
+/** Which way a keypress moves a card, or null to leave it alone. Alt+arrows
+ *  only (Alt keeps them clear of the browser's own arrow scrolling), and only
+ *  when the key was pressed on the card's own open control — a key bubbling up
+ *  from anything inside it is that control's business. */
+export function cardKeyMove(
+  e: { key: string; altKey: boolean; metaKey: boolean; ctrlKey: boolean },
+  onCard: boolean,
+): "left" | "right" | "up" | "down" | null {
+  if (!onCard || !e.altKey || e.metaKey || e.ctrlKey) return null;
+  return KEY_DIR[e.key] ?? null;
 }
 
 const KEY_DIR: Record<string, "left" | "right" | "up" | "down" | undefined> = {
@@ -558,8 +597,8 @@ function initials(name: string): string {
 // Enter makes the card and opens it, ready to fill in, so a new ticket never
 // sits there as a bare title. Blur (clicking away) still saves it but leaves
 // you where you clicked — that click was about something else.
-function AddCard({ mutate, columnId, onCreated }: {
-  mutate: Mutate; columnId: string; onCreated: (cardId: string) => void;
+function AddCard({ mutate, columnId, columnName, onCreated }: {
+  mutate: Mutate; columnId: string; columnName: string; onCreated: (cardId: string) => void;
 }) {
   const [value, setValue] = useState("");
   function commit(open: boolean) {
@@ -575,6 +614,7 @@ function AddCard({ mutate, columnId, onCreated }: {
       className="add-card"
       value={value}
       placeholder="+ add card"
+      aria-label={`Add card to ${columnName || "Untitled"}`}
       onChange={(e) => setValue(e.target.value)}
       onKeyDown={(e) => { if (e.key === "Enter") commit(true); }}
       onBlur={() => commit(false)}
