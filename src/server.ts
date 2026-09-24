@@ -17,7 +17,7 @@ import { readMood, writeMood, moodFile, formatMood, addNote as addMoodNote, upda
 import { mainCheckout } from "./lib/worktree";
 import { focusSession, interruptSession, killAgent, sendPrompt, sendFreshPrompt, spawnAgent } from "./ghostty";
 import { readRepo } from "./repo";
-import { readMergeState, readMergePreview, mergeWork, holdForClaims, cleanupMergedWork } from "./lib/merge";
+import { readMergeState, readMergePreview, mergeWork, holdForClaims, cleanupMergedWork, planWorktreeCleanup, cleanupMergedWorktrees } from "./lib/merge";
 import { saveUpload, resolveUploadPath } from "./lib/uploads";
 import { chooseFolder } from "./lib/chooser";
 import { initialIdle, onConnect, onDisconnect, shouldShutDown, type IdleState } from "./lib/idle";
@@ -30,7 +30,7 @@ import {
   CardRestoreBody, ColumnArchiveBody, CardAddBody, CommentDeleteBody, CardMoveBody, CardUpdateBody, CardMergeBody,
   CardCommentBody, SendTaskBody, CardAssignBody, UploadBody, CrewNoteBody, RenameBody, SpriteBody, PromptBody,
   MoodNoteAddBody, MoodNoteRestoreBody, MoodNoteRef, MoodNoteUpdateBody, MoodLinkAddBody, MoodLinkRef, MoodLinkUpdateBody,
-  MemoryAddBody, MemoryForgetBody,
+  MemoryAddBody, MemoryForgetBody, WorktreeCleanupBody,
 } from "./lib/actionBodies";
 
 function json(body: unknown, status = 200): Response {
@@ -855,6 +855,23 @@ export function makeServer(
     return json({ ...r, cleanup, ...(quitResult ? { quit: quitResult } : {}) });
   }
 
+  // worktree-cleanup (CONFIG): worktrees merged by hand never went through
+  // MERGE, so nothing removed them. The repos are the ones the board and the
+  // agents point at; every agent on the desk counts as live, so its worktree
+  // stays. A preview is read-only; removing is the human's confirm from the
+  // dashboard, as MERGE is.
+  async function worktreeCleanup({ req }: Ctx, body: z.output<typeof WorktreeCleanupBody>): Promise<Response> {
+    const board = readBoard(dir);
+    const agents = readSnapshot(dir, Date.now()).agents;
+    const repos = [...board.cards.map((k) => k.repoPath ?? ""), ...agents.map((a) => a.cwd)];
+    const live = agents.map((a) => a.cwd);
+    if (!body.remove) return json({ ok: true, ...(await planWorktreeCleanup(repos, live)) });
+    if (req.headers.get("sec-fetch-site") !== "same-origin") {
+      return json({ ok: false, error: "cleaning up worktrees is a human's call — use CONFIG in the dashboard" }, 403);
+    }
+    return json({ ok: true, ...(await cleanupMergedWorktrees(repos, live, body.remove)) });
+  }
+
   async function cardComment(_ctx: Ctx, body: z.output<typeof CardCommentBody>, card: Card, board: Board, title: string): Promise<Response> {
     const cardId = card.id;
     const actor = resolveActor(card, body);
@@ -1134,6 +1151,7 @@ export function makeServer(
     "send-task": withCard(SendTaskBody, sendTask),
     "card-assign": withCard(CardAssignBody, cardAssign),
     "upload": withBody(UploadBody, upload),
+    "worktree-cleanup": withBody(WorktreeCleanupBody, worktreeCleanup),
     "crew-note": withBody(CrewNoteBody, crewNote),
     "memory-add": withBody(MemoryAddBody, memoryAdd),
     "memory-forget": withBody(MemoryForgetBody, memoryForget),

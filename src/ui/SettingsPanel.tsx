@@ -5,12 +5,94 @@ import {
   LINE_ROWS_MIN, LINE_ROWS_MAX, LINE_ROWS_OFF,
   type BevelMode, type CrtMode, type Display,
 } from "./settings";
-import { uploadImage } from "./actions";
+import { uploadImage, previewWorktreeCleanup, runWorktreeCleanup } from "./actions";
+import type { CleanupPlan, SweepEntry, SweepResult } from "../lib/merge";
 import { toast } from "./toast";
 
 // How far a freshly uploaded wallpaper is dimmed, so the UI is readable over it
 // from the first frame. The user can take it straight back to 0.
 const DEFAULT_CUSTOM_DIM = 35;
+
+/** One worktree in the sweep's lists: repo · branch, and why when there is one. */
+export function sweepLine(w: SweepEntry & { why?: string; branchDeleted?: boolean }): string {
+  const last = (p: string) => p.replace(/\/+$/, "").split("/").pop() ?? p;
+  const name = `${last(w.repo)} · ${w.branch || last(w.path)}`;
+  return w.why ? `${name} — ${w.why}` : name;
+}
+
+export function sweepConfirmLabel(n: number): string {
+  return `REMOVE ${n} WORKTREE${n === 1 ? "" : "S"}`;
+}
+
+type Sweep =
+  | { step: "idle" }
+  | { step: "busy" }
+  | { step: "confirm"; plan: CleanupPlan }
+  | { step: "done"; result: SweepResult }
+  | { step: "error"; error: string };
+
+function SweepList({ title, lines }: { title: string; lines: string[] }) {
+  if (!lines.length) return null;
+  return (
+    <>
+      <div className="pix settings-hint">{title}</div>
+      <ul className="settings-sweep">{lines.map((l, i) => <li key={i}>{l}</li>)}</ul>
+    </>
+  );
+}
+
+// Worktrees merged by hand never went through MERGE, so nothing removed them.
+// Look first, then one confirm; the server re-checks each one as it goes.
+function WorktreeSweep() {
+  const [sweep, setSweep] = useState<Sweep>({ step: "idle" });
+  async function look() {
+    setSweep({ step: "busy" });
+    const r = await previewWorktreeCleanup();
+    setSweep("error" in r ? { step: "error", error: r.error } : { step: "confirm", plan: r });
+  }
+  async function remove(plan: CleanupPlan) {
+    setSweep({ step: "busy" });
+    const r = await runWorktreeCleanup(plan.remove.map((w) => w.path));
+    setSweep("error" in r ? { step: "error", error: r.error } : { step: "done", result: r });
+  }
+  return (
+    <>
+      <div className="pix settings-label">WORKTREES</div>
+      <div className="settings-row">
+        {sweep.step === "confirm" && sweep.plan.remove.length > 0 ? (
+          <>
+            <button className="deskbtn danger" onClick={() => void remove(sweep.plan)}>{sweepConfirmLabel(sweep.plan.remove.length)}</button>
+            <button className="deskbtn" onClick={() => setSweep({ step: "idle" })}>CANCEL</button>
+          </>
+        ) : (
+          <button className="deskbtn" disabled={sweep.step === "busy"} onClick={() => void look()}>
+            {sweep.step === "busy" ? "CHECKING…" : "🧹 CLEAN UP MERGED WORKTREES"}
+          </button>
+        )}
+      </div>
+      {sweep.step === "idle" && (
+        <div className="pix settings-hint">
+          Lists worktrees under .claude/worktrees that are clean, merged into main and not in use by an agent, then removes them and their branches after you confirm.
+        </div>
+      )}
+      {sweep.step === "error" && <div className="pix settings-hint">{sweep.error}</div>}
+      {sweep.step === "confirm" && (
+        <>
+          <SweepList title={`${sweep.plan.remove.length} CAN GO:`} lines={sweep.plan.remove.map(sweepLine)} />
+          {sweep.plan.remove.length === 0 && <div className="pix settings-hint">Nothing to clean up.</div>}
+          <SweepList title={`${sweep.plan.keep.length} STAY:`} lines={sweep.plan.keep.map(sweepLine)} />
+        </>
+      )}
+      {sweep.step === "done" && (
+        <>
+          <SweepList title={`REMOVED ${sweep.result.removed.length}:`} lines={sweep.result.removed.map(sweepLine)} />
+          {sweep.result.removed.length === 0 && <div className="pix settings-hint">Nothing was removed.</div>}
+          <SweepList title={`KEPT ${sweep.result.kept.length}:`} lines={sweep.result.kept.map(sweepLine)} />
+        </>
+      )}
+    </>
+  );
+}
 
 // One place for the display/alert controls. The values live in App (the CRT
 // overlay needs the mode too), so this panel only renders them and reports a
@@ -201,6 +283,8 @@ export function SettingsPanel({ display, onChange, alertsEnabled, onToggleAlerts
             </button>
           </div>
           <div className="pix settings-hint">A desktop notification + sound when an agent needs you.</div>
+
+          <WorktreeSweep />
         </div>
       </aside>
     </ModalBackdrop>

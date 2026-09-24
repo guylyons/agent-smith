@@ -189,6 +189,12 @@ export const CardUpdateBody = body({
 
 export const CardMergeBody = Signature.extend({ force: flag() });
 
+// worktree-cleanup: without `remove`, a preview; with it, the worktree paths
+// the human confirmed. Anything but a list of strings reads as a preview.
+export const WorktreeCleanupBody = body({
+  remove: z.array(z.string()).optional().catch(undefined),
+});
+
 export const CardCommentBody = Signature.extend({ text: trimmed() });
 
 /** Who pressed SEND TASK; the handler signs the card "You" when blank. */
