@@ -101,6 +101,8 @@ export function NewAgentModal({
   useEffect(() => { void fetchPersonas().then(setPersonas); }, []);
 
   const labels = folderLabels(recent);
+  // The model the chosen persona launches on when MODEL is left at Default.
+  const personaModel = personas.find((p) => p.id === persona)?.model;
 
   async function browse() {
     if (picking) return;
@@ -193,7 +195,7 @@ export function NewAgentModal({
           <div className="newagent-opt">
             <label className="pix newagent-label" htmlFor="na-model">MODEL</label>
             <select id="na-model" className="reply-input newagent-select" value={model} onChange={(e) => setModel(e.target.value)}>
-              <option value="">Default</option>
+              <option value="">{personaModel ? `Default (${personaModel})` : "Default"}</option>
               <option value="opus">Opus</option>
               <option value="sonnet">Sonnet</option>
               <option value="haiku">Haiku</option>

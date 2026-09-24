@@ -7,8 +7,8 @@ import { scanLiveSessions, readConversation, readSubagents } from "./scan";
 import { matchChat } from "./lib/chatsearch";
 import type { ChatMessage } from "./lib/conversation";
 import { readOverrides, applyOverrides, setNameOverride, setSpriteOverride } from "./lib/overrides";
-import { loadPersonas, applyPersonas } from "./lib/personas";
-import { applyCrew, pickName, mintCrewId, findAssigneeSession, isAssigneeSession, addNote, CREW_ID_RE } from "./lib/crew";
+import { loadPersonas, applyPersonas, spawnName } from "./lib/personas";
+import { applyCrew, mintCrewId, findAssigneeSession, isAssigneeSession, addNote, CREW_ID_RE } from "./lib/crew";
 import { sendTaskReadiness } from "./lib/sendTaskReady";
 import { readBoard, writeBoard, boardFile, addCard, moveCard, moveToWorkColumn, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, addColumn, renameColumn, setInstruction, setColumnStage, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, setCardTouches, setCardRepo, setCardKind, findScrumCard, scrumBrief, repoName, claimBlockReason, mergeBlockReason, landMergedCard, mergeReleaseNotes, finishesCard, type Board, type Card } from "./lib/board";
 import { readMood, writeMood, moodFile, formatMood, addNote as addMoodNote, updateNote, raiseNote, deleteNote, restoreNote, addLink, linkBlockReason, setLinkLabel, deleteLink, type Mood, type MoodLink, type NotePatch } from "./lib/mood";
@@ -544,16 +544,20 @@ export function makeServer(
     if (persona === "scrum-master" && !req.headers.get("sec-fetch-site")) {
       return json({ ok: false, error: "agents may not spawn a scrum-master — only a human can (use the + NEW AGENT dialog)" }, 403);
     }
-    // Who the new agent is: a roster name no live desk is using, and a
-    // crew id it keeps across every /clear (see src/lib/crew.ts).
+    // Who the new agent is: its persona's fixed name, else a roster name no
+    // live desk is using (see spawnName), and a crew id it keeps across
+    // every /clear (see src/lib/crew.ts).
     const live = readSnapshot(dir, Date.now()).agents;
-    const name = pickName(live.map((a) => a.name));
+    const personas = loadPersonas();
+    const name = spawnName(persona, personas, live.map((a) => a.name));
+    const cast = persona ? personas.find((p) => p.id === persona) : undefined;
     const crew = { id: mintCrewId(name), name };
     // A worker an agent staffs (the scrum master's spawn) runs in auto mode
     // unless the spawn names a mode, so it doesn't stall on prompts nobody is
     // watching. A human in the dialog gets exactly the mode they picked.
     const mode = permissionMode ?? (req.headers.get("sec-fetch-site") ? undefined : "auto");
-    const r = await spawn(cwd, task, { model, permissionMode: mode, worktree, branch, persona, serverUrl: url.origin, cardId, crew });
+    // The persona's model is only a default: one picked at launch wins.
+    const r = await spawn(cwd, task, { model: model ?? cast?.model, permissionMode: mode, worktree, branch, persona, serverUrl: url.origin, cardId, crew });
     // Bind the card to the new session once it shows up, hooks or not.
     if (r.ok && cardId && r.cwd) {
       pendingSpawns.push({
@@ -1079,8 +1083,8 @@ export function makeServer(
 
       // the persona picker's options
       if (url.pathname === "/personas") {
-        // id/name/role/skills only — the prompt body is never sent to the browser
-        return json(loadPersonas().map(({ id, name, role, skills }) => ({ id, name, role, skills })));
+        // id/name/role/skills/model only — the prompt body is never sent to the browser
+        return json(loadPersonas().map(({ id, name, role, skills, model }) => ({ id, name, role, skills, ...(model ? { model } : {}) })));
       }
 
       // whether a card's work is committed and can be landed on the trunk —

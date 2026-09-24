@@ -65,6 +65,17 @@ export function pickName(taken: Iterable<string>, rand: () => number = Math.rand
   return pool[Math.min(pool.length - 1, Math.floor(rand() * pool.length))]!;
 }
 
+/** The name for an agent spawned into a persona with a fixed name: the name
+ *  itself while no live desk wears it, else the first free NAME-2, NAME-3...
+ *  so two copies of one role never sign board comments as the same person. */
+export function castName(base: string, taken: Iterable<string>): string {
+  const used = new Set(Array.from(taken, (n) => n.toUpperCase()));
+  if (!used.has(base)) return base;
+  let n = 2;
+  while (used.has(`${base}-${n}`)) n++;
+  return `${base}-${n}`;
+}
+
 /** A crew id: the name plus four hex chars, so two RIPLEYs over the life of
  *  the board (one ends, another spawns) keep separate notes. */
 export function mintCrewId(name: string, rand: () => number = Math.random): string {

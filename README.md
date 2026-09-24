@@ -362,19 +362,21 @@ with no hooks at all keeps the old behaviour: a name hashed from its session id.
 ## Personas
 
 An agent can be launched *as* someone. Pick a **PERSONA** in **+ NEW AGENT** and
-the session starts with that role's system prompt — naming the skills it should
-reach for — and takes that persona's role line and sprite on the board. A
-persona is a *role*; the name belongs to the crew member spawned into it, so two
-`frontend-ux` agents are RIPLEY and VASQUEZ, both "Frontend UX".
+the session starts with that role's system prompt — its background, what it
+owns, how it works, what done means, and the skills it should reach for — and
+takes that persona's name, look and role line on the board. Each role is always
+the same crew member: a second `frontend-ux` running at the same time is
+RIPLEY-2. Random crew names never use a name a persona owns.
 
-Four ship with the app:
+Five ship with the app:
 
-| persona | plays | reaches for |
-| --- | --- | --- |
-| `scrum-master` | owns THE LINE: splits work into cards, staffs and watches them | `task-review`, `superpowers:writing-plans` |
-| `editor` | prose, docs, changelogs, commit messages | `superpowers:requesting-code-review` |
-| `backend-dev` | data, state, server correctness, test-first | `superpowers:test-driven-development`, `superpowers:systematic-debugging` |
-| `frontend-ux` | what the user sees and touches | `superpowers:brainstorming` |
+| persona | name | plays | model | reaches for |
+| --- | --- | --- | --- | --- |
+| `scrum-master` | DALLAS | owns THE LINE: splits work into cards, staffs and watches them | default | `task-review`, `superpowers:writing-plans` |
+| `backend-dev` | VASQUEZ | data, state, server correctness, test-first | default | `superpowers:test-driven-development`, `superpowers:systematic-debugging` |
+| `frontend-ux` | RIPLEY | what the user sees and touches | default | `superpowers:brainstorming`, `run` |
+| `editor` | BISHOP | prose, docs, changelogs, release notes, UI copy | sonnet | `superpowers:requesting-code-review` |
+| `release-manager` | APONE | readiness checks, merge order, release notes; lands nothing without you | sonnet | `superpowers:verification-before-completion`, `superpowers:finishing-a-development-branch` |
 
 They live in `personas/` — one markdown file each, YAML frontmatter plus a prompt
 body. Edit one, or drop in your own; the file's `id` must match its filename. A
@@ -383,18 +385,22 @@ malformed file is skipped, never fatal. Changes take effect on the next launch
 
 ```markdown
 ---
-id: frontend-ux
-role: Frontend UX
-skills: [superpowers:brainstorming]
+id: editor
+name: BISHOP
+role: Editor
+sprite: { body: bishop, palette: 0 }
+model: sonnet
+skills: [superpowers:requesting-code-review]
 ---
-You are the frontend/UX developer on this team. …
+You are the editor on this team. …
 ```
 
-A persona may still carry a `name:` of its own; it is used only when the session
-has no crew name (a fixed codename, the old behaviour). Likewise a `sprite:`
+`name:` (one word, uppercased) is the name every agent in this role spawns
+under; leave it out and each spawn draws a random roster name. `sprite:`
 (`{ body, palette, gear }`, with `body` one of the characters in the sprite
-picker) pins a look for the role, whoever plays it; without one the desk wears
-its crew name's character.
+picker) pins the role's look; without one the desk wears its name's character.
+`model:` (`opus`, `sonnet` or `haiku`) is the model the role launches on when
+**MODEL** is left at Default — picking one in the dialog still wins.
 
 Two limits worth knowing. Claude Code skills are model-invoked, so `skills:`
 tells an agent what to reach for — it can't force a skill to load. And a persona

@@ -3,7 +3,7 @@ import { fixtureDir } from "./fixtures";
 import { mkdirSync, rmSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import {
-  ROSTER, CREW_ID_RE, rosterName, pickName, mintCrewId, crewFrom, applyCrew,
+  ROSTER, CREW_ID_RE, rosterName, pickName, castName, mintCrewId, crewFrom, applyCrew,
   isAssigneeSession, findAssigneeSession, readNotes, addNote, notesContext, NOTES_CAP,
 } from "../src/lib/crew";
 import type { AgentStatus } from "../src/schema";
@@ -130,4 +130,11 @@ test("notesContext names the crew member, carries the notes and the exact call, 
 
 test("notesContext says so when there are no notes yet", () => {
   expect(notesContext({ id: "kane-1", name: "KANE" }, "", "http://x")).toContain("(none yet)");
+});
+
+test("castName keeps the name while free, then takes the first free suffix", () => {
+  expect(castName("RIPLEY", [])).toBe("RIPLEY");
+  expect(castName("RIPLEY", ["ripley"])).toBe("RIPLEY-2");
+  expect(castName("RIPLEY", ["RIPLEY", "RIPLEY-2", "RIPLEY-4"])).toBe("RIPLEY-3");
+  expect(crewFrom({ AGENT_CREW: mintCrewId("RIPLEY-2"), AGENT_NAME: "RIPLEY-2" })?.name).toBe("RIPLEY-2");
 });
