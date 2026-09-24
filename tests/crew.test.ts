@@ -4,7 +4,7 @@ import { mkdirSync, rmSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import {
   ROSTER, CREW_ID_RE, rosterName, pickName, castName, mintCrewId, crewFrom, applyCrew,
-  isAssigneeSession, findAssigneeSession, readNotes, addNote, notesContext, NOTES_CAP,
+  isAssigneeSession, findAssigneeSession, isActorSession, scrumHears, readNotes, addNote, notesContext, NOTES_CAP,
 } from "../src/lib/crew";
 import type { AgentStatus } from "../src/schema";
 
@@ -137,4 +137,31 @@ test("castName keeps the name while free, then takes the first free suffix", () 
   expect(castName("RIPLEY", ["ripley"])).toBe("RIPLEY-2");
   expect(castName("RIPLEY", ["RIPLEY", "RIPLEY-2", "RIPLEY-4"])).toBe("RIPLEY-3");
   expect(crewFrom({ AGENT_CREW: mintCrewId("RIPLEY-2"), AGENT_NAME: "RIPLEY-2" })?.name).toBe("RIPLEY-2");
+});
+
+// ---- who did it, and which scrum master hears it ---------------------------
+
+test("isActorSession: crew id wins, even across a /clear's new session id", () => {
+  const a = { sessionId: "new-1234", name: "KANE", crew: { id: "kane-1", name: "KANE" } } as any;
+  expect(isActorSession({ name: "KANE", sessionId: "old-9999", crew: "kane-1" }, a)).toBe(true);
+  expect(isActorSession({ name: "", crew: "ash-2" }, a)).toBe(false);
+});
+
+test("isActorSession: a bare name matches its own suffixed desk, not a longer name", () => {
+  const desk = { sessionId: "d8c1ebad", name: "DALLAS d8c1" } as any;
+  expect(isActorSession({ name: "DALLAS" }, desk)).toBe(true);
+  expect(isActorSession({ name: "DALLAS" }, { sessionId: "d8c1ebad", name: "DALLASX d8c1" } as any)).toBe(false);
+  expect(isActorSession({ name: "DALLAS" }, { sessionId: "ffff0000", name: "DALLAS d8c1" } as any)).toBe(false);
+  expect(isActorSession({ name: "" }, { sessionId: "x", name: "" } as any)).toBe(false);
+});
+
+test("scrumHears: scoped by the repo of the scrum card the session holds", () => {
+  const sm = { sessionId: "s1" } as any;
+  const board = { columns: [], cards: [
+    { id: "sc", title: "SM", columnId: "backlog", kind: "scrum", repo: "shop", assignee: { id: "s1", name: "SM" } },
+  ] } as any;
+  expect(scrumHears(board, sm, { id: "a", repo: "shop" } as any)).toBe(true);
+  expect(scrumHears(board, sm, { id: "b", repo: "blog" } as any)).toBe(false);
+  expect(scrumHears(board, sm, { id: "c" } as any)).toBe(true); // no repo: everyone hears
+  expect(scrumHears(board, { sessionId: "other" } as any, { id: "b", repo: "blog" } as any)).toBe(true); // no project on record
 });
