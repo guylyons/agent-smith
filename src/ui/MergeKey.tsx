@@ -168,7 +168,10 @@ export function MergeKey({ board, card, hasAssignee, onMove }: {
         <button
           type="button"
           className={`mergekey-cap${pushed ? " is-down" : ""}`}
-          disabled={phase === "merged" || (!ready && phase !== "working")}
+          // aria-disabled, not disabled: a disabled button drops focus to the
+          // page, and the key goes dead under the cursor the moment it merges.
+          // press() already ignores it when it can't fire.
+          aria-disabled={phase === "merged" || (!ready && phase !== "working")}
           aria-label={label}
           title={label}
           onMouseDown={() => { if (ready) { setDown(true); playKeyClick(true); } }}

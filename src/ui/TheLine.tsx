@@ -29,7 +29,7 @@ import {
   knownRepos, filterCards, filterRepo, dropIndex, visibleMoveTarget, loadRepoFilter, saveRepoFilter,
   parseRepoFilter, serialiseRepoFilter, type RepoFilter,
 } from "./repoFilter";
-import { refocusAfterMove, moveSettled, type PendingFocus } from "./moveFocus";
+import { refocusAfterMove, moveSettled, cardButton, type PendingFocus } from "./moveFocus";
 
 const CARD_MIME = "application/x-line-card";
 const COL_MIME = "application/x-line-column";
@@ -96,7 +96,7 @@ export function TheLine({
     const now = Date.now();
     const dropped = !document.activeElement || document.activeElement === document.body;
     const id = refocusAfterMove(pending, board, dropped, now);
-    const el = id && document.querySelector<HTMLElement>(`.card[data-card-id="${CSS.escape(id)}"] .card-open`);
+    const el = id && cardButton(id);
     if (el) { el.focus(); el.scrollIntoView({ block: "nearest" }); }
     if (moveSettled(pending, incoming, now)) pendingFocus.current = null;
   }, [board, incoming]);

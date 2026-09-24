@@ -36,6 +36,17 @@ function Marked({ text, marks }: { text: string; marks?: number[] }) {
   return <>{out}</>;
 }
 
+/** The palette's live result count: silent while browsing, else how many
+ *  rows the query found, so a screen reader hears the list change. */
+export function paletteStatus(count: number, query: string): string {
+  if (!query.trim()) return "";
+  if (count === 0) return "Nothing found.";
+  return `${count} result${count === 1 ? "" : "s"}`;
+}
+
+/** The DOM id of row `i`, for aria-activedescendant. */
+const optionId = (i: number) => `palette-opt-${i}`;
+
 const KIND_ICON: Record<SearchItem["kind"], string> = { card: "▤", agent: "◈" };
 
 export function CommandPalette({ snap, onClose }: { snap: Snapshot; onClose: () => void }) {
@@ -132,27 +143,38 @@ export function CommandPalette({ snap, onClose }: { snap: Snapshot; onClose: () 
             ref={inputRef}
             className="reply-input palette-input"
             aria-label="Find a ticket, desk, or chat"
+            // Focus stays in the box while the arrows move a highlight through
+            // the list; activedescendant tells a screen reader which row that is.
+            role="combobox"
+            aria-autocomplete="list"
+            aria-controls="palette-list"
+            aria-expanded={entries.length > 0}
+            aria-activedescendant={entries.length ? optionId(sel) : undefined}
             placeholder="Find a ticket, desk, or chat…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
         </div>
-        <div className="palette-list" ref={listRef}>
+        <div className="sr-only" role="status">{paletteStatus(entries.length, query)}</div>
+        <div className="palette-list" ref={listRef} id="palette-list" role="listbox" aria-label="Results">
           {entries.length === 0 && (
-            <div className="msg-empty">{query.trim() ? "Nothing found." : "Type to search everything."}</div>
+            <div className="msg-empty" aria-hidden="true">{query.trim() ? "Nothing found." : "Type to search everything."}</div>
           )}
           {entries.map((en, i) => {
             const group = groupFor(i);
             return (
-              <div key={en.key}>
-                {group && <div className="pix palette-group">{group}</div>}
+              <div key={en.key} role="none">
+                {group && <div className="pix palette-group" aria-hidden="true">{group}</div>}
                 <div
+                  id={optionId(i)}
+                  role="option"
+                  aria-selected={i === sel}
                   data-idx={i}
                   className={`palette-row${i === sel ? " on" : ""}`}
                   onMouseMove={() => setSel(i)}
                   onClick={en.activate}
                 >
-                  <span className="palette-icon">{en.icon}</span>
+                  <span className="palette-icon" aria-hidden="true">{en.icon}</span>
                   <span className="palette-title">{en.title}</span>
                   {en.subtitle && (
                     <span className={`palette-sub${en.marks ? " is-snippet" : ""}`}>

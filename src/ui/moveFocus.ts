@@ -44,3 +44,9 @@ export function moveSettled(pending: PendingFocus, server: Pick<Board, "cards">,
   const card = server.cards.find((c) => c.id === pending.cardId);
   return !card || card.columnId === pending.toColumnId;
 }
+
+/** A card's open button on the board, where focus lands when the card is
+ *  back on the board: after a keyboard move, or when its modal closes. */
+export function cardButton(cardId: string): HTMLElement | null {
+  return document.querySelector<HTMLElement>(`.card[data-card-id="${CSS.escape(cardId)}"] .card-open`);
+}
