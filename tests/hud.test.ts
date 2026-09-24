@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
 import { hudStats, columnAbbrev, ARMS_SLOTS } from "../src/lib/hud";
 import type { AgentStatus } from "../src/schema";
-import type { Board } from "../src/lib/board";
+import type { Board, Stage } from "../src/lib/board";
 
 function agent(o: Partial<AgentStatus> = {}): AgentStatus {
   return { state: "idle", ...o } as AgentStatus;
@@ -12,9 +12,9 @@ function budgeted(left: number, total: number, o: Partial<AgentStatus> = {}): Ag
   return agent({ usage: { budgetLeft: left, budgetTotal: total }, ...o });
 }
 
-function board(columns: [string, string][], cards: string[]): Board {
+function board(columns: [string, string, Stage?][], cards: string[]): Board {
   return {
-    columns: columns.map(([id, name]) => ({ id, name, instruction: "" })),
+    columns: columns.map(([id, name, stage]) => ({ id, name, instruction: "", ...(stage ? { stage } : {}) })),
     cards: cards.map((columnId, i) => ({ id: `c${i}`, title: `card ${i}`, columnId })),
   };
 }
@@ -100,6 +100,21 @@ test("armor reports done even when the done column is not among the first four",
   expect(hudStats([], b).armor).toBe(50);
 });
 
+test("armor counts cards that landed past Done, not just the ones waiting in it", () => {
+  // The live board keeps merged work in a stageless "Merged" column after Done.
+  // Those cards are the most finished of all; leaving them out read 5%.
+  const b = board(
+    [["backlog", "Backlog"], ["done", "Done"], ["merged", "Merged"]],
+    ["backlog", "done", "merged", "merged"],
+  );
+  expect(hudStats([], b).armor).toBe(75);
+});
+
+test("a stageless column before Done does not count as finished", () => {
+  const b = board([["backlog", "Backlog"], ["parked", "Parked"], ["done", "Done"]], ["parked", "done"]);
+  expect(hudStats([], b).armor).toBe(50);
+});
+
 // ---- the ammo table: cards per column ------------------------------------
 
 test("the table lists the board's columns with their card counts", () => {
@@ -110,7 +125,35 @@ test("the table lists the board's columns with their card counts", () => {
   ]);
 });
 
-test("the table shows at most four rows, the way DOOM's does", () => {
+test("the table shows one row per stage, with Done and Merged combined", () => {
+  const b = board(
+    [["backlog", "Backlog"], ["in-progress", "In Progress"], ["review", "Review"], ["done", "Done"], ["merged", "Merged"]],
+    ["backlog", "in-progress", "done", "merged", "merged"],
+  );
+  expect(hudStats([], b).table).toEqual([
+    { label: "BACK", count: 1, total: 5 },
+    { label: "PROG", count: 1, total: 5 },
+    { label: "REVI", count: 0, total: 5 },
+    { label: "DONE", count: 3, total: 5 },
+  ]);
+});
+
+test("the stage rows stay put when extra columns come first", () => {
+  // Position used to decide the rows, so a column added at the front pushed
+  // the finished row off the table.
+  const b = board(
+    [["ideas", "Ideas"], ["backlog", "Backlog"], ["in-progress", "In Progress"], ["review", "Review"], ["done", "Done"]],
+    ["ideas", "done"],
+  );
+  expect(hudStats([], b).table.map((r) => r.label)).toEqual(["BACK", "PROG", "REVI", "DONE"]);
+});
+
+test("a stage with no column on the board gets no row", () => {
+  const b = board([["todo", "Todo", "todo"], ["shipped", "Shipped", "done"]], ["todo", "shipped"]);
+  expect(hudStats([], b).table.map((r) => r.label)).toEqual(["TODO", "SHIP"]);
+});
+
+test("a board with no stages falls back to its first four columns", () => {
   const b = board(
     [["a", "Alpha"], ["b", "Bravo"], ["c", "Charlie"], ["d", "Delta"], ["e", "Echo"]],
     [],

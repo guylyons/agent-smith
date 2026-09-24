@@ -298,7 +298,7 @@ export function CardModal({
   const comments = card.comments ?? [];
 
   return (
-    <ModalBackdrop onClose={close}>
+    <ModalBackdrop onClose={close} labelledBy="cardmodal-title">
       <div
         className={`win cardmodal${dragOver ? " drag-over" : ""}`}
         onDragOver={(e: DragEvent) => { if (e.dataTransfer?.types.includes("Files")) { e.preventDefault(); setDragOver(true); } }}
@@ -593,6 +593,7 @@ function TitleField({ value, onCommit }: { value: string; onCommit: (v: string) 
 
   return (
     <input
+      id="cardmodal-title"
       className="cardmodal-title"
       value={editing ? draft : value}
       placeholder="Card title…"

@@ -72,7 +72,7 @@ export function NewAgentModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const [folder, setFolder] = useState(initialFolder ?? loadRecentFolders()[0] ?? liveFolders[0] ?? "");
+  const [folder, setFolder] = useState(initialFolder ?? recent[0] ?? "");
   // Only an explicit initialFolder (e.g. "new agent for this card") is a
   // deliberate default. A recent- or live-folder fallback is a guess pulled
   // from unrelated past activity — mark it "remembered" until the user
@@ -138,9 +138,9 @@ export function NewAgentModal({
   }
 
   return (
-    <ModalBackdrop onClose={onClose}>
+    <ModalBackdrop onClose={onClose} labelledBy="na-title">
       <div className="win newagent">
-        <div className="pix newagent-title">NEW AGENT</div>
+        <div id="na-title" className="pix newagent-title">NEW AGENT</div>
 
         <label className="pix newagent-label" htmlFor="na-folder">FOLDER</label>
         <div className="newagent-folder">
