@@ -137,11 +137,14 @@ export function makeServer(
     idleGraceMs?: number;
     idleStartupGraceMs?: number;
     idleCheckMs?: number;
+    /** How often /events sends a keep-alive comment (see the stream below). */
+    heartbeatMs?: number;
   } = {},
 ) {
   const {
     scan = false, scanIntervalMs = SCAN_INTERVAL_MS, deliver = sendPrompt, deliverFresh = sendFreshPrompt, spawn = spawnAgent,
     onWindowsClosed, idleGraceMs = 5_000, idleStartupGraceMs = 30_000, idleCheckMs = 1_000,
+    heartbeatMs = 5_000,
   } = opts;
   const dir = ensureStatusDir();
 
@@ -527,7 +530,11 @@ export function makeServer(
     const live = readSnapshot(dir, Date.now()).agents;
     const name = pickName(live.map((a) => a.name));
     const crew = { id: mintCrewId(name), name };
-    const r = await spawn(cwd, task, { model, permissionMode, worktree, branch, persona, serverUrl: url.origin, cardId, crew });
+    // A worker an agent staffs (the scrum master's spawn) runs in auto mode
+    // unless the spawn names a mode, so it doesn't stall on prompts nobody is
+    // watching. A human in the dialog gets exactly the mode they picked.
+    const mode = permissionMode ?? (req.headers.get("sec-fetch-site") ? undefined : "auto");
+    const r = await spawn(cwd, task, { model, permissionMode: mode, worktree, branch, persona, serverUrl: url.origin, cardId, crew });
     // Bind the card to the new session once it shows up, hooks or not.
     if (r.ok && cardId && r.cwd) {
       pendingSpawns.push({
@@ -890,14 +897,22 @@ export function makeServer(
       const url = new URL(req.url);
       if (url.pathname === "/events") {
         let send!: (s: Snapshot) => void;
+        let beat: ReturnType<typeof setInterval> | null = null;
         const stream = new ReadableStream({
           start(ctrl) {
             const enc = new TextEncoder();
             send = (s) => ctrl.enqueue(enc.encode(`data: ${JSON.stringify(s)}\n\n`));
             addClient(send);
             send(snapshot()); // initial
+            // Bun closes a connection after 10s with nothing sent, and this
+            // stream only speaks when the board changes: a quiet board lost
+            // it every ~10s and the header flashed RECONNECTING at a healthy
+            // server. A comment line (ignored by EventSource) keeps it open.
+            beat = setInterval(() => {
+              try { ctrl.enqueue(enc.encode(": ping\n\n")); } catch { if (beat) clearInterval(beat); }
+            }, heartbeatMs);
           },
-          cancel() { dropClient(send); },
+          cancel() { if (beat) clearInterval(beat); dropClient(send); },
         });
         return new Response(stream, { headers: {
           "content-type": "text/event-stream",

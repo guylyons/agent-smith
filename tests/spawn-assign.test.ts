@@ -98,10 +98,12 @@ async function server() {
   process.env.AGENT_STATUS_DIR = dir;
   const { makeServer } = await import("../src/server");
   const spawned: { cwd: string; cardId?: string }[] = [];
+  const modes: (string | undefined)[] = [];
   const srv = makeServer(0, {
     // Stands in for Ghostty: "launches" into a fresh worktree at `wt`.
     spawn: async (_cwd, _task, opts) => {
       spawned.push({ cwd: wt, cardId: opts?.cardId });
+      modes.push(opts?.permissionMode);
       return { ok: true, cwd: wt, worktreeCreated: true };
     },
   });
@@ -111,7 +113,7 @@ async function server() {
   const add = async (title: string) =>
     ((await (await post("/action/card-add", { columnId: "backlog", title })).json()) as any).cardId as string;
   const card = (id: string) => readSnapshot(dir, Date.now()).board.cards.find((k) => k.id === id)!;
-  return { srv, post, add, card, spawned };
+  return { srv, base, post, add, card, spawned, modes };
 }
 
 /** Wait for the status-dir watcher (150ms debounce) to push, and for the
@@ -179,5 +181,34 @@ test("a forced spawn is past the gate when its intent lands too", async () => {
   writeFileSync(join(dir, `${NEW}.json`), status({}));
   await until(() => !!card(second).assignee);
   expect(card(second).assignee?.id).toBe(NEW);
+  srv.stop(true);
+});
+
+// ---- the permission mode an agent-spawned worker runs in ---------------------
+// A scrum master staffs cards by spawning; its workers run in auto mode unless
+// it names a mode. A human in the dialog gets exactly what they picked.
+
+test("an agent's spawn with no mode launches the worker in auto mode", async () => {
+  const { srv, post, add, modes } = await server();
+  await post("/action/spawn", { cwd: dir, text: "do the card", cardId: await add("T") });
+  expect(modes).toEqual(["auto"]);
+  srv.stop(true);
+});
+
+test("an agent's spawn keeps a mode it names", async () => {
+  const { srv, post, modes } = await server();
+  await post("/action/spawn", { cwd: dir, text: "t", permissionMode: "plan" });
+  expect(modes).toEqual(["plan"]);
+  srv.stop(true);
+});
+
+test("a spawn from the dashboard with no mode stays on Claude's default", async () => {
+  const { srv, base, modes } = await server();
+  await fetch(`${base}/action/spawn`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "sec-fetch-site": "same-origin" },
+    body: JSON.stringify({ cwd: dir, text: "t" }),
+  });
+  expect(modes).toEqual([undefined]);
   srv.stop(true);
 });

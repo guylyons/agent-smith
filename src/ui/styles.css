@@ -469,7 +469,9 @@
   .crew{
     max-width:1080px;margin:0 auto;
     display:grid;gap:14px;
-    grid-template-columns:repeat(auto-fit,minmax(300px,1fr));
+    /* minmax(0,…) not a bare 1fr: a bare track grows to its widest line of
+       text, which pushed the desks (and their buttons) off a narrow window. */
+    grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr));
   }
   /* The empty grid is one block, not a column of cards, so it drops out of the
      auto-fit track and centres under the header. */
@@ -657,7 +659,7 @@
     .statline{gap:10px}
     /* One desk per row: two columns of 300px never fit, so auto-fit was
        overflowing rather than wrapping. */
-    .crew{grid-template-columns:1fr}
+    .crew{grid-template-columns:minmax(0,1fr)}
     .line{margin-top:16px;padding:12px}
     .line .hint{font-size:12px}
     /* A column just under the viewport, so the next one peeks in and the board
@@ -1511,9 +1513,14 @@ body{background:transparent}
   color:var(--on-danger);background:var(--clay);
   padding:2px 4px;letter-spacing:.5px;
 }
-/* Waiting behind another card's merge (mergeWaitFlag): the id of the card to
-   land first, in gold like the claim notes in the card modal. */
-.card-flag.card-flag-wait{color:var(--gold);font-size:11px}
+/* Waiting behind another card's merge (mergeWaitFlag): the title of the card to
+   land first, in gold like the claim notes in the card modal. One line, cut
+   with an ellipsis: a long title must not stretch the card. */
+.card-flag.card-flag-wait{
+  color:var(--gold);font-size:11px;line-height:1.3;
+  flex:1 1 100%;min-width:0;max-width:100%;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
 
 /* ---- tube death: STOP takes the agent's window out like a CRT ---------------
    Ending a session used to blink its window out between one frame and the next

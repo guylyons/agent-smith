@@ -1117,3 +1117,24 @@ test("name precedence: override > crew > persona name > hashed", () => {
   setNameOverride(dir, "kane-1", "MINE");
   expect(readSnapshot(dir, Date.now()).agents[0]!.name).toBe("MINE");
 });
+
+// ---- the /events stream stays open on a quiet board -------------------------
+// Bun drops a connection after 10s with nothing sent. The stream only speaks
+// when the board changes, so a quiet board used to lose it every ~10s and the
+// header flashed "RECONNECTING" at a healthy server. A comment line keeps it up.
+
+test("/events sends a keep-alive comment while the board is quiet", async () => {
+  reset();
+  process.env.AGENT_STATUS_DIR = dir;
+  const { makeServer } = await import("../src/server");
+  const server = makeServer(0, { heartbeatMs: 40 });
+  const res = await fetch(`http://localhost:${server.port}/events`);
+  const reader = res.body!.getReader();
+  const dec = new TextDecoder();
+  let seen = "";
+  const end = Date.now() + 2_000;
+  while (!seen.includes(": ping") && Date.now() < end) seen += dec.decode((await reader.read()).value);
+  await reader.cancel();
+  expect(seen).toContain(": ping\n\n");
+  server.stop(true);
+});

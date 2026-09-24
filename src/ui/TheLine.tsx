@@ -307,12 +307,15 @@ function ColumnView({
 
 /** The face's "wait for that card first" flag: the overlapping, unmerged cards
  *  this one has to let merge before it (see mergeBlockers), so an agent sees
- *  its place in line without opening the card or pressing MERGE. Null when
- *  nothing is ahead of it. */
+ *  its place in line without opening the card or pressing MERGE. Named by the
+ *  first card's title, since that is what the board shows; the ids stay in the
+ *  tooltip. Null when nothing is ahead of it. */
 export function mergeWaitFlag(board: Board, cardId: string): { label: string; title: string } | null {
   const ahead = mergeBlockers(board, cardId);
   if (!ahead.length) return null;
-  return { label: `⏳ ${ahead.map((c) => c.cardId).join(", ")}`, title: `Waiting to merge: ${mergeBlockReason(board, cardId)}` };
+  const first = board.cards.find((k) => k.id === ahead[0]!.cardId)?.title.trim() || ahead[0]!.cardId;
+  const more = ahead.length > 1 ? ` +${ahead.length - 1}` : "";
+  return { label: `⏳ after "${first}"${more}`, title: `Waiting to merge: ${mergeBlockReason(board, cardId)}` };
 }
 
 /** The face's repo chip: which project this card is for, so a board mixing
