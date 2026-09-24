@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { viewFromHash, type AppView } from "./view";
+import { viewFromHash, hashForView, type AppView } from "./view";
 import { useSnapshot } from "./useSnapshot";
 import { Backdrop } from "./Backdrop";
 import { Crt, TubeBevel } from "./Crt";
@@ -15,6 +15,7 @@ import { Toaster } from "./Toaster";
 import { Dictation } from "./Dictation";
 import { Notifier } from "./Notifier";
 import { MoodBoard } from "./MoodBoard";
+import { GameView } from "./GameView";
 import { onOpenAgent, onOpenCard, openCard } from "./nav";
 import { applyAllSettings, readDisplay, writeDisplay, loadBool, loadBoolDefaultOn, saveSetting, KEYS, LINE_ROWS_DEFAULT, FONT_DEFAULT, type Display } from "./settings";
 import { diffUnread, loadUnread, saveUnread, type PrevStates } from "./unread";
@@ -28,8 +29,9 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [alertsEnabled, setAlertsEnabled] = useState(false);
-  // Which page is up: the workshop (desks + THE LINE) or the MOOD board. Kept
-  // in the URL hash, so a reload, a bookmark and the back button all agree.
+  // Which page is up: the workshop (desks + THE LINE), the MOOD board or the
+  // GAME map. Kept in the URL hash, so a reload, a bookmark and the back
+  // button all agree.
   const [view, setViewState] = useState<AppView>(() => viewFromHash(location.hash));
   useEffect(() => {
     const onHash = () => setViewState(viewFromHash(location.hash));
@@ -37,16 +39,17 @@ export function App() {
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
   const setView = useCallback((v: AppView) => {
-    location.hash = v === "mood" ? "mood" : "";
+    location.hash = hashForView(v);
     setViewState(v);
   }, []);
-  // A card opened from the MOOD board (or a notice) lives on THE LINE, which
-  // only the workshop mounts: switch over, then ask again once it is listening.
+  // A card opened from the MOOD board, the GAME map (or a notice) lives on THE
+  // LINE, which only the workshop mounts: switch over, then ask again once it
+  // is listening.
   const viewRef = useRef(view);
   viewRef.current = view;
   const pendingCard = useRef<string | null>(null);
   useEffect(() => onOpenCard((cardId) => {
-    if (viewRef.current !== "mood") return;
+    if (viewRef.current === "workshop") return;
     pendingCard.current = cardId;
     setView("workshop");
   }), [setView]);
@@ -166,6 +169,8 @@ export function App() {
       <Header snap={snap} live={live} view={view} onView={setView} onNewAgent={() => setSpawnSeed({})} onFind={() => setPaletteOpen(true)} onSettings={() => setSettingsOpen(true)} />
       {view === "mood" ? (
         <MoodBoard mood={snap.mood} board={snap.board} onOpenCard={openCard} />
+      ) : view === "game" ? (
+        <GameView agents={snap.agents} board={snap.board} onOpen={openAgent} onOpenCard={openCard} />
       ) : (
         <>
           <Crew agents={snap.agents} board={snap.board} unread={unread} onOpen={openAgent} />

@@ -2265,3 +2265,38 @@ button:not(:disabled):active{transform:translateY(1px)}
 @media (prefers-reduced-motion:no-preference){
   .mnote-handle{transition:opacity .12s}
 }
+
+/* ---- the GAME map -------------------------------------------------------------
+   The Nostromo, top-down (see GameView.tsx). The art keeps its aspect ratio
+   and fits the window; below a readable size it stops shrinking and pans
+   sideways inside its own box, so the page itself never scrolls sideways.
+   Everything on it is placed in percent of the art, so it scales as one. */
+.game{max-width:var(--page-w);margin:26px auto 0;padding:16px;display:flex;flex-direction:column;gap:10px}
+.game h2{font-size:15px;letter-spacing:.5px}
+.game .hint{font-size:14px;color:var(--dim);margin-top:6px}
+.game-scroll{overflow-x:auto;overflow-y:hidden;max-width:100%}
+.game-map{position:relative;margin:0 auto;aspect-ratio:1536/1024;background:#07080a;
+  /* as wide as fits, but no taller than the window leaves under the header */
+  width:min(100%, calc((100dvh - 290px) * 1.5));min-width:720px}
+.game-art{position:absolute;inset:0;width:100%;height:100%;display:block;image-rendering:pixelated;user-select:none}
+.game-room{position:absolute;transform:translateY(-100%);font-size:11px;letter-spacing:.5px;white-space:nowrap;
+  color:var(--bone);background:rgba(0,0,0,.55);padding:1px 5px;pointer-events:none}
+.game-count{color:var(--gold)}
+.game-more{transform:none}
+.game-agent{position:absolute;transform:translate(-50%,-100%);width:2.6%;padding:0;border:0;background:none;cursor:pointer;
+  filter:drop-shadow(0 2px 0 rgba(0,0,0,.6))}
+.game-agent .sprite{width:100%;height:auto;aspect-ratio:16/24}
+.game-agent .bubble{top:-14px;right:-14px;font-size:11px;padding:2px 5px;border-width:2px}
+.game-agent:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
+.game-agent.is-asleep{filter:saturate(.35) brightness(1.1) drop-shadow(0 0 3px #7fd3ff)}
+.game-z{position:absolute;top:-12px;right:-8px;font-size:11px;color:#bfe9ff;pointer-events:none}
+/* name + doing, on hover or keyboard focus only, so the map stays readable */
+.game-tag{display:none;position:absolute;left:50%;bottom:100%;transform:translate(-50%,-8px);z-index:1;
+  width:max-content;max-width:220px;text-align:left;font-size:12px;line-height:1.4;
+  background:var(--box);color:var(--bone);border:2px solid var(--bevel);padding:4px 7px}
+.game-tag b{display:block;color:var(--gold);font-weight:600}
+.game-tag span{color:var(--dim);overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}
+.game-agent:hover,.game-agent:focus-visible{z-index:5000 !important}
+.game-agent:hover .game-tag,.game-agent:focus-visible .game-tag{display:block}
+.game-empty{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:14px;color:var(--gold);
+  background:rgba(0,0,0,.75);border:2px dashed var(--bevel);padding:12px 16px;text-align:center}
