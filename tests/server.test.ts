@@ -219,11 +219,12 @@ test("scan:true runs a pass and stop() cleans up without leaking a timer", async
 
 const CARD_SESSION = "502d0e8c-8790-4804-b767-0549edfc959c";
 
-async function cardApiServer() {
+async function cardApiServer(opts: Parameters<typeof import("../src/server").makeServer>[1] = {}) {
   reset();
   process.env.AGENT_STATUS_DIR = dir;
   const { makeServer } = await import("../src/server");
-  const server = makeServer(0);
+  // A merge ends the assignee's session; never let a test close a real tab.
+  const server = makeServer(0, { quit: async () => ({ ok: true }), ...opts });
   const base = `http://localhost:${server.port}`;
   const post = (path: string, body: object) =>
     fetch(`${base}${path}`, {
@@ -988,6 +989,37 @@ const mergeComment = async (base: string) => {
   const { board } = (await (await fetch(`${base}/board`)).json()) as any;
   return board.cards[0].comments.find((c: any) => c.text.startsWith("Merged "));
 };
+
+// After a merge the agent's work is done, so its session is ended — the live
+// assignee only, and the merge stands whether or not the tab could be closed.
+test("card-merge ends the assignee's live session once the work lands", async () => {
+  const quit: string[] = [];
+  const { server, base, post } = await cardApiServer({ quit: async (t) => { quit.push(t.cwd); return { ok: true }; } });
+  const cardId = await mergeFixture(post);
+  const res = (await (await mergePost(base, { cardId, author: "You" })).json()) as any;
+  expect(res).toMatchObject({ ok: true, quit: { ok: true } });
+  expect(quit).toEqual([join(mergeRepo, "wt")]); // the assignee's own session
+  server.stop(true);
+});
+
+test("card-merge leaves sessions alone when the merge is refused", async () => {
+  const quit: string[] = [];
+  const { server, base, post } = await cardApiServer({ quit: async (t) => { quit.push(t.cwd); return { ok: true }; } });
+  const cardId = await mergeFixture(post);
+  writeFileSync(join(mergeRepo, "wt", "dirty.txt"), "uncommitted\n");
+  expect((await mergePost(base, { cardId, author: "You" })).status).toBe(409);
+  expect(quit).toEqual([]);
+  server.stop(true);
+});
+
+test("card-merge still lands when the session can't be closed", async () => {
+  const { server, base, post } = await cardApiServer({ quit: async () => ({ ok: false, error: "couldn't find the terminal" }) });
+  const cardId = await mergeFixture(post);
+  const res = (await (await mergePost(base, { cardId, author: "You" })).json()) as any;
+  expect(res).toMatchObject({ ok: true, branch: "feature", quit: { ok: false } });
+  server.stop(true);
+});
+
 
 test("card-merge signs as: \"assignee\" like every other card write", async () => {
   const { server, base, post } = await cardApiServer();

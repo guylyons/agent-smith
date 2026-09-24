@@ -132,6 +132,9 @@ export function makeServer(
     deliverFresh?: (target: AgentStatus, text: string) => Promise<{ ok: boolean; error?: string }>;
     /** How a new session is launched. Injectable so tests don't drive Ghostty. */
     spawn?: typeof spawnAgent;
+    /** How a session is ended once its card's work has merged (see
+     *  cardMerge). Injectable so tests don't close real Ghostty tabs. */
+    quit?: typeof killAgent;
     /** Opt-in, for the stand-alone app window (`bun run app`): called once the
      *  last dashboard window has been shut for `idleGraceMs`, or never opened
      *  within `idleStartupGraceMs`. Left unset, the server serves forever with
@@ -145,7 +148,7 @@ export function makeServer(
   } = {},
 ) {
   const {
-    scan = false, scanIntervalMs = SCAN_INTERVAL_MS, deliver = sendPrompt, deliverFresh = sendFreshPrompt, spawn = spawnAgent,
+    scan = false, scanIntervalMs = SCAN_INTERVAL_MS, deliver = sendPrompt, deliverFresh = sendFreshPrompt, spawn = spawnAgent, quit = killAgent,
     onWindowsClosed, idleGraceMs = 5_000, idleStartupGraceMs = 30_000, idleCheckMs = 1_000,
     heartbeatMs = 5_000,
   } = opts;
@@ -734,7 +737,14 @@ export function makeServer(
       const t = next.cards.find((k) => k.id === n.cardId)?.title.trim() || "(untitled card)";
       void notifyCardEvent(next, n.cardId, { name: MERGE_NOTE_AUTHOR }, `[THE LINE] ${MERGE_NOTE_AUTHOR} commented on "${t}":\n${n.text}`, { kind: "comment" });
     }
-    return json(r);
+    // The work has landed, so the agent that did it is finished: end its
+    // session rather than leave it idling on a card that's gone. Only a LIVE
+    // assignee — one that has already gone has nothing to close. Best-effort:
+    // the merge stands either way, and the result rides back so the dashboard
+    // can tell a closed tab from one it couldn't find.
+    const live = findAssigneeSession(readSnapshot(dir, Date.now()).agents, card.assignee);
+    const quitResult = live ? await quit(live) : undefined;
+    return json({ ...r, ...(quitResult ? { quit: quitResult } : {}) });
   }
 
   async function cardComment(_ctx: Ctx, body: z.output<typeof CardCommentBody>, card: Card, board: Board, title: string): Promise<Response> {
