@@ -240,6 +240,7 @@ test("mergeWork lands on main without touching a detached, dirty main checkout",
   expect(r).toMatchObject({ ok: true, branch: "ag-jj", base: "main" });
 
   expect(await out(root, "log", "-1", "--pretty=%s", "main")).toBe("Merge branch 'ag-jj'");
+  expect(r.commit).toBe(await out(root, "rev-parse", "main"));
   expect((await out(root, "rev-list", "--parents", "-1", "main")).split(" ")).toHaveLength(3);
   expect(await out(root, "show", "main:feature.txt")).toBe("hello");
   // The checkout is exactly as it was: same HEAD, edit still there.
@@ -443,4 +444,13 @@ test("mergeWork lands when the tip is the one that was seen", async () => {
   const root = await freshRepo();
   const wt = await workOn(root, "ag-same", "feature.txt", "hello\n");
   expect(await mergeWork(wt, { tip: await tipOf(wt) })).toMatchObject({ ok: true, branch: "ag-same" });
+});
+
+test("mergeWork returns the merge commit it made, so the server knows what landed", async () => {
+  const root = await freshRepo();
+  const wt = await workOn(root, "ag-sha", "feature.txt", "hello\n");
+  const r = await mergeWork(wt);
+  expect(r.ok).toBe(true);
+  expect(r.commit).toBe(await out(root, "rev-parse", "main"));
+  expect(await out(root, "log", "-1", "--pretty=%s", r.commit!)).toBe("Merge branch 'ag-sha'");
 });

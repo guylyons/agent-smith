@@ -1211,6 +1211,8 @@ body{background:transparent}
 }
 .toast-action:hover{background:transparent;color:var(--gold)}
 .toast-action:focus-visible{outline:3px solid var(--bone);outline-offset:2px}
+/* "new version, reload" after a MERGE rebuilt the UI: stays up until reloaded. */
+.update-notice{position:fixed;right:22px;bottom:22px;z-index:120}
 
 /* a11y: keyboard-focus outline for the "jump to terminal" button on a crew
    card, mirroring .desk:focus-visible so both the card and its button get a

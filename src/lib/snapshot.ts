@@ -11,7 +11,13 @@ import { displayState } from "./liveness";
 // needs either fetches GET /board or GET /mood itself.
 // `archived` counts the cards in the archive (see src/lib/archive.ts); the
 // cards themselves stay out, which is the point of archiving them.
-export type Snapshot = { agents: AgentStatus[]; board: Board; mood?: Mood; archived?: number };
+export type Snapshot = { agents: AgentStatus[]; board: Board; mood?: Mood; archived?: number; ui?: UiState };
+
+/** The UI build the server is serving. A dashboard that sees `version` change
+ *  from the one it loaded is running old code and offers a reload; `failed` is
+ *  the last rebuild after a MERGE that didn't make it (the old build is still
+ *  served), stamped so each failure is toasted once. */
+export type UiState = { version: string; failed?: { at: number; error: string } };
 
 /** What one /events message carries: a snapshot minus any board or mood the
  *  client already holds. The board is most of the bytes and changes far less
