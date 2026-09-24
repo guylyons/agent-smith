@@ -8,7 +8,7 @@ import { matchChat } from "./lib/chatsearch";
 import type { ChatMessage } from "./lib/conversation";
 import { readOverrides, applyOverrides, setNameOverride, setSpriteOverride } from "./lib/overrides";
 import { loadPersonas, applyPersonas, spawnName } from "./lib/personas";
-import { applyCrew, mintCrewId, findAssigneeSession, isAssigneeSession, isActorSession, scrumHears, addNote, CREW_ID_RE } from "./lib/crew";
+import { applyCrew, applyBoundCrews, readBoundCrews, recordBoundCrew, mintCrewId, findAssigneeSession, isAssigneeSession, isActorSession, scrumHears, addNote, CREW_ID_RE } from "./lib/crew";
 import { sendTaskReadiness } from "./lib/sendTaskReady";
 import { readBoard, writeBoard, boardFile, addCard, moveCard, moveToWorkColumn, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, cardTaskFooter, addColumn, renameColumn, setInstruction, setColumnStage, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, setCardTouches, setCardRepo, setCardKind, findScrumCard, scrumBrief, repoName, claimBlockReason, mergeBlockReason, landMergedCard, mergeReleaseNotes, finishesCard, type Board, type Card } from "./lib/board";
 import { readMood, writeMood, moodFile, formatMood, addNote as addMoodNote, updateNote, raiseNote, deleteNote, restoreNote, addLink, linkBlockReason, setLinkLabel, deleteLink, type Mood, type MoodLink, type NotePatch } from "./lib/mood";
@@ -56,9 +56,16 @@ export function resolveAssignee(dir: string, sessionId: string): { id: string; n
   const live = readSnapshot(dir, Date.now()).agents.find((a) => a.sessionId === sessionId);
   const raw = live ?? loadStatus(dir, sessionId);
   if (!raw) return null;
-  const [resolved] = live ? [live] : applyOverrides(applyCrew(applyPersonas([raw], loadPersonas())), readOverrides(dir));
+  const [resolved] = live ? [live] : resolveNames(dir, [raw]);
   if (!resolved) return null;
   return { id: resolved.sessionId, name: resolved.name, ...(resolved.crew ? { crew: resolved.crew.id } : {}) };
+}
+
+/** Each agent's display name and crew. Personas and crew resolve INSIDE
+ *  applyOverrides so a name you typed yourself wins:
+ *  user override > crew name (reported, or bound at spawn) > persona name > inferRole > hashed */
+function resolveNames(dir: string, agents: AgentStatus[]): AgentStatus[] {
+  return applyOverrides(applyCrew(applyBoundCrews(applyPersonas(agents, loadPersonas()), readBoundCrews(dir))), readOverrides(dir));
 }
 
 export function readSnapshot(dir: string, now: number): Snapshot {
@@ -72,9 +79,7 @@ export function readSnapshot(dir: string, now: number): Snapshot {
       if (s) agents.push(s);
     } catch { /* half-written; skip */ }
   }
-  // personas and crew resolve INSIDE applyOverrides so a name you typed
-  // yourself wins: user override > crew name > persona name > inferRole > hashed
-  const snap = buildSnapshot(applyOverrides(applyCrew(applyPersonas(agents, loadPersonas())), readOverrides(dir)), now, {
+  const snap = buildSnapshot(resolveNames(dir, agents), now, {
     board: readBoard(dir),
   });
   return { ...snap, mood: readMood(dir) };
@@ -108,6 +113,16 @@ export async function searchChats(
 
 /** The JSON body any POST /action/* may carry; each handler reads its own
  *  fields and checks their types itself. */
+/** The human's byline on the board: the browser signs their writes with it,
+ *  and the dashboard reads it as "me". */
+const HUMAN = "You";
+
+/** An actor's name as an agent should read it. Typed into an agent's terminal,
+ *  the human's "You" reads as the agent itself ("You merged ..."). */
+function nameForAgents(name: string): string {
+  return name === HUMAN ? "The user" : name;
+}
+
 /** Who signs the note a merge leaves on the cards it was holding up. */
 const MERGE_NOTE_AUTHOR = "THE LINE";
 
@@ -358,7 +373,15 @@ export function makeServer(
       for (const { spawn: p, sessionId } of matches) {
         const board = readBoard(dir);
         const card = board.cards.find((k) => k.id === p.cardId);
-        if (!card || card.assignee?.id === sessionId) continue;
+        if (!card) continue;
+        // A session without hooks never reports the crew it was launched as;
+        // record it, so its desk and its signature use the name it was told.
+        const matched = agents.find((a) => a.sessionId === sessionId);
+        if (matched && !matched.crew && p.crewId && p.crewName) {
+          recordBoundCrew(dir, sessionId, { id: p.crewId, name: p.crewName });
+          wrote = true;
+        }
+        if (card.assignee?.id === sessionId) continue;
         // The same file-claim gate card-assign applies, unless the spawn was forced.
         if (!p.force && claimBlockReason(board, p.cardId)) continue;
         const who = resolveAssignee(dir, sessionId);
@@ -549,7 +572,9 @@ export function makeServer(
     // every /clear (see src/lib/crew.ts).
     const live = readSnapshot(dir, Date.now()).agents;
     const personas = loadPersonas();
-    const name = spawnName(persona, personas, live.map((a) => a.name));
+    // A spawn not yet bound to its session still holds its name, or two quick
+    // spawns into one persona would both be told the same one.
+    const name = spawnName(persona, personas, [...live.map((a) => a.name), ...pendingSpawns.flatMap((p) => (p.crewName ? [p.crewName] : []))]);
     const cast = persona ? personas.find((p) => p.id === persona) : undefined;
     const crew = { id: mintCrewId(name), name };
     // A worker an agent staffs (the scrum master's spawn) runs in auto mode
@@ -566,7 +591,7 @@ export function makeServer(
     // Bind the card to the new session once it shows up, hooks or not.
     if (r.ok && cardId && r.cwd) {
       pendingSpawns.push({
-        cardId, cwd: r.cwd, uniqueCwd: r.worktreeCreated === true, crewId: crew.id, task: sent,
+        cardId, cwd: r.cwd, uniqueCwd: r.worktreeCreated === true, crewId: crew.id, crewName: crew.name, task: sent,
         before: live.map((a) => a.sessionId), at: Date.now(), force: body.force,
       });
     }
@@ -688,7 +713,7 @@ export function makeServer(
     push();
     // The column id (not display name): unambiguous, and directly
     // reusable by the recipient in a card-move call of its own.
-    const delivery = await notifyCardEvent(next, cardId, actor, `[THE LINE] ${actor.name} moved "${title}" to "${to.id}".`, { kind: "move", direction });
+    const delivery = await notifyCardEvent(next, cardId, actor, `[THE LINE] ${nameForAgents(actor.name)} moved "${title}" to "${to.id}".`, { kind: "move", direction });
     const ended = await endFinishedSession(board, cardId, to.id);
     return json({ ok: true, delivery, ...(ended ? { ended: true } : {}) });
   }
@@ -736,7 +761,7 @@ export function makeServer(
     // browser sends author: "You"; unsigned falls back to the same.
     const actor = resolveActor(card, body);
     if ("error" in actor) return json({ ok: false, error: actor.error }, actor.status);
-    const by = actor.name || "You";
+    const by = actor.name || HUMAN;
     // Merge order: a card behind an overlapping, unmerged card waits
     // for it. Checked before the queue so a held card never touches git.
     // `force` is the human's override, as on card-assign and spawn.
@@ -755,7 +780,7 @@ export function makeServer(
     for (const n of released) next = addComment(next, n.cardId, MERGE_NOTE_AUTHOR, n.text);
     writeBoard(dir, next);
     push();
-    void notifyCardEvent(next, cardId, { ...actor, name: by }, `[THE LINE] ${by} merged "${title}" -- ${note}`, { kind: "move", direction: "forward" });
+    void notifyCardEvent(next, cardId, { ...actor, name: by }, `[THE LINE] ${nameForAgents(by)} merged "${title}" -- ${note}`, { kind: "move", direction: "forward" });
     for (const n of released) {
       const t = next.cards.find((k) => k.id === n.cardId)?.title.trim() || "(untitled card)";
       void notifyCardEvent(next, n.cardId, { name: MERGE_NOTE_AUTHOR }, `[THE LINE] ${MERGE_NOTE_AUTHOR} commented on "${t}":\n${n.text}`, { kind: "comment" });
@@ -780,7 +805,7 @@ export function makeServer(
     const next = addComment(board, cardId, actor.name, text);
     writeBoard(dir, next);
     push();
-    const delivery = await notifyCardEvent(next, cardId, actor, `[THE LINE] ${actor.name} commented on "${title}":\n${text}`, { kind: "comment" });
+    const delivery = await notifyCardEvent(next, cardId, actor, `[THE LINE] ${nameForAgents(actor.name)} commented on "${title}":\n${text}`, { kind: "comment" });
     return json({ ok: true, delivery });
   }
 

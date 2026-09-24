@@ -1,12 +1,13 @@
 import { test, expect } from "bun:test";
 import { fixtureDir } from "./fixtures";
-import { mkdirSync, rmSync, readFileSync, existsSync } from "node:fs";
+import { mkdirSync, rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import {
   ROSTER, CREW_ID_RE, rosterName, pickName, castName, mintCrewId, crewFrom, applyCrew,
-  isAssigneeSession, findAssigneeSession, isActorSession, scrumHears, readNotes, addNote, notesContext, NOTES_CAP,
+  isAssigneeSession, findAssigneeSession, isActorSession, scrumHears, readBoundCrews, recordBoundCrew, applyBoundCrews, readNotes, addNote, notesContext, NOTES_CAP,
 } from "../src/lib/crew";
 import type { AgentStatus } from "../src/schema";
+import { loadPersonas } from "../src/lib/personas";
 
 const dir = fixtureDir("crew-test");
 function reset() { rmSync(dir, { recursive: true, force: true }); mkdirSync(dir, { recursive: true }); }
@@ -15,6 +16,15 @@ test("the roster is uppercase ASCII with no duplicates", () => {
   expect(ROSTER.length).toBeGreaterThan(50);
   expect(new Set(ROSTER).size).toBe(ROSTER.length);
   for (const n of ROSTER) expect(/^[A-Z]+$/.test(n)).toBe(true);
+});
+
+test("rosterName never hands out a name a persona owns (no hashed DALLAS beside the scrum master)", () => {
+  const owned = new Set(loadPersonas().flatMap((p) => (p.name ? [p.name] : [])));
+  expect(owned.has("DALLAS")).toBe(true);
+  for (let i = 0; i < 2000; i++) expect(owned.has(rosterName(`anchor-${i}`))).toBe(false);
+  // The two tubetable sessions that both showed up as DALLAS.
+  expect(rosterName("2f8161b4-cebe-4971-b8b9-dc9886527c7c")).not.toBe("DALLAS");
+  expect(rosterName("a5e7c7d7-e23f-4398-b6a6-e24172867769")).not.toBe("DALLAS");
 });
 
 test("rosterName is stable for an anchor and drawn from the roster", () => {
@@ -164,4 +174,33 @@ test("scrumHears: scoped by the repo of the scrum card the session holds", () =>
   expect(scrumHears(board, sm, { id: "b", repo: "blog" } as any)).toBe(false);
   expect(scrumHears(board, sm, { id: "c" } as any)).toBe(true); // no repo: everyone hears
   expect(scrumHears(board, { sessionId: "other" } as any, { id: "b", repo: "blog" } as any)).toBe(true); // no project on record
+});
+
+// ---- crews the server bound (hookless spawns) -------------------------------
+
+test("a bound crew is recorded, read back, and dropped once its session is gone", () => {
+  reset();
+  writeFileSync(join(dir, "s1.json"), "{}");
+  recordBoundCrew(dir, "s1", { id: "ripley-3-ab12", name: "RIPLEY-3" });
+  expect(readBoundCrews(dir)).toEqual({ s1: { id: "ripley-3-ab12", name: "RIPLEY-3" } });
+  rmSync(join(dir, "s1.json"));
+  writeFileSync(join(dir, "s2.json"), "{}");
+  recordBoundCrew(dir, "s2", { id: "kane-0001", name: "KANE" });
+  expect(Object.keys(readBoundCrews(dir))).toEqual(["s2"]);
+});
+
+test("a corrupt or malformed bound-crew file reads as nothing bound, never throws", () => {
+  reset();
+  expect(readBoundCrews(dir)).toEqual({});
+  writeFileSync(join(dir, ".spawn-crews.json"), "{not json");
+  expect(readBoundCrews(dir)).toEqual({});
+  writeFileSync(join(dir, ".spawn-crews.json"), JSON.stringify({ ok: { id: "kane-0001", name: "KANE" }, bad: { id: "BAD ID", name: "X" }, worse: "x" }));
+  expect(readBoundCrews(dir)).toEqual({ ok: { id: "kane-0001", name: "KANE" } });
+});
+
+test("applyBoundCrews fills only crewless agents: a crew the hook reports wins", () => {
+  const a = (sessionId: string, crew?: { id: string; name: string }) => ({ sessionId, name: "X", crew }) as AgentStatus;
+  const bound = { s1: { id: "ripley-3-ab12", name: "RIPLEY-3" }, s2: { id: "kane-0001", name: "KANE" } };
+  const out = applyBoundCrews([a("s1"), a("s2", { id: "hicks-0002", name: "HICKS" }), a("s3")], bound);
+  expect(out.map((x) => x.crew?.name)).toEqual(["RIPLEY-3", "HICKS", undefined]);
 });

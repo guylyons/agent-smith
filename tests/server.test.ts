@@ -742,6 +742,28 @@ test("a human's comment wakes the assignee expecting a reply, and the scrum mast
   server.stop(true);
 });
 
+// The browser signs the human's writes "You". That is the human's own byline;
+// typed into an agent's terminal it read as the agent itself ("You merged").
+test("an agent is never told \"You\" did what the human did", async () => {
+  const { server, post, sent } = await notifyServer();
+  writeFileSync(join(dir, `${WORKER}.json`), valid({ sessionId: WORKER, name: "VOLT", state: "idle" }));
+  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", crew: { id: "cadence-0001", name: "CADENCE" }, state: "idle" }));
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
+  await post("/action/card-assign", { cardId, sessionId: WORKER });
+  sent.length = 0;
+  await post("/action/card-comment", { cardId, author: "You", text: "is this done?" });
+  await post("/action/card-move", { cardId, toColumnId: "review", author: "You" });
+  expect(sent.length).toBeGreaterThan(0);
+  for (const s of sent) {
+    expect(s.text).not.toMatch(/\bYou (commented|moved)\b/);
+    expect(s.text).toMatch(/The user (commented|moved)/);
+  }
+  // The board keeps the human's own byline: the dashboard reads "You" as them.
+  const { board } = (await (await fetch(`http://localhost:${server.port}/board`)).json()) as any;
+  expect(board.cards[0].comments.at(-1).author).toBe("You");
+  server.stop(true);
+});
+
 test("an assignee's own comment reaches the scrum master as FYI, no reply needed", async () => {
   const { server, post, sent } = await notifyServer();
   writeFileSync(join(dir, `${WORKER}.json`), valid({ sessionId: WORKER, name: "VOLT", state: "idle" }));
@@ -1057,6 +1079,18 @@ test("card-merge ends the assignee's live session once the work lands", async ()
   const res = (await (await mergePost(base, { cardId, author: "You" })).json()) as any;
   expect(res).toMatchObject({ ok: true, quit: { ok: true } });
   expect(quit).toEqual([join(mergeRepo, "wt")]); // the assignee's own session
+  server.stop(true);
+});
+
+test("card-merge by the human tells the scrum master \"The user merged\", not \"You merged\"", async () => {
+  const sent: string[] = [];
+  const { server, base, post } = await cardApiServer({ deliver: async (_t, text) => { sent.push(text); return { ok: true }; } });
+  const cardId = await mergeFixture(post);
+  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", crew: { id: "cadence-0001", name: "CADENCE" }, state: "idle" }));
+  expect(((await (await mergePost(base, { cardId, author: "You" })).json()) as any).ok).toBe(true);
+  for (let i = 0; i < 20 && !sent.length; i++) await new Promise((r) => setTimeout(r, 25));
+  expect(sent.join("\n")).toContain("The user merged");
+  expect(sent.join("\n")).not.toContain("You merged");
   server.stop(true);
 });
 
