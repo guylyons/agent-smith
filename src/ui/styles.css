@@ -2419,6 +2419,9 @@ body:has(#root > .game){display:flex;flex-direction:column;padding-bottom:0}
 .game-agent .bubble{top:-14px;right:-14px;font-size:11px;padding:2px 5px;border-width:2px}
 .game-agent:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
 .game-agent.is-asleep{filter:saturate(.35) brightness(1.1) drop-shadow(0 0 3px #7fd3ff)}
+/* idle past STALE_IDLE_MS: dimmed like a stale desk, full again on hover/focus */
+.game-agent.is-stale .sprite{opacity:.4}
+.game-agent.is-stale:hover .sprite,.game-agent.is-stale:focus-visible .sprite{opacity:1}
 .game-z{position:absolute;top:-12px;right:-8px;font-size:11px;color:#bfe9ff;pointer-events:none}
 /* name + doing, on hover or keyboard focus only, so the map stays readable */
 .game-tag{display:none;position:absolute;left:50%;bottom:100%;transform:translate(-50%,-8px);z-index:1;
