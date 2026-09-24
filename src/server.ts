@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { parseStatus, type AgentStatus } from "./schema";
 import { buildSnapshot, snapshotEvent, type Snapshot, type Sent } from "./lib/snapshot";
 import { archivableIds, archiveCards, restoreArchivedCard, visibleArchive, readArchive, loadArchiveForWrite, writeArchive } from "./lib/archive";
+import { remember, forget, compactMemory, memoryView, searchMemory, neighbours, formatResults, readMemory, loadMemoryForWrite, writeMemory, type FactKind } from "./lib/memory";
 import { ensureStatusDir, statusDir } from "./lib/paths";
 import { scanLiveSessions, readConversation, readSubagents } from "./scan";
 import { matchChat } from "./lib/chatsearch";
@@ -29,7 +30,7 @@ import {
   CardRestoreBody, ColumnArchiveBody, CardAddBody, CommentDeleteBody, CardMoveBody, CardUpdateBody, CardMergeBody,
   CardCommentBody, SendTaskBody, CardAssignBody, UploadBody, CrewNoteBody, RenameBody, SpriteBody, PromptBody,
   MoodNoteAddBody, MoodNoteRestoreBody, MoodNoteRef, MoodNoteUpdateBody, MoodLinkAddBody, MoodLinkRef, MoodLinkUpdateBody,
-  WorktreeCleanupBody,
+  MemoryAddBody, MemoryForgetBody, WorktreeCleanupBody,
 } from "./lib/actionBodies";
 
 function json(body: unknown, status = 200): Response {
@@ -999,6 +1000,36 @@ export function makeServer(
     return json(r, r.ok ? 200 : 400);
   }
 
+  // ---- memory-*: the team memory (src/lib/memory.ts) ---------------------------
+  // Read, change and write with no await between, so two writers can't
+  // interleave; compacted on every write so the file stays small. A memory
+  // file that is there but unreadable is refused, never overwritten.
+
+  const MEMORY_UNREADABLE = "the memory file can't be read, so writing would overwrite it; fix or move .line-memory.json";
+
+  function memoryAdd(_ctx: Ctx, body: z.output<typeof MemoryAddBody>): Response {
+    const memory = loadMemoryForWrite(dir);
+    if (!memory) return json({ ok: false, error: MEMORY_UNREADABLE }, 500);
+    const now = Date.now();
+    let r: ReturnType<typeof remember>;
+    try {
+      r = remember(memory, { kind: body.kind as FactKind, title: body.title, body: body.body, tags: body.tags, links: body.links, by: body.author || undefined }, now);
+    } catch (e) {
+      return json({ ok: false, error: e instanceof Error ? e.message : String(e) }, 400);
+    }
+    writeMemory(dir, compactMemory(r.memory, now));
+    return json({ ok: true, node: r.node });
+  }
+
+  function memoryForget(_ctx: Ctx, { id }: z.output<typeof MemoryForgetBody>): Response {
+    const memory = loadMemoryForWrite(dir);
+    if (!memory) return json({ ok: false, error: MEMORY_UNREADABLE }, 500);
+    const next = forget(memory, id);
+    if (!next) return json({ ok: false, error: `no memory: ${id}` }, 404);
+    writeMemory(dir, compactMemory(next, Date.now()));
+    return json({ ok: true });
+  }
+
   // ---- mood-*: the MOOD board (src/lib/mood.ts) -------------------------------
   // The same discipline as card-*: each action names the one note or link it
   // changes and applies it to a fresh read, so the human dragging a note and
@@ -1122,6 +1153,8 @@ export function makeServer(
     "upload": withBody(UploadBody, upload),
     "worktree-cleanup": withBody(WorktreeCleanupBody, worktreeCleanup),
     "crew-note": withBody(CrewNoteBody, crewNote),
+    "memory-add": withBody(MemoryAddBody, memoryAdd),
+    "memory-forget": withBody(MemoryForgetBody, memoryForget),
     "mood-note-add": withBody(MoodNoteAddBody, moodNoteAdd),
     "mood-note-update": withMoodNote(MoodNoteUpdateBody, moodNoteUpdate),
     "mood-note-delete": withMoodNote(NoFields, moodNoteDelete),
@@ -1212,6 +1245,26 @@ export function makeServer(
       if (url.pathname === "/archive") {
         const board = readBoard(dir);
         return json({ cards: visibleArchive(board, readArchive(dir)) });
+      }
+
+      // the team memory: recorded facts plus every card, searched by keyword
+      // and filter (see searchMemory). `?id=` is one node and its neighbours;
+      // `?format=text` is the digest the MCP memory tools return.
+      if (url.pathname === "/memory") {
+        const now = Date.now();
+        const view = memoryView(readMemory(dir), readBoard(dir), readArchive(dir), now);
+        const id = url.searchParams.get("id");
+        if (id !== null) {
+          const node = view.find((n) => n.id === id);
+          if (!node) return json({ error: `no memory: ${id}` }, 404);
+          const near = neighbours(view, id);
+          if (url.searchParams.get("format") === "text") return new Response(formatResults([node, ...near]), { headers: { "content-type": "text/plain; charset=utf-8" } });
+          return json({ node, neighbours: near });
+        }
+        const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit")) || 20));
+        const results = searchMemory(view, url.searchParams.get("q") ?? "", { limit, now });
+        if (url.searchParams.get("format") === "text") return new Response(formatResults(results), { headers: { "content-type": "text/plain; charset=utf-8" } });
+        return json({ results });
       }
 
       // one card + the column list — what a worker re-reads its ticket with
