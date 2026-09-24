@@ -39,6 +39,20 @@ export const BEVEL_MODES = [
 
 export type BevelMode = (typeof BEVEL_MODES)[number]["id"];
 
+/** The UI font. Source Code Pro is the default in every theme; THEME hands the
+ *  face back to the palette (Share Tech Mono in NOSTROMO, Roboto in MATERIAL).
+ *  Each family is loaded from Google Fonts in index.html. */
+export const FONT_THEME = "theme";
+export const FONT_DEFAULT = "source-code-pro";
+export const FONTS = [
+  { id: "source-code-pro", label: "SOURCE CODE PRO", family: "Source Code Pro" },
+  { id: "jetbrains-mono", label: "JETBRAINS MONO", family: "JetBrains Mono" },
+  { id: "fira-code", label: "FIRA CODE", family: "Fira Code" },
+  { id: "ibm-plex-mono", label: "IBM PLEX MONO", family: "IBM Plex Mono" },
+  { id: "roboto-mono", label: "ROBOTO MONO", family: "Roboto Mono" },
+  { id: FONT_THEME, label: "THEME'S OWN", family: "" },
+] as const;
+
 export const BACKGROUNDS = [
   { id: "night", label: "NIGHT" },
   { id: "stars", label: "STARS" },
@@ -75,7 +89,7 @@ export const DRAWER_W_DEFAULT = 560;
 
 export const DRAWER_FONT_MIN = 12;
 export const DRAWER_FONT_MAX = 24;
-export const DRAWER_FONT_DEFAULT = 14;
+export const DRAWER_FONT_DEFAULT = 15;
 export const DRAWER_FONT_STEP = 1;
 
 export const KEYS = {
@@ -85,6 +99,7 @@ export const KEYS = {
   bg: "aw-bg",
   bgImage: "aw-bg-image",
   bgDim: "aw-bg-dim",
+  font: "aw-font",
   alerts: "aw-alerts",
   lineRows: "aw-line-rows",
   face: "aw-face",
@@ -156,6 +171,27 @@ export function applyDrawerFont(px: number): void {
   root().style.setProperty("--drawer-font", `${clampDrawerFont(px)}px`);
 }
 
+/** The font-family stack for a font id, or null for THEME (use the palette's). */
+export function fontStack(id: string): string | null {
+  const f = FONTS.find((x) => x.id === id);
+  if (!f || !f.family) return null;
+  return `"${f.family}",ui-monospace,"SF Mono",Menlo,Consolas,monospace`;
+}
+
+/** Sets the body and code faces as inline properties on <html>, which outrank
+ *  the [data-theme] blocks; THEME removes them so the palette's own show. */
+export function applyFont(id: string): void {
+  const stack = fontStack(id);
+  const style = root().style;
+  if (stack) { style.setProperty("--mono", stack); style.setProperty("--code", stack); }
+  else { style.removeProperty("--mono"); style.removeProperty("--code"); }
+}
+
+export function loadFont(): string {
+  const saved = loadSetting(KEYS.font, FONT_DEFAULT);
+  return FONTS.some((f) => f.id === saved) ? saved : FONT_DEFAULT;
+}
+
 /** An empty stored value reads as 0 through Number(), which would clamp to the
  *  narrowest drawer rather than the default — so blank is treated as unset. */
 function storedNumber(key: string, fallback: number): number {
@@ -212,6 +248,7 @@ export function applyAllSettings(): void {
   applyBg(loadSetting(KEYS.bg, "night"));
   applyBgImage(loadSetting(KEYS.bgImage, ""));
   applyBgDim(loadBgDim());
+  applyFont(loadFont());
   applyDrawerWidth(loadDrawerWidth());
   applyDrawerFont(loadDrawerFont());
 }
@@ -220,6 +257,8 @@ export function applyAllSettings(): void {
  *  piece of state and the Settings panel can patch it. */
 export type Display = {
   theme: string; crt: CrtMode; bevel: BevelMode; bg: string; bgImage: string; bgDim: number;
+  /** A FONTS id; FONT_THEME means the theme's own face. */
+  font: string;
   /** Cards shown per LINE column before it scrolls; 0 = no cap. */
   lineRows: number;
 };
@@ -232,6 +271,7 @@ export function readDisplay(): Display {
     bg: loadSetting(KEYS.bg, "night"),
     bgImage: loadSetting(KEYS.bgImage, ""),
     bgDim: loadBgDim(),
+    font: loadFont(),
     lineRows: loadLineRows(),
   };
 }
@@ -244,5 +284,6 @@ export function writeDisplay(d: Display): void {
   applyBg(d.bg); saveSetting(KEYS.bg, d.bg);
   applyBgImage(d.bgImage); saveSetting(KEYS.bgImage, d.bgImage);
   applyBgDim(d.bgDim); saveSetting(KEYS.bgDim, String(d.bgDim));
+  applyFont(d.font); saveSetting(KEYS.font, d.font);
   saveSetting(KEYS.lineRows, String(d.lineRows));
 }
