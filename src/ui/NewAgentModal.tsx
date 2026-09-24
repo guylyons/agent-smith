@@ -204,6 +204,7 @@ export function NewAgentModal({
               <option value="">Default</option>
               <option value="plan">Plan</option>
               <option value="acceptEdits">Accept edits</option>
+              <option value="auto">Auto</option>
               <option value="bypassPermissions">Bypass</option>
             </select>
           </div>

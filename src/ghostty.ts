@@ -168,7 +168,7 @@ export async function sendFreshPrompt(t: Target, text: string): Promise<ActionRe
 }
 
 export const ALLOWED_MODELS = new Set(["opus", "sonnet", "haiku"]);
-export const ALLOWED_PERMISSION_MODES = new Set(["default", "plan", "acceptEdits", "bypassPermissions"]);
+export const ALLOWED_PERMISSION_MODES = new Set(["default", "plan", "acceptEdits", "auto", "bypassPermissions"]);
 
 function shq(s: string): string {
   return "'" + s.replace(/'/g, "'\\''") + "'";
