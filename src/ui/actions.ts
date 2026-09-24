@@ -71,13 +71,14 @@ export function setSprite(sessionId: string, palette: number, gear: string, body
 // the browser's last snapshot and its next edit — a comment, a move, a new card
 // — was silently erased. Each function below names the one thing it changes;
 // the server applies it against a fresh read, so concurrent writers compose
-// instead of clobbering. Nothing here sends a whole board.
+// instead of clobbering. Nothing here sends a whole board. Each resolves to
+// whether the server took the edit, so a refused one can be undone on screen.
 
-export function addColumnAction(name: string): void { void act("column-add", { name }); }
-export function renameColumnAction(columnId: string, name: string): void { void act("column-update", { columnId, name }); }
-export function setInstructionAction(columnId: string, instruction: string): void { void act("column-update", { columnId, instruction }); }
-export function setColumnStageAction(columnId: string, stage: Stage | null): void { void act("column-update", { columnId, stage }); }
-export function deleteColumnAction(columnId: string): void { void act("column-delete", { columnId }); }
+export function addColumnAction(name: string): Promise<boolean> { return act("column-add", { name }); }
+export function renameColumnAction(columnId: string, name: string): Promise<boolean> { return act("column-update", { columnId, name }); }
+export function setInstructionAction(columnId: string, instruction: string): Promise<boolean> { return act("column-update", { columnId, instruction }); }
+export function setColumnStageAction(columnId: string, stage: Stage | null): Promise<boolean> { return act("column-update", { columnId, stage }); }
+export function deleteColumnAction(columnId: string): Promise<boolean> { return act("column-delete", { columnId }); }
 /** Archive a merged column's cards (see src/lib/archive.ts); with `cardIds`,
  *  only those (the cards a repo-filtered view shows). The ids that went, or
  *  null on failure. */
@@ -100,9 +101,9 @@ export async function fetchArchive(): Promise<ArchivedCard[] | null> {
     return null;
   }
 }
-export function reorderColumnAction(columnId: string, toIndex: number): void { void act("column-reorder", { columnId, toIndex }); }
-export function restoreColumnAction(column: Column, index: number, cards: Card[]): void {
-  void act("column-restore", { column, index, cards });
+export function reorderColumnAction(columnId: string, toIndex: number): Promise<boolean> { return act("column-reorder", { columnId, toIndex }); }
+export function restoreColumnAction(column: Column, index: number, cards: Card[]): Promise<boolean> {
+  return act("column-restore", { column, index, cards });
 }
 
 /** Add a card; resolves to the id the server minted, or null if it refused. */
@@ -124,21 +125,21 @@ export async function addScrumCardAction(
   if (!r.ok || !r.cardId) { toastError(r.error ?? "card-add failed"); return null; }
   return { id: r.cardId, existing: !!r.existing };
 }
-export function renameCardAction(cardId: string, title: string): void { void act("card-update", { cardId, title }); }
-export function setCardDescriptionAction(cardId: string, description: string): void { void act("card-update", { cardId, description }); }
+export function renameCardAction(cardId: string, title: string): Promise<boolean> { return act("card-update", { cardId, title }); }
+export function setCardDescriptionAction(cardId: string, description: string): Promise<boolean> { return act("card-update", { cardId, description }); }
 /** Replace the card's file claim — the paths/globs it is expected to change.
  *  An empty list clears it. */
-export function setCardTouchesAction(cardId: string, touches: string[]): void { void act("card-update", { cardId, touches }); }
+export function setCardTouchesAction(cardId: string, touches: string[]): Promise<boolean> { return act("card-update", { cardId, touches }); }
 /** Label the card with its repo by hand; a blank name clears it. */
-export function setCardRepoAction(cardId: string, repo: string, repoPath?: string): void {
-  void act("card-update", { cardId, repo, ...(repoPath ? { repoPath } : {}) });
+export function setCardRepoAction(cardId: string, repo: string, repoPath?: string): Promise<boolean> {
+  return act("card-update", { cardId, repo, ...(repoPath ? { repoPath } : {}) });
 }
-export function moveCardAction(cardId: string, toColumnId: string, toIndex?: number): void {
-  void act("card-move", { cardId, toColumnId, author: ME, ...(toIndex === undefined ? {} : { toIndex }) });
+export function moveCardAction(cardId: string, toColumnId: string, toIndex?: number): Promise<boolean> {
+  return act("card-move", { cardId, toColumnId, author: ME, ...(toIndex === undefined ? {} : { toIndex }) });
 }
-export function deleteCardAction(cardId: string): void { void act("card-delete", { cardId }); }
-export function restoreCardAction(card: Card, index: number): void { void act("card-restore", { card, index }); }
-export function assignCardAction(cardId: string, sessionId: string | null): void { void act("card-assign", { cardId, sessionId }); }
+export function deleteCardAction(cardId: string): Promise<boolean> { return act("card-delete", { cardId }); }
+export function restoreCardAction(card: Card, index: number): Promise<boolean> { return act("card-restore", { card, index }); }
+export function assignCardAction(cardId: string, sessionId: string | null): Promise<boolean> { return act("card-assign", { cardId, sessionId }); }
 /** Post a comment as the human. The server delivers it to the card's assignee
  *  (and any scrum master) itself; the returned delivery says how each got it,
  *  so the modal can toast "Notified" vs "Queued" truthfully. */
@@ -147,7 +148,7 @@ export async function addCommentAction(cardId: string, text: string): Promise<De
   if (!r.ok) { toastError(r.error ?? "card-comment failed"); return []; }
   return r.delivery ?? [];
 }
-export function deleteCommentAction(cardId: string, commentId: string): void { void act("comment-delete", { cardId, commentId }); }
+export function deleteCommentAction(cardId: string, commentId: string): Promise<boolean> { return act("comment-delete", { cardId, commentId }); }
 
 /** The human's byline on comments and moves they make. Agents append with their
  *  own persona name, so a thread reads clearly as a human<->agent exchange. */

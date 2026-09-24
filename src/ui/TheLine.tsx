@@ -30,6 +30,7 @@ import {
   knownRepos, filterCards, filterRepo, dropIndex, visibleMoveTarget, loadRepoFilter, saveRepoFilter,
   parseRepoFilter, serialiseRepoFilter, scrumTarget, newlyHidden, cardInFilter, type RepoFilter,
 } from "./repoFilter";
+import { optimisticEdit } from "./optimistic";
 import { refocusAfterMove, moveSettled, cardButton, type PendingFocus } from "./moveFocus";
 
 const CARD_MIME = "application/x-line-card";
@@ -41,7 +42,9 @@ const COL_MIME = "application/x-line-column";
 // that makes it real. `send` is optional — an op whose id the SERVER generates
 // (adding a card or a column) has nothing to show optimistically and passes the
 // call alone, letting the SSE echo bring the new thing back.
-type Mutate = (fn: ((b: Board) => Board) | null, send: () => void) => void;
+// `send` resolves to whether the server took the edit; a refused one is undone
+// (see optimistic.ts).
+type Mutate = (fn: ((b: Board) => Board) | null, send: () => Promise<boolean> | void) => void;
 
 // THE LINE — a simple kanban board. Columns and cards are renamable and
 // draggable; each column carries an instruction describing what to do with work
@@ -80,6 +83,9 @@ export function TheLine({
   // / an agent). Active text fields keep their own draft, so this never yanks a
   // value out from under the cursor.
   useEffect(() => { setBoard(incoming); }, [incoming]);
+  // The newest board the server sent, for undoing an edit it refuses.
+  const server = useRef(incoming);
+  server.current = incoming;
 
   // Open a card when the notification center asks (clicking a comment/move),
   // landing on the exact thing the notice was about.
@@ -93,10 +99,7 @@ export function TheLine({
   // the empty default, and a baseline taken from that silences nothing.
   const [read, setRead] = useState(loadMarks);
 
-  const mutate: Mutate = (fn, send) => {
-    if (fn) setBoard((prev) => fn(prev));
-    send();
-  };
+  const mutate: Mutate = (fn, send) => optimisticEdit(fn, send, setBoard, () => server.current);
 
   // A keyboard move to another column remounts the card there and drops focus
   // to the page; put it back on the card once the board has re-rendered, until
