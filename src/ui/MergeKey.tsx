@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchMergeState, mergeCard, type MergeState } from "./actions";
+import { fetchMergeRead, mergeCard, type MergeState } from "./actions";
 import { mergeGate, mergeRefusal } from "../lib/mergeRace";
+import { mergeHint, type MergeRead } from "../lib/mergeHint";
+import type { Board, Card } from "../lib/board";
 import { playKeyClick } from "./sounds";
 import { toast, toastError } from "./toast";
 
@@ -13,6 +15,10 @@ import { toast, toastError } from "./toast";
 // the user's main checkout, and one stray click shouldn't do that. The first
 // press latches the cap down and swaps the legend to CONFIRM; the second one
 // merges. It relaxes on its own after a few seconds, or when focus leaves it.
+//
+// No key on a card waiting in Review or Done usually means its branch landed
+// some other way (merged by hand, worktree gone). Then one plain line says so,
+// with a button that moves the card on to the merged column (see mergeHint).
 
 /** How long an armed key waits for the confirming press before relaxing. Long
  *  enough to read the branch name on the plate beside it and then press. */
@@ -26,34 +32,46 @@ type Phase = "idle" | "armed" | "working" | "merged";
 
 /** Read the card's merge state now, and keep it fresh while the card is open. */
 function useMergeState(cardId: string, enabled: boolean) {
-  const [state, setState] = useState<MergeState | null>(null);
+  const [read, setRead] = useState<MergeRead>({ kind: "loading" });
+  const state = read.kind === "state" ? read.state : null;
 
   // Re-read now and hand the fresh state back, for the confirming press to
   // decide on. A failed read keeps what the key already shows — a blip
   // shouldn't blink the key out of existence under the pointer.
   const reload = useCallback(async () => {
-    const s = await fetchMergeState(cardId);
-    if (s) setState(s);
-    return s;
+    const r = await fetchMergeRead(cardId);
+    if ("state" in r) { setRead({ kind: "state", state: r.state }); return r.state; }
+    return null;
   }, [cardId]);
 
   useEffect(() => {
-    if (!enabled) { setState(null); return; }
+    if (!enabled) { setRead({ kind: "loading" }); return; }
     let alive = true;
     const tick = async () => {
-      const s = await fetchMergeState(cardId);
-      if (alive) setState(s);
+      const r = await fetchMergeRead(cardId);
+      if (!alive) return;
+      // A failed poll under a live key keeps the key, as reload does.
+      if ("error" in r) setRead((prev) => (prev.kind === "state" && prev.state.committed ? prev : { kind: "error", message: r.error }));
+      else setRead({ kind: "state", state: r.state });
     };
     void tick();
     const t = setInterval(() => void tick(), POLL_MS);
     return () => { alive = false; clearInterval(t); };
   }, [cardId, enabled]);
 
-  return { state, reload };
+  return { read, state, reload };
 }
 
-export function MergeKey({ cardId, hasAssignee }: { cardId: string; hasAssignee: boolean }) {
-  const { state, reload } = useMergeState(cardId, hasAssignee);
+export function MergeKey({ board, card, hasAssignee, onMove }: {
+  board: Board; card: Card; hasAssignee: boolean;
+  /** move the card to this column (the modal's own optimistic move) */
+  onMove: (columnId: string) => void;
+}) {
+  const cardId = card.id;
+  // A card in Review or Done is read even with no assignee, so the line
+  // below can say why there's no key rather than show nothing.
+  const waiting = mergeHint(board, card, { kind: "loading" }) !== null;
+  const { read, state, reload } = useMergeState(cardId, hasAssignee || waiting);
   const [phase, setPhase] = useState<Phase>("idle");
   // Held down: by the pointer, or by a held Enter/Space — a keyboard press
   // should push the cap in for as long as the key is down, same as a finger.
@@ -72,7 +90,10 @@ export function MergeKey({ cardId, hasAssignee }: { cardId: string; hasAssignee:
   // A merged key stays latched with its own legend for the life of the modal:
   // the state behind it now says "nothing to merge", and blinking the key out
   // of existence is a worse answer than showing what just happened.
-  if (!landed && (!state || !state.committed)) return null;
+  if (!landed && (!state || !state.committed)) {
+    const hint = mergeHint(board, card, read);
+    return hint ? <MergeHintLine hint={hint} onMove={onMove} /> : null;
+  }
 
   const ready = !!state?.ready && phase !== "working";
   const summary = landed
@@ -169,6 +190,25 @@ export function MergeKey({ cardId, hasAssignee }: { cardId: string; hasAssignee:
           {phase === "armed" && <span className="mergekey-why armed">press again to land it on {state?.base}</span>}
         </div>
       </div>
+    </div>
+  );
+}
+
+/** The one line under a card with no MERGE key, and the button that moves it
+ *  on. Live region so a screen reader hears "Checking…" turn into the answer. */
+function MergeHintLine({ hint, onMove }: { hint: NonNullable<ReturnType<typeof mergeHint>>; onMove: (columnId: string) => void }) {
+  const to = hint.moveTo;
+  return (
+    <div className={`mergehint tone-${hint.tone}`}>
+      <p className="mergehint-text" role="status" aria-live="polite">{hint.text}</p>
+      {to && (
+        <button
+          type="button"
+          className="pix mergehint-move"
+          title={`Move this card to ${to.name}`}
+          onClick={() => { onMove(to.id); toast(`Moved to ${to.name}`); }}
+        >→ MOVE TO {to.name.toUpperCase()}</button>
+      )}
     </div>
   );
 }

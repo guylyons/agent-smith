@@ -244,7 +244,21 @@ export async function fetchChatSearch(q: string): Promise<ChatHit[]> {
  *  any failure (no assignee, no status file, a blip) — the key simply doesn't
  *  appear, which is the same as "nothing to merge yet". */
 export async function fetchMergeState(cardId: string): Promise<MergeState | null> {
-  return getJson<MergeState>(`/merge-state?cardId=${encodeURIComponent(cardId)}`);
+  const r = await fetchMergeRead(cardId);
+  return "state" in r ? r.state : null;
+}
+
+/** The same read, keeping the server's reason when it fails ("no working
+ *  directory known for VOLT"), so a card with no key can say why. */
+export async function fetchMergeRead(cardId: string): Promise<{ state: MergeState } | { error: string }> {
+  try {
+    const res = await fetch(`/merge-state?cardId=${encodeURIComponent(cardId)}`);
+    const body = (await res.json().catch(() => null)) as (MergeState & { error?: string }) | null;
+    if (!res.ok || !body) return { error: body?.error || `the server answered ${res.status}` };
+    return { state: body };
+  } catch {
+    return { error: "the dashboard server didn't answer" };
+  }
 }
 
 /** Land this card's branch on the trunk. Real `git merge --no-ff`, run in the

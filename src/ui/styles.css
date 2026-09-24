@@ -1361,6 +1361,19 @@ body{background:transparent}
 @media (max-width:560px){
   .mergekey{align-self:stretch}
 }
+
+/* No key on a card waiting in Review or Done: one plain line saying why, and
+   a button that moves the card on. Quiet on purpose -- it is a note on the
+   ticket, not a second MERGE key. */
+.mergehint{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}
+.mergehint-text{margin:0;flex:1 1 220px;min-width:0;font-size:13px;line-height:1.4;color:var(--dim);overflow-wrap:anywhere}
+.mergehint.tone-error .mergehint-text{color:var(--clay)}
+.mergehint-move{
+  cursor:pointer;font-size:12px;letter-spacing:.5px;padding:8px 10px;
+  border:2px solid var(--bevel);background:var(--box-lo);color:var(--bone);
+}
+.mergehint-move:hover{color:var(--gold);border-color:var(--gold)}
+.mergehint-move:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
 .cardmodal-desc{
   width:100%;box-sizing:border-box;resize:vertical;min-height:94px;
   font-family:var(--mono);font-size:14px;line-height:1.6;
