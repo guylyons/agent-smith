@@ -14,7 +14,7 @@ import { readOverrides, applyOverrides, setNameOverride, setSpriteOverride } fro
 import { loadPersonas, applyPersonas, spawnName } from "./lib/personas";
 import { applyCrew, applyBoundCrews, readBoundCrews, recordBoundCrew, mintCrewId, findAssigneeSession, isAssigneeSession, isActorSession, scrumHears, addNote, CREW_ID_RE } from "./lib/crew";
 import { sendTaskReadiness } from "./lib/sendTaskReady";
-import { readBoard, writeBoard, boardFile, addCard, moveCard, moveToWorkColumn, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, cardTaskFooter, addColumn, renameColumn, setInstruction, setColumnStage, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, setCardTouches, setCardRepo, setCardKind, findScrumCard, cardView, scrumBrief, repoName, claimBlockReason, mergeBlockReason, landMergedCard, mergeReleaseNotes, finishesCard, isLandedColumn, type Board, type Card } from "./lib/board";
+import { readBoard, writeBoard, boardFile, addCard, moveCard, moveToWorkColumn, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, cardTaskFooter, addColumn, renameColumn, setInstruction, setColumnStage, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, pinComment, setCardTouches, setCardRepo, setCardKind, findScrumCard, cardView, scrumBrief, repoName, claimBlockReason, mergeBlockReason, landMergedCard, mergeReleaseNotes, finishesCard, isLandedColumn, type Board, type Card } from "./lib/board";
 import { readMood, writeMood, moodFile, formatMood, addNote as addMoodNote, updateNote, raiseNote, deleteNote, restoreNote, addLink, linkBlockReason, setLinkLabel, deleteLink, type Mood, type MoodLink, type NotePatch } from "./lib/mood";
 import { mainCheckout } from "./lib/worktree";
 import { focusSession, interruptSession, killAgent, sendPrompt, sendFreshPrompt, spawnAgent } from "./ghostty";
@@ -30,7 +30,7 @@ import {
   parseBody, SESSION_ID_RE, ColumnRef, CardRef, SessionRef, NoFields, type Signature,
   PickFolderBody, SpawnBody, ColumnAddBody, ColumnUpdateBody, ColumnReorderBody, ColumnRestoreBody,
   CardRestoreBody, ColumnArchiveBody, CardUnarchiveBody, CardAddBody, CommentDeleteBody, CardMoveBody, CardUpdateBody, CardMergeBody,
-  CardCommentBody, SendTaskBody, CardAssignBody, UploadBody, CrewNoteBody, RenameBody, SpriteBody, PromptBody,
+  CardCommentBody, CardPinBody, SendTaskBody, CardAssignBody, UploadBody, CrewNoteBody, RenameBody, SpriteBody, PromptBody,
   MoodNoteAddBody, MoodNoteRestoreBody, MoodNoteRef, MoodNoteUpdateBody, MoodLinkAddBody, MoodLinkRef, MoodLinkUpdateBody,
   MemoryAddBody, MemoryForgetBody, WorktreeCleanupBody,
 } from "./lib/actionBodies";
@@ -952,11 +952,35 @@ export function makeServer(
     const text = body.text;
     // Checked after the signature, so a bad one is what gets reported.
     if (!actor.name || !text) return json({ ok: false, error: "a signature (author, sessionId or as: \"assignee\") and text are required" }, 400);
-    const next = addComment(board, cardId, actor.name, text);
+    let next = addComment(board, cardId, actor.name, text);
+    // The new comment is the card's last; pinning it is the author pinning
+    // their own note, so it needs no further permission check.
+    const added = next.cards.find((k) => k.id === cardId)?.comments?.at(-1);
+    if (body.pin && added) next = pinComment(next, cardId, added.id);
     writeBoard(dir, next);
     push();
     const delivery = await notifyCardEvent(next, cardId, actor, `[THE LINE] ${nameForAgents(actor.name)} commented on "${title}":\n${text}`, { kind: "comment" });
-    return json({ ok: true, delivery });
+    return json({ ok: true, delivery, ...(body.pin && added ? { commentId: added.id } : {}) });
+  }
+
+  // card-pin: pin an existing comment as the card's handoff note (one per
+  // card, so it replaces any earlier pin), or unpin it. Only the comment's
+  // author or the human may. Signed like any card write, so a crew taken off
+  // the card is refused. Silent, like card-update: nobody is woken for it.
+  function cardPin(_ctx: Ctx, body: z.output<typeof CardPinBody>, card: Card, board: Board): Response {
+    const actor = resolveActor(card, body);
+    if ("error" in actor) return json({ ok: false, error: actor.error }, actor.status);
+    const target = (card.comments ?? []).find((m) => m.id === body.commentId);
+    if (!target) return json({ ok: false, error: `unknown comment: ${body.commentId}` }, 404);
+    if (!actor.name) return json({ ok: false, error: "a signature (author, sessionId or as: \"assignee\") is required" }, 400);
+    if (actor.name !== HUMAN && actor.name !== target.author) {
+      return json({ ok: false, error: `only ${nameForAgents(target.author)} or the user can pin or unpin that comment` }, 403);
+    }
+    // Unpinning a comment that isn't the pinned one leaves the real pin alone.
+    if (!body.pin && card.pinnedCommentId !== target.id) return json({ ok: true });
+    writeBoard(dir, pinComment(board, card.id, body.pin ? target.id : null));
+    push();
+    return json({ ok: true });
   }
 
   // send-task: compose the full protocol prompt server-side and type it
@@ -1227,6 +1251,7 @@ export function makeServer(
     "card-update": withCard(CardUpdateBody, cardUpdate),
     "card-merge": withCard(CardMergeBody, cardMerge),
     "card-comment": withCard(CardCommentBody, cardComment),
+    "card-pin": withCard(CardPinBody, cardPin),
     "send-task": withCard(SendTaskBody, sendTask),
     "card-assign": withCard(CardAssignBody, cardAssign),
     "upload": withBody(UploadBody, upload),

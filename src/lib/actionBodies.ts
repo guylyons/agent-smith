@@ -206,7 +206,15 @@ export const WorktreeCleanupBody = body({
   remove: z.array(z.string()).optional().catch(undefined),
 });
 
-export const CardCommentBody = Signature.extend({ text: trimmed() });
+// pin: true also pins the new comment as the card's handoff note.
+export const CardCommentBody = Signature.extend({ text: trimmed(), pin: flag() });
+
+// card-pin: pin an existing comment (replacing any earlier pin), or unpin it
+// with pin: false. Left out, pin means pin.
+export const CardPinBody = Signature.extend({
+  commentId: required("commentId is required"),
+  pin: z.boolean().catch(true),
+});
 
 /** Who pressed SEND TASK; the handler signs the card "You" when blank. */
 export const SendTaskBody = body({ author: trimmed() });

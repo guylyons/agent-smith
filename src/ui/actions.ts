@@ -149,6 +149,11 @@ export async function addCommentAction(cardId: string, text: string): Promise<De
   return r.delivery ?? [];
 }
 export function deleteCommentAction(cardId: string, commentId: string): Promise<boolean> { return act("comment-delete", { cardId, commentId }); }
+/** Pin a comment as the card's handoff note (replacing any earlier pin), or
+ *  unpin it. Signed as the human, who may pin anyone's comment. */
+export function pinCommentAction(cardId: string, commentId: string, pin: boolean): Promise<boolean> {
+  return act("card-pin", { cardId, commentId, pin, author: ME });
+}
 
 /** The human's byline on comments and moves they make. Agents append with their
  *  own persona name, so a thread reads clearly as a human<->agent exchange. */

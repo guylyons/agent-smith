@@ -1502,6 +1502,15 @@ body{background:transparent}
 .comment-time{flex:1;font-size:14px;color:var(--dim)}
 .comment-del{background:transparent;border:none;color:var(--dim);cursor:pointer;font-size:14px;line-height:1;padding:1px 3px}
 .comment-del:hover{color:var(--clay)}
+/* Pin/unpin a comment as the card's handoff note (CardModal's PinButton). */
+.comment-pin{background:transparent;border:1px solid var(--bevel);color:var(--dim);cursor:pointer;font-size:11px;letter-spacing:.5px;line-height:1;padding:3px 5px}
+.comment-pin:hover{color:var(--gold);border-color:var(--gold)}
+.comment-pin.is-on{color:var(--gold);border-color:var(--gold)}
+.comment-pin:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+.comment.is-pinned{border-left-color:var(--gold)}
+/* The pinned note at the top of the card: a comment box, edged in gold. */
+.cardmodal-pinned{background:color-mix(in srgb,var(--gold) 8%,var(--box-lo));border:2px solid var(--gold);padding:8px 10px;display:flex;flex-direction:column;gap:5px;min-width:0}
+.pinned-tag{font-size:12px;letter-spacing:.5px;color:var(--gold)}
 .comment-text{font-family:var(--mono);font-size:15px;line-height:1.6;color:var(--bone);word-break:break-word}
 /* What a clicked notification was about: the comment, or the stage it moved to.
    Held in gold for as long as the card stays open, with a short ring on arrival
@@ -1664,6 +1673,9 @@ body{background:transparent}
    success green so "merge me" reads apart from "waiting". Its text is short and
    fixed (no title in it), so it wraps rather than cutting off the count. */
 .card-flag.card-flag-next{color:var(--leaf);white-space:normal}
+/* A pinned handoff note (card-pin): gold like other "read this" marks, with a
+   word beside the pin so it is not colour or glyph alone. */
+.card-flag.card-flag-pin{color:var(--gold);font-size:12px;letter-spacing:.5px}
 
 /* ---- tube death: STOP takes the agent's window out like a CRT ---------------
    Ending a session used to blink its window out between one frame and the next

@@ -321,14 +321,16 @@ export const TOOLS: Tool[] = [
         cardId: CARD_ID,
         text: { type: "string", description: "The comment body." },
         author: { type: "string", description: "Who is writing. Leave it out: the board signs it as you." },
+        pin: { type: "boolean", description: "Pin this comment to the top of the card as its handoff note, replacing any earlier pin. Send it on your final comment before moving the card to review." },
       },
       required: ["cardId", "text"],
     },
     async run(args, ctx) {
       const cardId = str(args, "cardId");
-      const body = { cardId, text: str(args, "text"), ...(await signatureFor(ctx, cardId, optionalStr(args, "author"))) };
+      const pin = args.pin === true;
+      const body = { cardId, text: str(args, "text"), ...(pin ? { pin } : {}), ...(await signatureFor(ctx, cardId, optionalStr(args, "author"))) };
       await request(ctx, "POST", "/action/card-comment", body);
-      return `Commented on ${body.cardId}.`;
+      return pin ? `Commented on ${body.cardId} and pinned it.` : `Commented on ${body.cardId}.`;
     },
   },
   {
