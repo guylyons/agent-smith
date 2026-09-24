@@ -1,10 +1,12 @@
 import { existsSync, readdirSync, readFileSync, statSync, watch } from "node:fs";
 import { join } from "node:path";
+import { homedir } from "node:os";
 import { parseStatus, type AgentStatus } from "./schema";
 import { buildSnapshot, snapshotEvent, type Snapshot, type Sent } from "./lib/snapshot";
 import { archivableIds, archiveCards, restoreArchivedCard, visibleArchive, readArchive, loadArchiveForWrite, writeArchive } from "./lib/archive";
 import { remember, forget, compactMemory, memoryView, searchMemory, neighbours, formatResults, readMemory, loadMemoryForWrite, writeMemory, type FactKind } from "./lib/memory";
 import { ensureStatusDir, statusDir } from "./lib/paths";
+import { sandboxLeakWarning } from "./lib/sandbox";
 import { scanLiveSessions, readConversation, readSubagents } from "./scan";
 import { matchChat } from "./lib/chatsearch";
 import type { ChatMessage } from "./lib/conversation";
@@ -1392,6 +1394,8 @@ export function makeServer(
 }
 
 if (import.meta.main) {
+  const leak = sandboxLeakWarning(process.env, homedir());
+  if (leak) console.warn(leak);
   const server = makeServer(Number(process.env.PORT ?? 4173), { scan: true });
   console.log(`Agent Workshop → http://localhost:${server.port}  (watching ${statusDir()}, scanning open sessions)`);
 }

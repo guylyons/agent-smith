@@ -553,7 +553,10 @@ signaling it.
 - **Single-user, local tool** — no auth; status files live in a local
   directory.
 - **`AGENT_STATUS_DIR`** — overrides where status files live (default
-  `~/.agent-status/`); useful for isolated testing.
+  `~/.agent-status/`). On its own this does **not** isolate a test board: the
+  scanner still finds live sessions (see `bun run sandbox` below).
+- **`AGENT_PROJECTS_DIR`** — where the scanner looks for session transcripts
+  (default `~/.claude/projects`).
 - **`AGENT_SCAN_FRESH_MS`** — how recently a transcript must have changed to
   count as "open" (default 15 min).
 - **`AGENT_SCAN_INTERVAL_MS`** — how often the scanner re-reads
@@ -561,6 +564,21 @@ signaling it.
   many transcripts, at the cost of slower status updates.
 
 ## Testing
+
+To click around, write to the board, or try a spawn or merge without touching
+the live dashboard, run a sandbox:
+
+```bash
+bun run build                   # once, so the sandbox has a UI to serve
+PORT=4180 bun run sandbox       # PORT optional; 4173 is refused
+```
+
+It copies the board into a temp dir, points `AGENT_STATUS_DIR` and
+`AGENT_PROJECTS_DIR` there (the projects dir is empty, so no live session
+shows up as a desk), and turns typing, quitting and spawning into no-ops that
+report `sandbox`. Setting only `AGENT_STATUS_DIR` is not a sandbox: live
+sessions appear and board events get typed into their terminals. The server
+prints a warning at start when it sees that.
 
 ```bash
 bun test                              # unit tests (pure logic)
