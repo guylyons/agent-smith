@@ -1,6 +1,6 @@
 // tests/hook-status.test.ts
 import { test, expect } from "bun:test";
-import { applyEvent } from "../hooks/status";
+import { applyEvent, selfAssignCard, assignCardOnStart } from "../hooks/status";
 
 const start = {
   hook_event_name: "SessionStart", session_id: "s1",
@@ -312,4 +312,36 @@ test("sessionStartOutput is a SessionStart additionalContext carrying the notes"
   expect(out.hookSpecificOutput.hookEventName).toBe("SessionStart");
   expect(out.hookSpecificOutput.additionalContext).toContain("You are RIPLEY");
   expect(out.hookSpecificOutput.additionalContext).toContain("tests live in tests/");
+});
+
+// ---- self-assign on the first start only (#109) ---------------------------
+// A /clear fires SessionStart too, and AGENT_CARD stays in the env for the
+// life of the terminal. Re-assigning on it took the card back from whoever
+// the human had since handed it to.
+
+test("selfAssignCard: only a SessionStart with source startup binds AGENT_CARD", () => {
+  expect(selfAssignCard({ ...start, source: "startup" } as any, "card_x")).toBe("card_x");
+  for (const source of ["clear", "resume", "compact", undefined]) {
+    expect(selfAssignCard({ ...start, source } as any, "card_x")).toBeNull();
+  }
+});
+
+test("selfAssignCard: no AGENT_CARD, or another event, binds nothing", () => {
+  expect(selfAssignCard({ ...start, source: "startup" } as any, undefined)).toBeNull();
+  expect(selfAssignCard({ ...start, source: "startup" } as any, "")).toBeNull();
+  expect(selfAssignCard({ ...start, hook_event_name: "Stop", source: "startup" } as any, "card_x")).toBeNull();
+});
+
+test("assignCardOnStart signs the request as a self-assign, so the server can refuse a taken card", async () => {
+  const calls: any[] = [];
+  const f = (async (url: string, init: any) => { calls.push({ url, body: JSON.parse(init.body) }); return new Response("{}"); }) as any;
+  await assignCardOnStart("card_x", "s1", "http://x", f);
+  expect(calls).toEqual([{ url: "http://x/action/card-assign", body: { cardId: "card_x", sessionId: "s1", selfAssign: true } }]);
+});
+
+test("assignCardOnStart does not retry a refusal (409): the card is someone else's", async () => {
+  let n = 0;
+  const f = (async () => { n++; return new Response("{}", { status: 409 }); }) as any;
+  await assignCardOnStart("card_x", "s1", "http://x", f);
+  expect(n).toBe(1);
 });

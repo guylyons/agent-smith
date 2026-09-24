@@ -23,6 +23,8 @@ export type HookEvent = {
   /** Notification only: permission_prompt, idle_prompt, elicitation_dialog, ...
    *  Absent on older Claude Code versions. */
   notification_type?: string;
+  /** SessionStart only: startup, resume, clear or compact. */
+  source?: string;
 };
 
 /** The notification types that mean the session is blocked on the user. The
@@ -272,11 +274,10 @@ async function main() {
   // card" spawn can't set the assignee at launch — the session id is minted
   // here, inside the new terminal — so the dashboard passes the card id in the
   // env and we bind it now, once the status file above exists for the server to
-  // resolve our display name from. SessionStart only, best-effort: a failure
-  // must never break the hook.
-  if (e.hook_event_name === "SessionStart" && process.env.AGENT_CARD) {
-    await assignCardOnStart(process.env.AGENT_CARD, e.session_id);
-  }
+  // resolve our display name from. The first start only (see selfAssignCard),
+  // best-effort: a failure must never break the hook.
+  const card = selfAssignCard(e, process.env.AGENT_CARD);
+  if (card) await assignCardOnStart(card, e.session_id, DASHBOARD_URL());
   // Last, because stdout is the hook's answer. On Stop: block the stop with
   // the queued board events as the reason. On SessionStart (a launch, and
   // every /clear): hand the crew member its notes as context, so what it wrote
@@ -294,12 +295,21 @@ export function sessionStartOutput(crew: Crew, notes: string, serverUrl: string)
   return { hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: notesContext(crew, notes, serverUrl) } };
 }
 
+/** The card this SessionStart should bind to itself: AGENT_CARD, on the
+ *  spawn's first start only. A /clear, resume or compact fires SessionStart
+ *  too, with AGENT_CARD still in the env; binding then took the card back
+ *  from whoever the human had since handed it to (#109). */
+export function selfAssignCard(e: HookEvent, agentCard: string | undefined): string | null {
+  if (e.hook_event_name !== "SessionStart" || e.source !== "startup") return null;
+  return agentCard || null;
+}
+
 /** POST the card-assign the dashboard couldn't do at spawn time. Fire-and-await
  *  (so the request lands before this short-lived hook process exits) but never
  *  throw — an unreachable dashboard just leaves the card unassigned, the same
- *  state as before. */
-async function assignCardOnStart(cardId: string, sessionId: string): Promise<void> {
-  const base = DASHBOARD_URL();
+ *  state as before. Signed selfAssign, so the server refuses (409) a card that
+ *  a different live agent holds; that answer is final, not retried. */
+export async function assignCardOnStart(cardId: string, sessionId: string, base: string, fetchFn: typeof fetch = fetch): Promise<void> {
   // Retry a few times: a brand-new session can beat the dashboard to the punch
   // (server still starting, or our status file not yet surfaced). One swallowed
   // failure used to leave the card unassigned for the whole session — the
@@ -307,12 +317,12 @@ async function assignCardOnStart(cardId: string, sessionId: string): Promise<voi
   // status file directly, so this only needs to cover the moments it's unreachable.
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const res = await fetch(`${base}/action/card-assign`, {
+      const res = await fetchFn(`${base}/action/card-assign`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ cardId, sessionId }),
+        body: JSON.stringify({ cardId, sessionId, selfAssign: true }),
       });
-      if (res.ok) return;
+      if (res.ok || res.status === 409) return;
     } catch { /* not reachable yet — fall through to a short wait and retry */ }
     await new Promise((r) => setTimeout(r, 400));
   }

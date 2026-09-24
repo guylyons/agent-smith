@@ -1048,6 +1048,14 @@ export function makeServer(
     }
     const resolved = resolveAssignee(dir, body.sessionId);
     if (!resolved) return json({ ok: false, error: "no session with that id" }, 404);
+    // A hook's self-assign leaves a card alone that the human has since
+    // handed to someone else who is still running (#109). Same crew is the
+    // same agent, as in notifyTakenOff.
+    const was = card.assignee;
+    if (body.selfAssign && was && !(was.crew && resolved.crew ? was.crew === resolved.crew : was.id === resolved.id)
+        && findAssigneeSession(readSnapshot(dir, Date.now()).agents, was)) {
+      return json({ ok: false, error: `card already has a live assignee (${was.name})` }, 409);
+    }
     pendingSpawns = pendingSpawns.filter((p) => p.cardId !== cardId);
     const next = assignCard(board, cardId, resolved);
     writeBoard(dir, next);
