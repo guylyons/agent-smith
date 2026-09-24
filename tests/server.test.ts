@@ -1002,6 +1002,28 @@ test("card-merge ends the assignee's live session once the work lands", async ()
   server.stop(true);
 });
 
+// Moving a card into Done ends its agent too, through the same injectable quit
+// — and a merge ends it once, not once per path.
+test("card-move into Done ends the assignee's session through quit", async () => {
+  const quit: string[] = [];
+  const { server, post } = await cardApiServer({ quit: async (t) => { quit.push(t.cwd); return { ok: true }; } });
+  const cardId = await mergeFixture(post);
+  const res = (await (await post("/action/card-move", { cardId, toColumnId: "done" })).json()) as any;
+  expect(res).toMatchObject({ ok: true, ended: true });
+  expect(quit).toEqual([join(mergeRepo, "wt")]);
+  server.stop(true);
+});
+
+test("card-merge ends the assignee's session exactly once", async () => {
+  const quit: string[] = [];
+  const { server, base, post } = await cardApiServer({ quit: async (t) => { quit.push(t.cwd); return { ok: true }; } });
+  const cardId = await mergeFixture(post);
+  await mergePost(base, { cardId, author: "You" });
+  await Bun.sleep(50); // let any after-notify work run
+  expect(quit).toEqual([join(mergeRepo, "wt")]);
+  server.stop(true);
+});
+
 test("card-merge leaves sessions alone when the merge is refused", async () => {
   const quit: string[] = [];
   const { server, base, post } = await cardApiServer({ quit: async (t) => { quit.push(t.cwd); return { ok: true }; } });

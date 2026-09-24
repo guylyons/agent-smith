@@ -433,9 +433,9 @@ export function makeServer(
     return { cwd: st.cwd };
   };
 
-  // A finished card has no more use for its agent: when a card lands in Done
-  // (or past it, on a merge) its assignee's session is ended, the same kill
-  // the desk's ✕ runs. The dashboard sees the move in its next snapshot and
+  // A finished card has no more use for its agent: when a card is moved into
+  // Done (or past it) its assignee's session is ended through `quit`, the same
+  // kill the desk's ✕ runs. A card-merge ends its own session (see cardMerge). The dashboard sees the move in its next snapshot and
   // plays the tube death (see finishedAssignees). Best effort — a session
   // already gone, or a terminal we can't find, just stays as it is.
   const endFinishedSession = async (before: Board, cardId: string, toColumnId: string): Promise<boolean> => {
@@ -443,7 +443,7 @@ export function makeServer(
     if (!card?.assignee || !finishesCard(before, card.columnId, toColumnId)) return false;
     const st = findAssigneeSession(readSnapshot(dir, Date.now()).agents, card.assignee) ?? loadStatus(dir, card.assignee.id);
     if (!st) return false;
-    try { return (await killAgent(st)).ok; } catch { return false; }
+    try { return (await quit(st)).ok; } catch { return false; }
   };
 
   // ---- POST /action/* handlers ------------------------------------------------
@@ -746,8 +746,7 @@ export function makeServer(
     for (const n of released) next = addComment(next, n.cardId, MERGE_NOTE_AUTHOR, n.text);
     writeBoard(dir, next);
     push();
-    void notifyCardEvent(next, cardId, { ...actor, name: by }, `[THE LINE] ${by} merged "${title}" -- ${note}`, { kind: "move", direction: "forward" })
-      .then(() => { const to = next.cards.find((k) => k.id === cardId)?.columnId; if (to) void endFinishedSession(before, cardId, to); });
+    void notifyCardEvent(next, cardId, { ...actor, name: by }, `[THE LINE] ${by} merged "${title}" -- ${note}`, { kind: "move", direction: "forward" });
     for (const n of released) {
       const t = next.cards.find((k) => k.id === n.cardId)?.title.trim() || "(untitled card)";
       void notifyCardEvent(next, n.cardId, { name: MERGE_NOTE_AUTHOR }, `[THE LINE] ${MERGE_NOTE_AUTHOR} commented on "${t}":\n${n.text}`, { kind: "comment" });
