@@ -10,7 +10,7 @@ import { readOverrides, applyOverrides, setNameOverride, setSpriteOverride } fro
 import { loadPersonas, applyPersonas } from "./lib/personas";
 import { applyCrew, pickName, mintCrewId, findAssigneeSession, isAssigneeSession, addNote, CREW_ID_RE } from "./lib/crew";
 import { sendTaskReadiness } from "./lib/sendTaskReady";
-import { readBoard, writeBoard, boardFile, addCard, moveCard, moveToWorkColumn, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, addColumn, renameColumn, setInstruction, setColumnStage, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, setCardTouches, setCardRepo, repoName, claimBlockReason, mergeBlockReason, landMergedCard, mergeReleaseNotes, type Board, type Card } from "./lib/board";
+import { readBoard, writeBoard, boardFile, addCard, moveCard, moveToWorkColumn, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, addColumn, renameColumn, setInstruction, setColumnStage, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, setCardTouches, setCardRepo, setCardKind, findScrumCard, scrumBrief, repoName, claimBlockReason, mergeBlockReason, landMergedCard, mergeReleaseNotes, type Board, type Card } from "./lib/board";
 import { mainCheckout } from "./lib/worktree";
 import { focusSession, interruptSession, killAgent, sendPrompt, sendFreshPrompt, spawnAgent } from "./ghostty";
 import { readRepo } from "./repo";
@@ -611,11 +611,23 @@ export function makeServer(
     return json({ ok: true });
   }
 
-  function cardAdd(_ctx: Ctx, { columnId, title, description }: z.output<typeof CardAddBody>): Response {
+  function cardAdd(_ctx: Ctx, { columnId, title, description, kind, repo, repoPath }: z.output<typeof CardAddBody>): Response {
     const board = readBoard(dir);
     if (!board.columns.some((c) => c.id === columnId)) return json({ ok: false, error: `unknown column: ${columnId}` }, 400);
+    // One scrum master card per project: asking again hands back the one there
+    // is, so a double-click (or a second tab) never makes two orchestrators.
+    if (kind === "scrum") {
+      const existing = findScrumCard(board, repo);
+      if (existing) return json({ ok: true, cardId: existing.id, existing: true });
+    }
     let next = addCard(board, columnId, title);
     const card = next.cards[next.cards.length - 1]!; // addCard appends
+    if (repo) next = setCardRepo(next, card.id, repo, repoPath);
+    if (kind === "scrum") {
+      // Top of the column, so it is the first thing in the backlog, not the last.
+      next = moveCard(setCardKind(next, card.id, kind), card.id, columnId, 0);
+      if (!description.trim()) description = scrumBrief(repo, repoPath);
+    }
     if (description.trim()) next = setCardDescription(next, card.id, description);
     writeBoard(dir, next);
     push();

@@ -44,7 +44,12 @@ export type Card = {
   // one loads bare and simply shows no chip.
   repo?: string;
   repoPath?: string;
+  // What sort of card this is. Absent on an ordinary work card; "scrum" marks
+  // the one card per project that briefs a scrum master (see scrumBrief). The
+  // board draws it in its own colour so it never reads as just another ticket.
+  kind?: CardKind;
 };
+export type CardKind = "scrum";
 /** What a column MEANS to the protocol, independent of where it sits. `todo`
  *  is where new cards wait, `doing` is where an agent works, `review` is where
  *  finished work lands for a human, `done` is finished. A column with no stage
@@ -240,6 +245,43 @@ export function setCardRepo(board: Board, id: string, repo: string | null, path?
     if (!name) return rest;
     return where ? { ...rest, repo: name, repoPath: where } : { ...rest, repo: name };
   });
+}
+
+/** Mark what sort of card this is; `null` makes it an ordinary card again. */
+export function setCardKind(board: Board, id: string, kind: CardKind | null): Board {
+  return mapCard(board, id, (k) => {
+    const { kind: _k, ...rest } = k;
+    return kind ? { ...rest, kind } : rest;
+  });
+}
+
+/** The scrum master card already on the board for this project, if any. A card
+ *  with no repo only matches a request with none, so "no project yet" is its
+ *  own slot rather than a wildcard. */
+export function findScrumCard(board: Board, repo: string | undefined): Card | undefined {
+  const want = (repo ?? "").trim();
+  return board.cards.find((k) => k.kind === "scrum" && (k.repo ?? "") === want);
+}
+
+/** The starter brief for a scrum master card. Deliberately short and plain: it
+ *  is a draft the human edits before any scrum master is put on it. */
+export function scrumBrief(repo: string | undefined, repoPath?: string): string {
+  const name = (repo ?? "").trim();
+  const where = (repoPath ?? "").trim();
+  const project = name
+    ? `**${name}**${where ? ` (\`${where}\`)` : ""}`
+    : "**(name the project here)**";
+  return [
+    `You are the scrum master for ${project}.`,
+    "",
+    "Your job:",
+    "- Read the board and pick the next cards for this project from the backlog.",
+    "- Hand each card to a fresh agent: spawn one per card, with the persona that fits the work.",
+    "- Do not write code yourself. Keep the board truthful and tell me what is blocked on me.",
+    "",
+    "Notes for this project:",
+    "- (add priorities, constraints or cards to skip here)",
+  ].join("\n");
 }
 
 /** Assign the card to a live agent session, or clear it with `null`. */
@@ -777,6 +819,7 @@ export function sanitizeCard(v: unknown): Card | null {
     const repoPath = str(o.repoPath)?.trim();
     if (repoPath) card.repoPath = repoPath;
   }
+  if (o.kind === "scrum") card.kind = "scrum";
   return card;
 }
 
