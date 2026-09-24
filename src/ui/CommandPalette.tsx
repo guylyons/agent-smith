@@ -125,13 +125,14 @@ export function CommandPalette({ snap, onClose }: { snap: Snapshot; onClose: () 
   };
 
   return (
-    <ModalBackdrop className="palette-backdrop" onClose={onClose}>
+    <ModalBackdrop className="palette-backdrop" onClose={onClose} label="Find">
       <div className="win palette" onKeyDown={onKeyDown}>
         <div className="palette-inputrow">
           <span className="palette-prompt">⌕</span>
           <input
             ref={inputRef}
             className="reply-input palette-input"
+            aria-label="Find a ticket, desk, or chat"
             placeholder="Find a ticket, desk, or chat…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}

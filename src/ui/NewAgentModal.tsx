@@ -138,9 +138,9 @@ export function NewAgentModal({
   }
 
   return (
-    <ModalBackdrop onClose={onClose}>
+    <ModalBackdrop onClose={onClose} labelledBy="na-title">
       <div className="win newagent">
-        <div className="pix newagent-title">NEW AGENT</div>
+        <div id="na-title" className="pix newagent-title">NEW AGENT</div>
 
         <label className="pix newagent-label" htmlFor="na-folder">FOLDER</label>
         <div className="newagent-folder">
