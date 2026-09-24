@@ -207,7 +207,11 @@ export const WorktreeCleanupBody = body({
 });
 
 // pin: true also pins the new comment as the card's handoff note.
-export const CardCommentBody = Signature.extend({ text: trimmed(), pin: flag() });
+// ask: true flags the card WAITING ON YOU with this comment as the question.
+export const CardCommentBody = Signature.extend({ text: trimmed(), pin: flag(), ask: flag() });
+
+// card-ask-clear: take the WAITING ON YOU flag off a card by hand.
+export const CardAskClearBody = Signature;
 
 // card-pin: pin an existing comment (replacing any earlier pin), or unpin it
 // with pin: false. Left out, pin means pin.

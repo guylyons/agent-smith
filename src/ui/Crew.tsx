@@ -104,7 +104,7 @@ function useDyingDesks(agents: AgentStatus[]): { dying: Set<string>; ghosts: { a
 // agent is assigned to ("title · column"), computed by Crew so the comparator
 // stays a flat prop check. `ticket` is the desk's badge, likewise precomputed
 // (see deskTicket).
-const AgentCard = memo(function AgentCard({ a, onCard, ticket, unread, dying, onOpen }: { a: AgentStatus; onCard: string; ticket: string | null; unread: boolean; dying: boolean; onOpen: (id: string) => void }) {
+const AgentCard = memo(function AgentCard({ a, onCard, ticket, asking, unread, dying, onOpen }: { a: AgentStatus; onCard: string; ticket: string | null; asking: boolean; unread: boolean; dying: boolean; onOpen: (id: string) => void }) {
   const { palette } = paletteFor(a.sessionId, a.role);
   const flashing = useSendFlash(a.sessionId);
   // Killing closes the agent's terminal — irreversible, so the ✕ arms a confirm
@@ -183,6 +183,9 @@ const AgentCard = memo(function AgentCard({ a, onCard, ticket, unread, dying, on
         )}
         {/* the board card this agent is assigned to, tying the desk to THE LINE */}
         {onCard && <div className="pix oncard" title={onCard}>▸ {onCard}</div>}
+        {/* Its card holds a question for the human ("ask":true), unanswered.
+            Words, not just colour; it goes when the human replies on the card. */}
+        {asking && <div className="pix desk-ask" title="Answer on the card to clear this">✋ WAITING ON YOU</div>}
         <div className="doing">{a.doing}</div>
         <div className="pix state">
           <span className={`lamp ${a.state}`}></span>
@@ -194,7 +197,7 @@ const AgentCard = memo(function AgentCard({ a, onCard, ticket, unread, dying, on
   );
 }, (prev, next) => {
   const x = prev.a, y = next.a;
-  return prev.onOpen === next.onOpen && prev.onCard === next.onCard && prev.ticket === next.ticket &&
+  return prev.onOpen === next.onOpen && prev.onCard === next.onCard && prev.ticket === next.ticket && prev.asking === next.asking &&
     prev.unread === next.unread && prev.dying === next.dying &&
     x.sessionId === y.sessionId && x.name === y.name && x.role === y.role &&
     x.state === y.state && x.doing === y.doing &&
@@ -222,6 +225,11 @@ export function assignedCardLabel(board: Board, sessionId: string, crewId?: stri
   const col = board.columns.find((c) => c.id === first.columnId);
   const more = mine.length > 1 ? ` +${mine.length - 1}` : "";
   return `${first.title} · ${col?.name ?? first.columnId}${more}`;
+}
+
+/** Does a card this session holds have an unanswered question for the human? */
+export function deskAsking(board: Board, a: Pick<AgentStatus, "sessionId" | "crew">): boolean {
+  return assignedCards(board, a.sessionId, a.crew?.id).some((c) => !!c.ask);
 }
 
 /** The desk's ticket badge. A desk with an assigned card shows that card's
@@ -266,6 +274,7 @@ export function Crew({ agents, board, unread, onOpen }: {
           a={a}
           onCard={ghost ? "" : assignedCardLabel(board, a.sessionId, a.crew?.id)}
           ticket={ghost ? a.ticket : deskTicket(board, a)}
+          asking={!ghost && deskAsking(board, a)}
           unread={!ghost && unread.has(a.sessionId)}
           dying={ghost || dying.has(a.sessionId)}
           onOpen={onOpen}

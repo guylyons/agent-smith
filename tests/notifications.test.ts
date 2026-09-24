@@ -98,3 +98,16 @@ test("a needs-you notice, or a comment notice without its id, has no spot on the
   expect(notifFocus(notif({ kind: "needs-you", sessionId: "s1" }))).toBeUndefined();
   expect(notifFocus(notif({ kind: "comment", cardId: "c1" }))).toBeUndefined();
 });
+
+test("a new ask is one WAITING ON YOU notice that lands on the question, not a second comment notice", () => {
+  const m = { id: "m1", author: "VOLT", text: "A or B?", at: 5 };
+  const prev = snap([], board([{ id: "c1", title: "Fix bug", columnId: "backlog", comments: [] }]));
+  const curr = snap([], board([{ id: "c1", title: "Fix bug", columnId: "backlog", comments: [m], ask: { commentId: "m1", by: "VOLT", at: 5 } }]));
+  const out = diffNotifications(prev, curr, "You", 100);
+  expect(out.length).toBe(1);
+  expect(out[0]).toMatchObject({ kind: "ask", cardId: "c1", who: "VOLT", commentId: "m1" });
+  expect(out[0]!.text).toContain("WAITING ON YOU");
+  expect(notifFocus(out[0]!)).toEqual({ kind: "comment", id: "m1" });
+  // an ask already open is not news again
+  expect(diffNotifications(curr, curr, "You", 200)).toEqual([]);
+});

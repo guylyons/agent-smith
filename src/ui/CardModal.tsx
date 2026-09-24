@@ -2,14 +2,15 @@ import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from
 import type { AgentStatus } from "../schema";
 import type { Board, Card } from "../lib/board";
 import type { Assignee } from "../lib/board";
-import { renameCard, setCardDescription, setCardTouches, setCardRepo, assignCard, addComment, deleteComment, pinComment, pinnedComment, moveCard, cardTaskPrompt, claimBlockReason } from "../lib/board";
+import { renameCard, setCardDescription, setCardTouches, setCardRepo, assignCard, addComment, deleteComment, pinComment, pinnedComment, setAsk, moveCard, cardTaskPrompt, claimBlockReason } from "../lib/board";
 import {
   sendCardTask, uploadImage, ME,
   renameCardAction, setCardDescriptionAction, setCardTouchesAction, setCardRepoAction, assignCardAction,
-  addCommentAction, deleteCommentAction, pinCommentAction, moveCardAction, type Delivery,
+  addCommentAction, deleteCommentAction, pinCommentAction, clearAskAction, moveCardAction, type Delivery,
 } from "./actions";
 import { ModalBackdrop } from "./Backdrop";
 import { MergeKey } from "./MergeKey";
+import { AskBanner } from "./WaitingOnYou";
 import { cardButton } from "./moveFocus";
 import { guardSessionEnd } from "./sessionEnd";
 import { renderMarkdown, imageSrc } from "./markdown";
@@ -254,7 +255,9 @@ export function CardModal({
   // twice, in two wordings.)
   function postComment(text: string) {
     mutate(
-      (b) => addComment(b, card.id, ME, text),
+      // The human replying is what clears an open question (the server does
+      // the same), so the flag drops the moment they post.
+      (b) => setAsk(addComment(b, card.id, ME, text), card.id, null),
       () => { void addCommentAction(card.id, text).then((delivery) => toast(deliveryToast(delivery))); },
     );
   }
@@ -326,6 +329,8 @@ export function CardModal({
             value={card.title}
             onCommit={(v) => { if (v) mutate((b) => renameCard(b, card.id, v), () => renameCardAction(card.id, v)); }}
           />
+
+          <AskBanner card={card} onClear={() => mutate((b) => setAsk(b, card.id, null), () => clearAskAction(card.id))} />
 
           {/* The handoff note: the one comment pinned to the top, usually the
               worker's last (what changed, how it was verified, what wasn't).

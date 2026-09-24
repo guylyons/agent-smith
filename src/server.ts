@@ -14,7 +14,7 @@ import { readOverrides, applyOverrides, setNameOverride, setSpriteOverride } fro
 import { loadPersonas, applyPersonas, spawnName } from "./lib/personas";
 import { applyCrew, applyBoundCrews, readBoundCrews, recordBoundCrew, mintCrewId, findAssigneeSession, isAssigneeSession, isActorSession, scrumHears, addNote, CREW_ID_RE } from "./lib/crew";
 import { sendTaskReadiness } from "./lib/sendTaskReady";
-import { readBoard, writeBoard, boardFile, addCard, moveCard, moveToWorkColumn, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, cardTaskFooter, addColumn, renameColumn, setInstruction, setColumnStage, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, pinComment, setCardTouches, setCardRepo, setCardKind, findScrumCard, cardView, scrumBrief, repoName, claimBlockReason, mergeBlockReason, landMergedCard, mergeReleaseNotes, finishesCard, isLandedColumn, setCardWork, type Board, type Card } from "./lib/board";
+import { readBoard, writeBoard, boardFile, addCard, moveCard, moveToWorkColumn, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, cardTaskFooter, addColumn, renameColumn, setInstruction, setColumnStage, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, pinComment, setAsk, setCardTouches, setCardRepo, setCardKind, findScrumCard, cardView, scrumBrief, repoName, claimBlockReason, mergeBlockReason, landMergedCard, mergeReleaseNotes, finishesCard, isLandedColumn, setCardWork, type Board, type Card } from "./lib/board";
 import { readMood, writeMood, moodFile, formatMood, addNote as addMoodNote, updateNote, raiseNote, deleteNote, restoreNote, addLink, linkBlockReason, setLinkLabel, deleteLink, type Mood, type MoodLink, type NotePatch } from "./lib/mood";
 import { mainCheckout } from "./lib/worktree";
 import { focusSession, interruptSession, killAgent, sendPrompt, sendFreshPrompt, spawnAgent } from "./ghostty";
@@ -31,7 +31,7 @@ import {
   parseBody, SESSION_ID_RE, ColumnRef, CardRef, SessionRef, NoFields, type Signature,
   PickFolderBody, SpawnBody, ColumnAddBody, ColumnUpdateBody, ColumnReorderBody, ColumnRestoreBody,
   CardRestoreBody, ColumnArchiveBody, CardUnarchiveBody, CardAddBody, CommentDeleteBody, CardMoveBody, CardUpdateBody, CardMergeBody,
-  CardCommentBody, CardPinBody, SendTaskBody, CardAssignBody, UploadBody, CrewNoteBody, RenameBody, SpriteBody, PromptBody,
+  CardCommentBody, CardPinBody, CardAskClearBody, SendTaskBody, CardAssignBody, UploadBody, CrewNoteBody, RenameBody, SpriteBody, PromptBody,
   MoodNoteAddBody, MoodNoteRestoreBody, MoodNoteRef, MoodNoteUpdateBody, MoodLinkAddBody, MoodLinkRef, MoodLinkUpdateBody,
   MemoryAddBody, MemoryForgetBody, WorktreeCleanupBody,
 } from "./lib/actionBodies";
@@ -359,6 +359,12 @@ export function makeServer(
   function resolveActor(card: Card, body: Signature): Actor | Unsignable {
     const signer = resolveSigner(body, card);
     return "error" in signer ? signer : { name: signer.name ?? "", sessionId: signer.sessionId, crew: signer.crew };
+  }
+
+  /** The human's own signature: their byline, and no crew or session behind
+   *  it. An agent signing with only a name is not taken for the human. */
+  function isHuman(actor: Actor): boolean {
+    return actor.name === HUMAN && !actor.crew && !actor.sessionId;
   }
 
   /** Whose notes a crew-note write is for. Notes belong to a crew member, so
@@ -1001,10 +1007,32 @@ export function makeServer(
     // their own note, so it needs no further permission check.
     const added = next.cards.find((k) => k.id === cardId)?.comments?.at(-1);
     if (body.pin && added) next = pinComment(next, cardId, added.id);
+    // The human answering on the card is what an open question waits for, so
+    // their comment clears it. An agent's "ask":true raises it (the human
+    // can't ask themselves); any other agent comment leaves it be.
+    const human = isHuman(actor);
+    if (human && card.ask) next = setAsk(next, cardId, null);
+    else if (!human && body.ask && added) next = setAsk(next, cardId, added.id);
     writeBoard(dir, next);
     push();
     const delivery = await notifyCardEvent(next, cardId, actor, `[THE LINE] ${nameForAgents(actor.name)} commented on "${title}":\n${text}`, { kind: "comment" });
-    return json({ ok: true, delivery, ...(body.pin && added ? { commentId: added.id } : {}) });
+    return json({ ok: true, delivery, ...((body.pin || body.ask) && added ? { commentId: added.id } : {}) });
+  }
+
+  // card-ask-clear: take the WAITING ON YOU flag off by hand, for a question
+  // answered somewhere other than the card. The human or the agent that asked
+  // may; a crew taken off the card is refused like any card write. Silent.
+  function cardAskClear(_ctx: Ctx, body: z.output<typeof CardAskClearBody>, card: Card, board: Board): Response {
+    const actor = resolveActor(card, body);
+    if ("error" in actor) return json({ ok: false, error: actor.error }, actor.status);
+    if (!actor.name) return json({ ok: false, error: "a signature (author, sessionId or as: \"assignee\") is required" }, 400);
+    if (!card.ask) return json({ ok: true });
+    if (!isHuman(actor) && actor.name !== card.ask.by) {
+      return json({ ok: false, error: `only ${nameForAgents(card.ask.by)} or the user can clear that question` }, 403);
+    }
+    writeBoard(dir, setAsk(board, card.id, null));
+    push();
+    return json({ ok: true });
   }
 
   // card-pin: pin an existing comment as the card's handoff note (one per
@@ -1305,6 +1333,7 @@ export function makeServer(
     "card-merge": withCard(CardMergeBody, cardMerge),
     "card-comment": withCard(CardCommentBody, cardComment),
     "card-pin": withCard(CardPinBody, cardPin),
+    "card-ask-clear": withCard(CardAskClearBody, cardAskClear),
     "send-task": withCard(SendTaskBody, sendTask),
     "card-assign": withCard(CardAssignBody, cardAssign),
     "upload": withBody(UploadBody, upload),

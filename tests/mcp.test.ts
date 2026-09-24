@@ -97,6 +97,15 @@ test("card_comment passes pin through only when true", async () => {
   expect(calls[1]!.body).not.toHaveProperty("pin");
 });
 
+test("card_comment passes ask through only when true", async () => {
+  const { api, calls } = fakeApi();
+  const res = await call("card_comment", { cardId: "card_1", text: "A or B?", ask: true }, api);
+  expect(calls[0]!.body).toEqual({ cardId: "card_1", text: "A or B?", ask: true, author: "ANVIL" });
+  expect(res.result.content[0].text).toContain("waiting on the user");
+  await call("card_comment", { cardId: "card_1", text: "x", ask: "yes" }, api);
+  expect(calls[1]!.body).not.toHaveProperty("ask");
+});
+
 test("card_comment uses an explicit author when given one", async () => {
   const { api, calls } = fakeApi();
   await call("card_comment", { cardId: "card_1", author: "CADENCE", text: "hi" }, api);

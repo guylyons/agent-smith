@@ -31,12 +31,12 @@ function ago(ms: number, now: number): string {
 /** Where on the card a notice should land: the comment it announced, or the
  *  stage row for a move. A needs-you opens the agent, not a card spot. */
 export function notifFocus(n: Notif): CardFocus | undefined {
-  if (n.kind === "comment" && n.commentId) return { kind: "comment", id: n.commentId };
+  if ((n.kind === "comment" || n.kind === "ask") && n.commentId) return { kind: "comment", id: n.commentId };
   if (n.kind === "move") return { kind: "stage" };
   return undefined;
 }
 
-const ICON: Record<Notif["kind"], string> = { comment: "💬", "needs-you": "⚠", move: "→" };
+const ICON: Record<Notif["kind"], string> = { comment: "💬", "needs-you": "⚠", move: "→", ask: "✋" };
 
 /**
  * The header's notification inbox: a bell with an unread count, and a panel of

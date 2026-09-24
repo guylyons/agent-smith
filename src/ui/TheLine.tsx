@@ -657,6 +657,9 @@ function CardView({
           {/* A pinned handoff note: the worker's summary is ready to read.
               Glyph plus a word, so it never rests on colour; the card's
               aria-label says it in full (see cardName). */}
+          {/* An agent asked the human a real question ("ask":true). Loudest
+              flag on the card, with words, so it never rests on colour. */}
+          {card.ask && <span className="card-flag card-flag-ask" title={`${card.ask.by} is waiting on your answer`}>✋ WAITING ON YOU</span>}
           {card.pinnedCommentId && <span className="card-flag card-flag-pin" title="Handoff note pinned">📌 NOTE</span>}
           {mergeWait && <span className="card-flag card-flag-wait" title={mergeWait.title}>{mergeWait.label}</span>}
           {mergeNext && <span className="card-flag card-flag-wait card-flag-next" title={mergeNext.title}>{mergeNext.label}</span>}
@@ -689,7 +692,7 @@ function CardView({
  *  what the face shows, in words. The chips inside the open button are only
  *  pictures and initials, so the name has to carry them. */
 export function cardName(
-  card: Pick<Card, "title" | "kind" | "assignee"> & Partial<Pick<Card, "id" | "num" | "pinnedCommentId">>,
+  card: Pick<Card, "title" | "kind" | "assignee"> & Partial<Pick<Card, "id" | "num" | "pinnedCommentId" | "ask">>,
   staffing: "live" | "ended" | "none",
   unread: number,
   commentCount: number,
@@ -701,6 +704,7 @@ export function cardName(
   } else parts.push("unassigned");
   if (unread) parts.push(`${unread} new comment${unread > 1 ? "s" : ""}`);
   else if (commentCount) parts.push(`${commentCount} comment${commentCount > 1 ? "s" : ""}`);
+  if (card.ask) parts.push(`waiting on you, ${card.ask.by} asked`);
   if (card.pinnedCommentId) parts.push("handoff note pinned");
   if (card.id) parts.push(`card ${cardRef({ id: card.id, num: card.num })}`);
   return parts.join(", ");
