@@ -244,7 +244,9 @@ export async function readMergePreview(cwd: string): Promise<MergePreview | { er
   return buildPreview({ branch, base, tip, log: log.stdout, totalCommits: Number.parseInt(count.stdout, 10) || 0, numstat: stat.stdout });
 }
 
-export type MergeResult = { ok: boolean; branch?: string; base?: string; error?: string };
+/** `commit` is the merge commit made, so what comes after (the UI rebuild)
+ *  knows exactly what landed. */
+export type MergeResult = { ok: boolean; branch?: string; base?: string; commit?: string; error?: string };
 
 /** The refusal for a merge of a tip that is no longer the branch's. */
 export const BRANCH_MOVED = "the branch moved since you looked; review again";
@@ -286,7 +288,7 @@ export async function mergeWork(cwd: string, opts: { tip?: string } = {}): Promi
       const why = (merge.stdout || merge.stderr).split("\n").find((l) => l.trim()) ?? "";
       return { ok: false, error: `could not merge ${facts.branch} into ${facts.base} — ${why || "merge it by hand"}` };
     }
-    return { ok: true, branch: facts.branch, base: facts.base };
+    return { ok: true, branch: facts.branch, base: facts.base, commit: await revParse(root, "HEAD") };
   });
 }
 
@@ -311,7 +313,7 @@ async function mergeDetached(root: string, branch: string, base: string, tip: st
   if (commit.code !== 0) return refused(commit.stderr);
   const moved = await git(root, ["update-ref", "-m", `merge ${branch}`, `refs/heads/${base}`, commit.stdout, baseTip.stdout]);
   if (moved.code !== 0) return refused(moved.stderr);
-  return { ok: true, branch, base };
+  return { ok: true, branch, base, commit: commit.stdout };
 }
 
 export type CleanupResult = {

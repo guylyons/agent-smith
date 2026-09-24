@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync, watch } from "node:fs"
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { parseStatus, type AgentStatus } from "./schema";
-import { buildSnapshot, snapshotEvent, type Snapshot, type Sent } from "./lib/snapshot";
+import { buildSnapshot, snapshotEvent, type Snapshot, type Sent, type UiState } from "./lib/snapshot";
 import { archivableIds, archiveCards, restoreArchivedCard, visibleArchive, readArchive, loadArchiveForWrite, writeArchive, numberCards } from "./lib/archive";
 import { remember, forget, compactMemory, memoryView, searchMemory, neighbours, formatResults, readMemory, loadMemoryForWrite, writeMemory, type FactKind } from "./lib/memory";
 import { ensureStatusDir, statusDir } from "./lib/paths";
@@ -25,6 +25,7 @@ import { chooseFolder } from "./lib/chooser";
 import { initialIdle, onConnect, onDisconnect, shouldShutDown, type IdleState } from "./lib/idle";
 import { matchPendingSpawns, sessionsNeedingOpeningPrompt, type PendingSpawn } from "./lib/spawnAssign";
 import { dispatchAction, type ActionContext, type ActionHandler } from "./lib/actionDispatch";
+import { rebuildAfterMerge, uiVersion, bunBuild, type Builder } from "./lib/uiBuild";
 import type { z } from "zod";
 import {
   parseBody, SESSION_ID_RE, ColumnRef, CardRef, SessionRef, NoFields, type Signature,
@@ -173,12 +174,15 @@ export function makeServer(
     heartbeatMs?: number;
     /** Where the built UI lives. Injectable so tests needn't build it. */
     distDir?: string;
+    /** How the UI is rebuilt after a MERGE lands a UI change (see
+     *  lib/uiBuild). Injectable so tests needn't run bun build. */
+    buildUi?: Builder;
   } = {},
 ) {
   const {
     scan = false, scanIntervalMs = SCAN_INTERVAL_MS, deliver = sendPrompt, deliverFresh = sendFreshPrompt, spawn = spawnAgent, quit = killAgent,
     onWindowsClosed, idleGraceMs = 5_000, idleStartupGraceMs = 30_000, idleCheckMs = 1_000,
-    heartbeatMs = 5_000, distDir = join(import.meta.dir, "..", "dist"),
+    heartbeatMs = 5_000, distDir = join(import.meta.dir, "..", "dist"), buildUi = bunBuild,
   } = opts;
   const dir = ensureStatusDir();
 
@@ -215,10 +219,14 @@ export function makeServer(
   };
   /** The live view plus each session's queued count, so the human can see a
    *  note is waiting to land rather than wondering whether it was heard. */
+  // The build being served, for dashboards to notice when it changes under
+  // them (see rebuildUiAfterMerge). Read once here; only a rebuild moves it.
+  let ui: UiState = { version: uiVersion(distDir) };
   const snapshot = (): Snapshot => {
     const snap = readSnapshot(dir, Date.now());
     return {
       ...snap,
+      ui,
       agents: snap.agents.map((a) => {
         const n = inbox.get(a.sessionId)?.length ?? 0;
         return n ? { ...a, inbox: n } : a;
@@ -925,7 +933,31 @@ export function makeServer(
       writeBoard(dir, addComment(readBoard(dir), cardId, MERGE_NOTE_AUTHOR, tidy));
       push();
     }
+    // A UI change landed in the checkout we serve: rebuild dist/ in the
+    // background, so the merge answers now and the dashboards hear after.
+    void rebuildUiAfterMerge(cardId, r.commit ?? "");
     return json({ ...r, cleanup, ...(quitResult ? { quit: quitResult } : {}) });
+  }
+
+  // After a MERGE: rebuild the UI when the merge changed src/ui in the
+  // checkout dist/ is served from (lib/uiBuild decides and builds). A good
+  // build bumps `ui.version`, which open dashboards see as "new version,
+  // reload"; a failed one keeps the old dist and sets `ui.failed` for a toast.
+  // Either way the card says what happened. Never throws.
+  async function rebuildUiAfterMerge(cardId: string, commit: string): Promise<void> {
+    const r = await rebuildAfterMerge(distDir, commit, buildUi).catch((e) => ({ ran: true as const, ok: false, error: String(e) }));
+    if (!r.ran) return;
+    let note: string;
+    if (r.ok) {
+      ui = { version: uiVersion(distDir) };
+      note = "Rebuilt the dashboard UI. Open dashboards will offer a reload.";
+    } else {
+      const error = r.error || "unknown error";
+      ui = { ...ui, failed: { at: Date.now(), error } };
+      note = `UI build failed, so the dashboard still serves the old build: ${error}`;
+    }
+    writeBoard(dir, addComment(readBoard(dir), cardId, MERGE_NOTE_AUTHOR, note));
+    push();
   }
 
   // worktree-cleanup (CONFIG): worktrees merged by hand never went through
