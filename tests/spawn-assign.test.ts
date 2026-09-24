@@ -254,3 +254,26 @@ test("a bound hookless spawn keeps its name taken for the next spawn", async () 
   expect(crews.map((c) => c.name)).toEqual(["RIPLEY", "RIPLEY-2"]);
   srv.stop(true);
 });
+
+test("while a respawn waits to bind, \"as\":\"assignee\" signs with the new agent's name, not the ended assignee's", async () => {
+  const { srv, post, add, card, crews } = await server();
+  const id = await add("Reduced motion");
+  writeFileSync(join(dir, `${OLD}.json`), status({ sessionId: OLD, name: "KIRSH", cwd: "/somewhere/else" }));
+  await post("/action/card-assign", { cardId: id, sessionId: OLD });
+  rmSync(join(dir, `${OLD}.json`)); // KIRSH's session ended
+  await post("/action/spawn", { cwd: dir, text: "do the card", cardId: id, persona: "frontend-ux" });
+  await post("/action/card-comment", { cardId: id, as: "assignee", text: "picked up" });
+  expect(card(id).comments?.at(-1)?.author).toBe(crews[0]!.name);
+  srv.stop(true);
+});
+
+test("a LIVE assignee still signs as itself while a spawn for its card is pending", async () => {
+  const { srv, post, add, card } = await server();
+  const id = await add("Shared");
+  writeFileSync(join(dir, `${OLD}.json`), status({ sessionId: OLD, name: "KIRSH", cwd: "/somewhere/else" }));
+  await post("/action/card-assign", { cardId: id, sessionId: OLD });
+  await post("/action/spawn", { cwd: dir, text: "do the card", cardId: id, persona: "frontend-ux" });
+  await post("/action/card-comment", { cardId: id, as: "assignee", text: "still here" });
+  expect(card(id).comments?.at(-1)?.author).toBe("KIRSH");
+  srv.stop(true);
+});

@@ -257,6 +257,11 @@ export function makeServer(
       if (!k) return { error: `unknown card: ${body.cardId ?? ""}`, status: 404 };
       if (!k.assignee) return { error: "card has no assignee to sign as", status: 400 };
       const live = findAssigneeSession(readSnapshot(dir, Date.now()).agents, k.assignee);
+      // The assignee has ended and a new agent was spawned for the card but
+      // hasn't bound yet: the caller is that agent, so sign with the name it
+      // was launched under, not the ended assignee's.
+      const respawn = live ? undefined : pendingSpawns.findLast((p) => p.cardId === k.id && p.crewName);
+      if (respawn) return { via: "assignee", name: respawn.crewName, crew: respawn.crewId };
       const fresh = live ?? resolveAssignee(dir, k.assignee.id);
       return {
         via: "assignee",
