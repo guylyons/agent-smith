@@ -72,6 +72,13 @@ test("card haystack includes description, comments, and column name", () => {
   expect(item.hay).toContain("backlog"); // column name
 });
 
+test("a card can be found by its number", () => {
+  const board = addCard(defaultBoard(), "backlog", "Ticket");
+  const cardId = board.cards[0]!.id;
+  const item = buildSearchItems(snapWith(board)).find((i) => i.id === cardId)!;
+  expect(item.hay).toContain("#1");
+});
+
 test("buildSearchItems yields one agent item per agent, keyed by session id", () => {
   const items = buildSearchItems(snapWith(defaultBoard(), [A({ sessionId: "sess-1", name: "SABLE", role: "Backend Dev", ticket: "MHO-96" })]));
   const agent = items.find((i) => i.kind === "agent");

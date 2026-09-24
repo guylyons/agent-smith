@@ -27,12 +27,13 @@ const desk = (o: Partial<AgentStatus>): AgentStatus => ({
   sessionId: SID, name: "NOVA", role: "r", ticket: null, state: "idle", doing: "", cwd: "/", branch: null, updatedAt: 0, ...o,
 });
 
-test("deskTicket comes from the assigned card, not the branch", () => {
+test("deskTicket is the assigned card's number, not the branch's ticket", () => {
   let b = defaultBoard();
+  b = addCard(b, "backlog", "first");
   b = addCard(b, "backlog", "AG-42: Something unrelated");
-  b = assignCard(b, b.cards[0]!.id, { id: SID, name: "NOVA" });
+  b = assignCard(b, b.cards[1]!.id, { id: SID, name: "NOVA" });
   // still on the old card's branch — the badge must not keep saying #11
-  expect(deskTicket(b, desk({ branch: "ag-11-right-hand-sidebar-the", ticket: "#11" }))).toBe("AG-42");
+  expect(deskTicket(b, desk({ branch: "ag-11-right-hand-sidebar-the", ticket: "#11" }))).toBe("#2");
 });
 
 test("deskTicket follows the card across a /clear by crew id", () => {
@@ -41,7 +42,7 @@ test("deskTicket follows the card across a /clear by crew id", () => {
   const id = b.cards[0]!.id;
   b = assignCard(b, id, { id: "old-session", name: "NOVA", crew: "nova-1" });
   const out = deskTicket(b, desk({ ticket: "#11", crew: { id: "nova-1", name: "NOVA" } }));
-  expect(out).toBe(id.replace(/^card_/, "").slice(0, 6));
+  expect(out).toBe("#1");
 });
 
 test("deskTicket falls back to the branch ticket with no card", () => {

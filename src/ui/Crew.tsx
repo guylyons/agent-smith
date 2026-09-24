@@ -2,7 +2,7 @@ import { memo, useEffect, useRef, useState } from "react";
 import type { MouseEvent } from "react";
 import type { AgentStatus } from "../schema";
 import type { Board, Card } from "../lib/board";
-import { cardTicket } from "../lib/ticket";
+import { cardRef } from "../lib/ticket";
 import { Sprite } from "./Sprite";
 import { paletteFor } from "./sprite-data";
 import { focusSession, killAgent } from "./actions";
@@ -225,12 +225,12 @@ export function assignedCardLabel(board: Board, sessionId: string, crewId?: stri
 }
 
 /** The desk's ticket badge. A desk with an assigned card shows that card's
- *  ticket, so the badge can't disagree with the card title beside it — the
+ *  number, so the badge can't disagree with the card title beside it — the
  *  branch can lag (an agent picks up a new card without switching branches).
  *  Only a desk with no card falls back to the ticket parsed from its branch. */
 export function deskTicket(board: Board, a: AgentStatus): string | null {
   const first = assignedCards(board, a.sessionId, a.crew?.id)[0];
-  return first ? cardTicket(first) : a.ticket;
+  return first ? cardRef(first) : a.ticket;
 }
 
 export function Crew({ agents, board, unread, onOpen }: {

@@ -66,3 +66,15 @@ test("GET /card on an unknown or missing id is a 404 JSON error", async () => {
     }
   });
 });
+
+test("GET /card also takes a card's number, with or without the #", async () => {
+  const b = twoCards();
+  await withServer(b, async (base) => {
+    for (const q of ["2", "%232"]) {
+      const out = await (await fetch(`${base}/card?id=${q}`)).json();
+      expect(out.card.id).toBe(b.cards[1]!.id);
+      expect(out.card.num).toBe(2);
+    }
+    expect((await fetch(`${base}/card?id=99`)).status).toBe(404);
+  });
+});

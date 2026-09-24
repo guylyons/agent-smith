@@ -39,6 +39,22 @@ export function escCloses(e: { key: string; defaultPrevented: boolean; isComposi
   return e.key === "Escape" && isTop && !e.defaultPrevented && !e.isComposing;
 }
 
+// Where focus goes when a dialog closes, or null to leave it where it is.
+// Only moves focus that was lost with the dialog (`focusLost`: it was inside
+// the dialog, or already dropped to the page): if something else took focus
+// meanwhile, such as a dialog that opened as this one closed, it stays there.
+// Takes the first candidate still on the page, in order: the control that
+// opened the dialog, the dialog's own fallback (the card's button on the
+// board), then the dialog now on top. The opener is often gone by then: a FIND
+// row or a notice that opened a card unmounts as it does, and a card that
+// changed column is a fresh button in its new column.
+export function returnTarget<T extends { isConnected: boolean }>(
+  focusLost: boolean, candidates: (T | null | undefined)[],
+): T | null {
+  if (!focusLost) return null;
+  return candidates.find((c): c is T => !!c && c.isConnected) ?? null;
+}
+
 const TABBABLE = [
   "a[href]", "button:not([disabled])", "input:not([disabled]):not([type=hidden])",
   "select:not([disabled])", "textarea:not([disabled])", "[tabindex]:not([tabindex='-1'])",
@@ -63,15 +79,19 @@ const openDialogs: HTMLElement[] = [];
 // Given a name (`labelledBy`, the id of the dialog's title, or `label`), it is
 // also a modal dialog: announced as one, focus moves in on open (unless the
 // dialog already focused a field of its own), Tab cycles inside, Esc calls
-// onClose, and on close focus goes back to whatever opened it.
-export function ModalBackdrop({ className = "drawer-backdrop", onClose, labelledBy, label, children }: {
-  className?: string; onClose: () => void; labelledBy?: string; label?: string; children: ReactNode;
+// onClose, and on close focus goes back to whatever opened it, or, when that
+// is gone, to `returnTo()` or the dialog underneath (see returnTarget).
+export function ModalBackdrop({ className = "drawer-backdrop", onClose, labelledBy, label, returnTo, children }: {
+  className?: string; onClose: () => void; labelledBy?: string; label?: string;
+  returnTo?: () => HTMLElement | null; children: ReactNode;
 }) {
   const downOnSelf = useRef(false);
   const ref = useRef<HTMLDivElement>(null);
   // The latest onClose, so the key listener below needn't resubscribe per render.
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
+  const returnToRef = useRef(returnTo);
+  returnToRef.current = returnTo;
   const isDialog = Boolean(labelledBy || label);
   // Read during the first render, before any autoFocus inside has moved focus.
   const [opener] = useState(() => (typeof document === "undefined" ? null : document.activeElement));
@@ -96,7 +116,15 @@ export function ModalBackdrop({ className = "drawer-backdrop", onClose, labelled
     return () => {
       document.removeEventListener("keydown", onKey);
       openDialogs.splice(openDialogs.indexOf(root), 1);
-      if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+      const active = document.activeElement;
+      const lost = !active || active === document.body || root.contains(active);
+      const top = openDialogs[openDialogs.length - 1];
+      const to = returnTarget(lost, [
+        opener instanceof HTMLElement && opener !== document.body ? opener : null,
+        returnToRef.current?.(),
+        top && (tabbables(top)[0] ?? top),
+      ]);
+      to?.focus();
     };
   }, [isDialog]);
 
