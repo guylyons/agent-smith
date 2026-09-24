@@ -14,12 +14,12 @@ import { readOverrides, applyOverrides, setNameOverride, setSpriteOverride } fro
 import { loadPersonas, applyPersonas, spawnName } from "./lib/personas";
 import { applyCrew, applyBoundCrews, readBoundCrews, recordBoundCrew, mintCrewId, findAssigneeSession, isAssigneeSession, isActorSession, scrumHears, addNote, CREW_ID_RE } from "./lib/crew";
 import { sendTaskReadiness } from "./lib/sendTaskReady";
-import { readBoard, writeBoard, boardFile, addCard, moveCard, moveToWorkColumn, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, cardTaskFooter, addColumn, renameColumn, setInstruction, setColumnStage, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, setCardTouches, setCardRepo, setCardKind, findScrumCard, cardView, scrumBrief, repoName, claimBlockReason, mergeBlockReason, landMergedCard, mergeReleaseNotes, finishesCard, isLandedColumn, type Board, type Card } from "./lib/board";
+import { readBoard, writeBoard, boardFile, addCard, moveCard, moveToWorkColumn, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, cardTaskFooter, addColumn, renameColumn, setInstruction, setColumnStage, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, setCardTouches, setCardRepo, setCardKind, findScrumCard, cardView, scrumBrief, repoName, claimBlockReason, mergeBlockReason, landMergedCard, mergeReleaseNotes, finishesCard, isLandedColumn, setCardWork, type Board, type Card } from "./lib/board";
 import { readMood, writeMood, moodFile, formatMood, addNote as addMoodNote, updateNote, raiseNote, deleteNote, restoreNote, addLink, linkBlockReason, setLinkLabel, deleteLink, type Mood, type MoodLink, type NotePatch } from "./lib/mood";
 import { mainCheckout } from "./lib/worktree";
 import { focusSession, interruptSession, killAgent, sendPrompt, sendFreshPrompt, spawnAgent } from "./ghostty";
 import { readRepo } from "./repo";
-import { readMergeState, readMergePreview, mergeWork, holdForClaims, cleanupMergedWork, planWorktreeCleanup, cleanupMergedWorktrees } from "./lib/merge";
+import { readMergeState, readMergePreview, readWork, readGoneWorktreeState, mergeWork, holdForClaims, cleanupMergedWork, planWorktreeCleanup, cleanupMergedWorktrees } from "./lib/merge";
 import { saveUpload, resolveUploadPath } from "./lib/uploads";
 import { chooseFolder } from "./lib/chooser";
 import { initialIdle, onConnect, onDisconnect, shouldShutDown, type IdleState } from "./lib/idle";
@@ -449,6 +449,7 @@ export function makeServer(
       const { matches, keep } = matchPendingSpawns(pendingSpawns, agents, Date.now(), opening);
       pendingSpawns = keep;
       let wrote = false;
+      const bound: { cardId: string; who: NonNullable<Card["assignee"]>; cwd: string }[] = [];
       for (const { spawn: p, sessionId } of matches) {
         const board = readBoard(dir);
         const card = board.cards.find((k) => k.id === p.cardId);
@@ -467,9 +468,11 @@ export function makeServer(
         if (!who) continue;
         writeBoard(dir, assignCard(board, p.cardId, who));
         noteTakenOff(p.cardId, card.assignee, who);
+        bound.push({ cardId: p.cardId, who, cwd: matched?.cwd || p.cwd });
         wrote = true;
       }
       if (wrote) push();
+      for (const b of bound) await recordWork(b.cardId, b.who, b.cwd);
     } finally {
       settling = false;
     }
@@ -525,15 +528,35 @@ export function makeServer(
   // Read from the session's own status FILE rather than the live snapshot,
   // so a card whose agent has finished and gone still knows which branch
   // holds its work — which is exactly when you want to merge it.
-  const cardWorkDir = (cardId: string): { cwd: string } | { error: string; status: number } => {
+  // Once that file is gone too (the session ended, and SessionEnd or the
+  // scanner deleted it), the card's own record of where its work lives
+  // (card.work, written when the agent bound to it) answers instead.
+  const cardWorkDir = (cardId: string): { cwd: string; branch?: string; root?: string } | { error: string; status: number } => {
     const card = readBoard(dir).cards.find((k) => k.id === cardId);
     if (!card) return { error: `unknown card: ${cardId}`, status: 404 };
     if (!card.assignee) return { error: "card has no assignee, so there's no branch to merge", status: 400 };
     // The crew member's current session first (its id moved on with a
     // /clear), then the session the card was bound to.
     const st = findAssigneeSession(readSnapshot(dir, Date.now()).agents, card.assignee) ?? loadStatus(dir, card.assignee.id);
-    if (!st?.cwd) return { error: `no working directory known for ${card.assignee.name}`, status: 404 };
-    return { cwd: st.cwd };
+    const work = card.work;
+    if (st?.cwd && st.cwd !== work?.cwd) return { cwd: st.cwd, branch: st.branch || undefined, root: card.repoPath };
+    if (work) return work;
+    return { error: `no working directory known for ${card.assignee.name}`, status: 404 };
+  };
+
+  // Record where a card's work lives (see Card.work) once an agent is bound to
+  // it. Only while that agent is still the assignee (by crew, so a /clear's new
+  // session id still counts): the git calls yield, and the card may have
+  // changed hands meanwhile. Best effort, like the rest of the bookkeeping.
+  const recordWork = async (cardId: string, who: NonNullable<Card["assignee"]>, cwd: string): Promise<void> => {
+    const work = await readWork(cwd);
+    const board = readBoard(dir); // re-read: the git calls above yielded
+    const card = board.cards.find((k) => k.id === cardId);
+    const a = card?.assignee;
+    if (!a || !(a.crew && who.crew ? a.crew === who.crew : a.id === who.id)) return;
+    if (JSON.stringify(card.work) === JSON.stringify(work)) return;
+    writeBoard(dir, setCardWork(board, cardId, work));
+    push();
   };
 
   // A finished card has no more use for its agent: when a card is moved into
@@ -999,6 +1022,7 @@ export function makeServer(
     // write (moveToWorkColumn is a no-op if it already landed in-progress).
     writeBoard(dir, addComment(moveToWorkColumn(readBoard(dir), cardId), cardId, by, `Sent task to ${agent.name}.`));
     push();
+    if (card.assignee && agent.cwd) await recordWork(cardId, card.assignee, agent.cwd);
     return json({ ok: true });
   }
 
@@ -1029,6 +1053,8 @@ export function makeServer(
     writeBoard(dir, next);
     noteTakenOff(cardId, card.assignee, resolved);
     push();
+    const cwd = loadStatus(dir, body.sessionId)?.cwd;
+    if (cwd) await recordWork(cardId, resolved, cwd);
     const delivery = await notifyTakenOff(next, card, resolved, title);
     return json({ ok: true, delivery });
   }
@@ -1396,6 +1422,9 @@ export function makeServer(
         if (card && !existsSync(where.cwd) && isLandedColumn(board, card.columnId)) {
           return json(holdForClaims({ ...(await readMergeState("")), blocked: "already merged" }, board, cardId));
         }
+        // Gone before it landed (CLEAN UP, or removed by hand): say that, and
+        // whether the branch it was on is still in the repo.
+        if (!existsSync(where.cwd)) return json(holdForClaims(await readGoneWorktreeState(where.root, where.branch), board, cardId));
         const state = await readMergeState(where.cwd);
         return json(holdForClaims(state, board, cardId));
       }
@@ -1405,6 +1434,7 @@ export function makeServer(
       if (url.pathname === "/merge-preview") {
         const where = cardWorkDir(url.searchParams.get("cardId") ?? "");
         if ("error" in where) return json({ error: where.error }, where.status);
+        if (!existsSync(where.cwd)) return json({ error: "this card's worktree was removed" });
         return json(await readMergePreview(where.cwd));
       }
 

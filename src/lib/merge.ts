@@ -42,6 +42,10 @@ export type MergeFacts = {
    *  merge commit — work landed outside the dashboard. Only a real merge is
    *  seen; a fast-forward looks the same as a branch with no commits. */
   landed?: boolean;
+  /** the card's worktree folder no longer exists (removed by CLEAN UP, or by
+   *  hand). `branch` is then the recorded branch when it is still in the repo,
+   *  "" when it is gone too. See readGoneWorktreeState. */
+  worktreeGone?: boolean;
 };
 
 export type MergeState = MergeFacts & {
@@ -210,6 +214,37 @@ export async function readMergeState(cwd: string): Promise<MergeState> {
     return { ...facts, ...verdict, ready: false, blocked: "a merge is in progress — try again in a moment", merging };
   }
   return { ...facts, ...verdict, merging };
+}
+
+/** Where some work lives, for a card to record when an agent binds to it (see
+ *  Card.work): the folder, the branch checked out there, and the repo's main
+ *  checkout. A folder that isn't a repo is recorded bare. */
+export async function readWork(cwd: string): Promise<{ cwd: string; branch?: string; root?: string }> {
+  const root = await repoRoot(cwd);
+  if (!root) return { cwd };
+  const branch = await currentBranch(cwd);
+  return branch ? { cwd, branch, root } : { cwd, root };
+}
+
+/** The merge state of a card whose worktree folder is gone, said plainly
+ *  rather than as "not a git repository". Reads the recorded branch from the
+ *  repo's main checkout: still there, it says so and counts what the trunk
+ *  lacks; merged in already, it reads as landed. Never offers a MERGE: the
+ *  merge runs from the worktree, and there isn't one. */
+export async function readGoneWorktreeState(root: string | undefined, branch: string | undefined): Promise<MergeState> {
+  const gone: MergeState = { ...NOT_A_REPO, worktreeGone: true, blocked: "this card's worktree was removed" };
+  if (!root || !branch || !(await repoRoot(root))) return gone;
+  const tip = await revParse(root, `refs/heads/${branch}`);
+  if (!tip) return gone;
+  const base = await pickBase(root);
+  if (!base || base === branch) return gone;
+  const count = await git(root, ["rev-list", "--count", `${base}..${tip}`]);
+  const ahead = count.code === 0 ? Number.parseInt(count.stdout, 10) || 0 : 0;
+  const landed = ahead === 0 && (await mergedInto(root, branch, base));
+  const blocked = landed
+    ? `${branch} is already in ${base}`
+    : `this card's worktree was removed, but its branch ${branch} is still in the repo with ${ahead} commit${ahead === 1 ? "" : "s"} not in ${base}`;
+  return { ...gone, repo: true, branch, base, ahead, tip, landed, blocked };
 }
 
 /**

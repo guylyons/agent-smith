@@ -69,3 +69,16 @@ test("a reason that already ends in punctuation isn't doubled", () => {
   const h = mergeHint(withMerged(), card("review"), { kind: "error", message: "gone." });
   expect(h?.text).toBe("Can't read this card's branch: gone.");
 });
+
+// The card's worktree is gone (CLEAN UP, or removed by hand): say so in plain
+// words rather than "not a git repository".
+test("a card whose worktree and branch are gone says so plainly", () => {
+  const h = mergeHint(withMerged(), card("review"), state({ repo: false, branch: "", worktreeGone: true, blocked: "this card's worktree was removed" }));
+  expect(h).toEqual({ tone: "idle", text: "This card's worktree was removed. If its work is merged, move it to Merged.", moveTo: { id: "merged", name: "Merged" } });
+});
+
+test("a card whose worktree is gone but whose branch is left names the branch", () => {
+  const blocked = "this card's worktree was removed, but its branch ag-6 is still in the repo with 2 commits not in main";
+  const h = mergeHint(withMerged(), card("done"), state({ ahead: 2, worktreeGone: true, blocked }));
+  expect(h?.text).toBe("This card's worktree was removed, but its branch ag-6 is still in the repo with 2 commits not in main.");
+});
