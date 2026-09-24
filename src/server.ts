@@ -261,6 +261,14 @@ export function makeServer(
       // hasn't bound yet: the caller is that agent, so sign with the name it
       // was launched under, not the ended assignee's.
       const respawn = live ? undefined : pendingSpawns.findLast((p) => p.cardId === k.id && p.crewName);
+      // A caller that also says who it is (the footer adds its crew id) and is
+      // not the assignee was taken off the card: signing it as the assignee
+      // would put its words under the new agent's name. Without a crew id on
+      // both sides there is nothing to compare, so old footers sign as before.
+      const current = respawn?.crewId ?? live?.crew?.id ?? k.assignee.crew;
+      if (body.crew && CREW_ID_RE.test(body.crew) && current && body.crew !== current) {
+        return { error: "you are no longer assigned to this card; stop work on it", status: 409 };
+      }
       if (respawn) return { via: "assignee", name: respawn.crewName, crew: respawn.crewId };
       const fresh = live ?? resolveAssignee(dir, k.assignee.id);
       return {
@@ -276,7 +284,9 @@ export function makeServer(
       return who ? { via: "session", name: who.name, sessionId: who.id, crew: who.crew } : { error: "no session with that id", status: 404 };
     }
     if (body.crew !== undefined) {
-      return CREW_ID_RE.test(body.crew) ? { via: "crew", crew: body.crew } : { error: "bad crew id", status: 400 };
+      // With an author too (the footer's fallback swaps "as" for "author" and
+      // leaves the crew id in), the name comes from the author.
+      return CREW_ID_RE.test(body.crew) ? { via: "crew", crew: body.crew, name: body.author || undefined } : { error: "bad crew id", status: 400 };
     }
     return { via: "author", name: body.author };
   }
@@ -590,7 +600,7 @@ export function makeServer(
     // A card spawn by curl (the scrum master staffing a card) sends plain
     // text; the browser sends the full prompt. Either way the agent must get
     // the card's protocol footer exactly once.
-    const footer = cardId && !task.includes("-- THE LINE --") ? cardTaskFooter(readBoard(dir), cardId, url.origin, name) : "";
+    const footer = cardId && !task.includes("-- THE LINE --") ? cardTaskFooter(readBoard(dir), cardId, url.origin, name, { crew: crew.id }) : "";
     const sent = footer ? `${task}\n\n${footer}` : task;
     const r = await spawn(cwd, sent, { model: model ?? cast?.model, permissionMode: mode, worktree, branch, persona, serverUrl: url.origin, cardId, crew });
     // Bind the card to the new session once it shows up, hooks or not.
@@ -843,7 +853,7 @@ export function makeServer(
     // reaches in-progress even if the agent skips STEP 1, and the prompt
     // correctly tells it the card is already there (leave it, pick it up).
     const progressed = moveToWorkColumn(board, cardId);
-    const prompt = cardTaskPrompt(progressed, cardId, url.origin, agent.name, { workedBefore });
+    const prompt = cardTaskPrompt(progressed, cardId, url.origin, agent.name, { workedBefore, crew: agent.crew?.id });
     if (!prompt.trim()) return json({ ok: false, error: "card has no task text to send" }, 400);
     // Fresh delivery: clear the agent's context before the new task so
     // the previous ticket doesn't bleed into this one.
@@ -859,13 +869,15 @@ export function makeServer(
 
   // card-assign: bind a LIVE session (resolved to its display name so
   // the label survives the session ending), or clear with null.
-  function cardAssign(_ctx: Ctx, body: z.output<typeof CardAssignBody>, card: Card, board: Board): Response {
+  async function cardAssign(_ctx: Ctx, body: z.output<typeof CardAssignBody>, card: Card, board: Board, title: string): Promise<Response> {
     const cardId = card.id;
     if (body.sessionId === null) {
       pendingSpawns = pendingSpawns.filter((p) => p.cardId !== cardId);
-      writeBoard(dir, assignCard(board, cardId, null));
+      const next = assignCard(board, cardId, null);
+      writeBoard(dir, next);
       push();
-      return json({ ok: true });
+      const delivery = await notifyTakenOff(next, card, null, title);
+      return json({ ok: true, delivery });
     }
     // The same file-claim gate as spawn: binding an agent to this card is
     // staffing it. Unassigning (handled above) is never blocked — it is
@@ -877,9 +889,35 @@ export function makeServer(
     const resolved = resolveAssignee(dir, body.sessionId);
     if (!resolved) return json({ ok: false, error: "no session with that id" }, 404);
     pendingSpawns = pendingSpawns.filter((p) => p.cardId !== cardId);
-    writeBoard(dir, assignCard(board, cardId, resolved));
+    const next = assignCard(board, cardId, resolved);
+    writeBoard(dir, next);
     push();
-    return json({ ok: true });
+    const delivery = await notifyTakenOff(next, card, resolved, title);
+    return json({ ok: true, delivery });
+  }
+
+  // The agent a card-assign took off the card is told to stop, or it carries
+  // on from its footer. The scrum master hears it as FYI. Nobody is told when
+  // the card had no assignee, or the "new" one is the same agent (by crew, as
+  // everywhere, so a /clear's new session id is not a change of hands).
+  async function notifyTakenOff(next: Board, before: Card, to: NonNullable<Card["assignee"]> | null, title: string): Promise<Delivery[]> {
+    const was = before.assignee;
+    if (!was) return [];
+    if (to && (was.crew && to.crew ? was.crew === to.crew : was.id === to.id)) return [];
+    const { agents } = readSnapshot(dir, Date.now());
+    const old = findAssigneeSession(agents, was);
+    const card = next.cards.find((k) => k.id === before.id) ?? before;
+    const where = `"${title}" (${before.id})`;
+    const out: Delivery[] = [];
+    if (old) {
+      out.push(await deliverTo(old, `[THE LINE] You were taken off ${where}. Stop work on it and do not write to it again.\n(no reply needed)`));
+    }
+    const change = to ? `reassigned from ${nameForAgents(was.name)} to ${nameForAgents(to.name)}` : `unassigned from ${nameForAgents(was.name)}`;
+    for (const a of agents) {
+      if (a === old || a.persona !== "scrum-master" || !scrumHears(next, a, card)) continue;
+      out.push(await deliverTo(a, `[THE LINE] ${where} was ${change}.\n(FYI, no reply needed unless it raises a problem or asks you something)`));
+    }
+    return out;
   }
 
   // upload: save an image dropped/pasted into a chat to a temp file, and
