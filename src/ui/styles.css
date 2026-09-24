@@ -1576,6 +1576,10 @@ body{background:transparent}
   flex:1 1 100%;min-width:0;max-width:100%;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
+/* Front of a merge line (mergeNextFlag): same shape as the wait flag, in the
+   success green so "merge me" reads apart from "waiting". Its text is short and
+   fixed (no title in it), so it wraps rather than cutting off the count. */
+.card-flag.card-flag-next{color:var(--leaf);white-space:normal}
 
 /* ---- tube death: STOP takes the agent's window out like a CRT ---------------
    Ending a session used to blink its window out between one frame and the next
