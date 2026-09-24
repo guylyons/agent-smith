@@ -614,7 +614,7 @@ function doneAwaitsMerge(board: Board): boolean {
 
 /** Has a card in this column landed? Past Done (see isPastDone), except the
  *  done-stage column itself when it awaits merge (see doneAwaitsMerge). */
-function isLandedColumn(board: Board, columnId: string): boolean {
+export function isLandedColumn(board: Board, columnId: string): boolean {
   const at = board.columns.findIndex((c) => c.id === columnId);
   if (at < 0) return LEGACY_STAGE[columnId] === "done";
   if (!isPastDone(board, at)) return false;
