@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync, watch } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync, watch } from "node:fs";
 import { join } from "node:path";
 import { parseStatus, type AgentStatus } from "./schema";
 import { buildSnapshot, type Snapshot } from "./lib/snapshot";
@@ -10,12 +10,12 @@ import { readOverrides, applyOverrides, setNameOverride, setSpriteOverride } fro
 import { loadPersonas, applyPersonas, spawnName } from "./lib/personas";
 import { applyCrew, applyBoundCrews, readBoundCrews, recordBoundCrew, mintCrewId, findAssigneeSession, isAssigneeSession, isActorSession, scrumHears, addNote, CREW_ID_RE } from "./lib/crew";
 import { sendTaskReadiness } from "./lib/sendTaskReady";
-import { readBoard, writeBoard, boardFile, addCard, moveCard, moveToWorkColumn, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, cardTaskFooter, addColumn, renameColumn, setInstruction, setColumnStage, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, setCardTouches, setCardRepo, setCardKind, findScrumCard, cardView, scrumBrief, repoName, claimBlockReason, mergeBlockReason, landMergedCard, mergeReleaseNotes, finishesCard, type Board, type Card } from "./lib/board";
+import { readBoard, writeBoard, boardFile, addCard, moveCard, moveToWorkColumn, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, cardTaskFooter, addColumn, renameColumn, setInstruction, setColumnStage, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, setCardTouches, setCardRepo, setCardKind, findScrumCard, cardView, scrumBrief, repoName, claimBlockReason, mergeBlockReason, landMergedCard, mergeReleaseNotes, finishesCard, isLandedColumn, type Board, type Card } from "./lib/board";
 import { readMood, writeMood, moodFile, formatMood, addNote as addMoodNote, updateNote, raiseNote, deleteNote, restoreNote, addLink, linkBlockReason, setLinkLabel, deleteLink, type Mood, type MoodLink, type NotePatch } from "./lib/mood";
 import { mainCheckout } from "./lib/worktree";
 import { focusSession, interruptSession, killAgent, sendPrompt, sendFreshPrompt, spawnAgent } from "./ghostty";
 import { readRepo } from "./repo";
-import { readMergeState, mergeWork, holdForClaims } from "./lib/merge";
+import { readMergeState, mergeWork, holdForClaims, cleanupMergedWork } from "./lib/merge";
 import { saveUpload, resolveUploadPath } from "./lib/uploads";
 import { chooseFolder } from "./lib/chooser";
 import { initialIdle, onConnect, onDisconnect, shouldShutDown, type IdleState } from "./lib/idle";
@@ -797,7 +797,16 @@ export function makeServer(
     // can tell a closed tab from one it couldn't find.
     const live = findAssigneeSession(readSnapshot(dir, Date.now()).agents, card.assignee);
     const quitResult = live ? await quit(live) : undefined;
-    return json({ ...r, ...(quitResult ? { quit: quitResult } : {}) });
+    // And its worktree and branch with it, when the dashboard made them and
+    // nothing is left in them (see cleanupMergedWork). Best-effort too: what
+    // it keeps is said on the card, and never fails the merge.
+    const cleanup = await cleanupMergedWork(where.cwd, r.branch ?? "");
+    const tidy = cleanup.removed && cleanup.branchDeleted ? `Removed its worktree and branch ${r.branch}.` : cleanup.why;
+    if (tidy) {
+      writeBoard(dir, addComment(readBoard(dir), cardId, MERGE_NOTE_AUTHOR, tidy));
+      push();
+    }
+    return json({ ...r, cleanup, ...(quitResult ? { quit: quitResult } : {}) });
   }
 
   async function cardComment(_ctx: Ctx, body: z.output<typeof CardCommentBody>, card: Card, board: Board, title: string): Promise<Response> {
@@ -1138,8 +1147,15 @@ export function makeServer(
         const cardId = url.searchParams.get("cardId") ?? "";
         const where = cardWorkDir(cardId);
         if ("error" in where) return json({ error: where.error }, where.status);
+        const board = readBoard(dir);
+        // A merged card's worktree was removed after it landed: that is the
+        // answer, not "not a git repository".
+        const card = board.cards.find((k) => k.id === cardId);
+        if (card && !existsSync(where.cwd) && isLandedColumn(board, card.columnId)) {
+          return json(holdForClaims({ ...(await readMergeState("")), blocked: "already merged" }, board, cardId));
+        }
         const state = await readMergeState(where.cwd);
-        return json(holdForClaims(state, readBoard(dir), cardId));
+        return json(holdForClaims(state, board, cardId));
       }
 
       // a session's git context (branch, commits, working-tree status)
