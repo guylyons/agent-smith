@@ -55,10 +55,11 @@ export function Header({ snap, live, view, onView, onNewAgent, onFind, onSetting
         <div className="pix statline">
           <span><b>{idle}</b> IDLE</span>
           <span><b>{onLine}</b> TASKS</span>
-          {/* The two pages: the desks + THE LINE, or the big-picture MOOD board. */}
+          {/* The pages: the desks + THE LINE, the big-picture MOOD board, or the GAME map. */}
           <span className="view-tabs" role="group" aria-label="View">
             <button className={`view-tab${view === "workshop" ? " on" : ""}`} aria-pressed={view === "workshop"} onClick={() => onView("workshop")}>WORKSHOP</button>
             <button className={`view-tab${view === "mood" ? " on" : ""}`} aria-pressed={view === "mood"} onClick={() => onView("mood")} title="The big picture: what we're on, what's at risk, what's next">MOOD</button>
+            <button className={`view-tab${view === "game" ? " on" : ""}`} aria-pressed={view === "game"} onClick={() => onView("game")} title="The ship map: each agent in the room that matches what it's doing">GAME</button>
           </span>
           {/* CONFIG used to be a cog pinned to the top-right corner, floating over
               whatever it happened to land on. It belongs with the other things you
