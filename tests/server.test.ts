@@ -534,6 +534,64 @@ test("card ops without any scrum master or assignee deliver nothing", async () =
   server.stop(true);
 });
 
+// ---- scoping: a scrum master hears its own project, never its own echo -----
+// Two projects on one board used to cross-talk: every scrum master got every
+// card's events. And a scrum master signing by bare name ("DALLAS") while its
+// desk shows "DALLAS d8c1" got its own comments typed back at it.
+
+const SCRUM2 = "d8c1ebad-1029-4826-826b-1db98f735c17";
+
+async function twoProjects() {
+  const env = await notifyServer();
+  const { post } = env;
+  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", crew: { id: "cadence-0001", name: "CADENCE" }, state: "idle" }));
+  writeFileSync(join(dir, `${SCRUM2}.json`), valid({ sessionId: SCRUM2, persona: "scrum-master", crew: { id: "tempo-0002", name: "TEMPO" }, state: "idle" }));
+  const add = async (body: object) => ((await (await post("/action/card-add", { columnId: "backlog", ...body })).json()) as any).cardId as string;
+  const shopScrum = await add({ title: "Scrum master", kind: "scrum", repo: "shop" });
+  const blogScrum = await add({ title: "Scrum master", kind: "scrum", repo: "blog" });
+  await post("/action/card-assign", { cardId: shopScrum, sessionId: SCRUM });
+  await post("/action/card-assign", { cardId: blogScrum, sessionId: SCRUM2 });
+  const shopCard = await add({ title: "Shop bug", repo: "shop" });
+  const blogCard = await add({ title: "Blog bug", repo: "blog" });
+  const bareCard = await add({ title: "No repo" });
+  env.sent.length = 0;
+  return { ...env, shopCard, blogCard, bareCard };
+}
+
+test("each scrum master hears only its own project's card events", async () => {
+  const { server, post, sent, shopCard, blogCard } = await twoProjects();
+  await post("/action/card-comment", { cardId: shopCard, author: "VOLT", text: "shop note" });
+  expect(sent.map((s) => s.sessionId)).toEqual([SCRUM]);
+  sent.length = 0;
+  await post("/action/card-move", { cardId: blogCard, author: "VOLT", toColumnId: "review" });
+  expect(sent.map((s) => s.sessionId)).toEqual([SCRUM2]);
+  server.stop(true);
+});
+
+test("a card with no repo still reaches every scrum master", async () => {
+  const { server, post, sent, bareCard } = await twoProjects();
+  await post("/action/card-comment", { cardId: bareCard, author: "VOLT", text: "no project" });
+  expect(sent.map((s) => s.sessionId).sort()).toEqual([SCRUM, SCRUM2].sort());
+  server.stop(true);
+});
+
+test("a scrum master signing by bare name is not sent its own event", async () => {
+  const { server, post, sent } = await notifyServer();
+  // Two DALLAS desks, so the snapshot shows "DALLAS d8c1" and "DALLAS 9a1b".
+  writeFileSync(join(dir, `${SCRUM}.json`), valid({ sessionId: SCRUM, persona: "scrum-master", name: "DALLAS", state: "idle" }));
+  writeFileSync(join(dir, `${SCRUM2}.json`), valid({ sessionId: SCRUM2, persona: "scrum-master", name: "DALLAS", state: "idle" }));
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
+  const names = readSnapshot(dir, Date.now()).agents.map((a) => a.name).sort();
+  expect(names).toEqual(["DALLAS 9a1b", "DALLAS d8c1"]);
+  sent.length = 0;
+  await post("/action/card-comment", { cardId, author: "DALLAS", text: "mine" });
+  await post("/action/card-move", { cardId, author: "DALLAS d8c1", toColumnId: "review" });
+  // The bare name is both desks' own name, so neither is echoed; the suffixed
+  // one is only SCRUM2's, so SCRUM still hears about the move.
+  expect(sent.map((s) => s.sessionId)).toEqual([SCRUM]);
+  server.stop(true);
+});
+
 // ---- cascade guards -------------------------------------------------------
 // A live run showed two failure modes: notifications typed into a session
 // waiting at a permission dialog pressed Enter ON the dialog (auto-approving

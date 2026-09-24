@@ -13,7 +13,7 @@
 import { join } from "node:path";
 import { mkdirSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import type { AgentStatus } from "../schema";
-import type { Assignee } from "./board";
+import type { Assignee, Board, Card } from "./board";
 
 /** Crew of the Nostromo, Sulaco, Auriga, Prometheus, Covenant, Corbelan and
  *  Maginot, with the odd ship and synthetic. Uppercase ASCII: the name rides
@@ -110,6 +110,31 @@ export function isAssigneeSession(assignee: Assignee | null | undefined, agent: 
 
 export function findAssigneeSession<A extends Pick<AgentStatus, "sessionId" | "crew">>(agents: A[], assignee: Assignee | null | undefined): A | undefined {
   return agents.find((a) => isAssigneeSession(assignee, a));
+}
+
+/** Is this live session the one that did a board write? By crew or session id
+ *  when the signature carried one. A bare name also matches that name with the
+ *  session-id fragment the snapshot adds when two desks share a name, so a
+ *  signer writing "DALLAS" is still DALLAS when its desk shows "DALLAS d8c1". */
+export function isActorSession(
+  actor: { name: string; sessionId?: string; crew?: string },
+  agent: Pick<AgentStatus, "sessionId" | "crew" | "name">,
+): boolean {
+  if (actor.crew && agent.crew?.id === actor.crew) return true;
+  if (actor.sessionId) return agent.sessionId === actor.sessionId;
+  if (actor.crew || !actor.name) return false;
+  return agent.name === actor.name || agent.name === `${actor.name} ${agent.sessionId.slice(0, 4)}`;
+}
+
+/** Should this scrum master hear about an event on this card? Only when the
+ *  card is in its project: the repo of the scrum card it is assigned to. A card
+ *  with no repo, or a scrum master with no project on record, hears all. */
+export function scrumHears(board: Board, agent: Pick<AgentStatus, "sessionId" | "crew">, card: Card): boolean {
+  const cardRepo = (card.repo ?? "").trim();
+  if (!cardRepo) return true;
+  const own = board.cards.find((k) => k.kind === "scrum" && isAssigneeSession(k.assignee, agent));
+  const ownRepo = (own?.repo ?? "").trim();
+  return !ownRepo || ownRepo === cardRepo;
 }
 
 // ---- notes ------------------------------------------------------------------

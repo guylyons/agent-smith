@@ -8,7 +8,7 @@ import { matchChat } from "./lib/chatsearch";
 import type { ChatMessage } from "./lib/conversation";
 import { readOverrides, applyOverrides, setNameOverride, setSpriteOverride } from "./lib/overrides";
 import { loadPersonas, applyPersonas, spawnName } from "./lib/personas";
-import { applyCrew, mintCrewId, findAssigneeSession, isAssigneeSession, addNote, CREW_ID_RE } from "./lib/crew";
+import { applyCrew, mintCrewId, findAssigneeSession, isAssigneeSession, isActorSession, scrumHears, addNote, CREW_ID_RE } from "./lib/crew";
 import { sendTaskReadiness } from "./lib/sendTaskReady";
 import { readBoard, writeBoard, boardFile, addCard, moveCard, moveToWorkColumn, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, cardTaskFooter, addColumn, renameColumn, setInstruction, setColumnStage, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, setCardTouches, setCardRepo, setCardKind, findScrumCard, scrumBrief, repoName, claimBlockReason, mergeBlockReason, landMergedCard, mergeReleaseNotes, finishesCard, type Board, type Card } from "./lib/board";
 import { readMood, writeMood, moodFile, formatMood, addNote as addMoodNote, updateNote, raiseNote, deleteNote, restoreNote, addLink, linkBlockReason, setLinkLabel, deleteLink, type Mood, type MoodLink, type NotePatch } from "./lib/mood";
@@ -210,9 +210,9 @@ export function makeServer(
     }
   }
 
-  /** Who did a thing on the board: a display name, plus the session when it is
-   *  known — which is what lets the fan-out skip the actor reliably. */
-  type Actor = { name: string; sessionId?: string };
+  /** Who did a thing on the board: a display name, plus the session and crew
+   *  when known — which is what lets the fan-out skip the actor reliably. */
+  type Actor = { name: string; sessionId?: string; crew?: string };
 
   type Unsignable = { error: string; status: number };
 
@@ -266,7 +266,7 @@ export function makeServer(
    *  (a move says "someone", a merge "You", a comment refuses). */
   function resolveActor(card: Card, body: Signature): Actor | Unsignable {
     const signer = resolveSigner(body, card);
-    return "error" in signer ? signer : { name: signer.name ?? "", sessionId: signer.sessionId };
+    return "error" in signer ? signer : { name: signer.name ?? "", sessionId: signer.sessionId, crew: signer.crew };
   }
 
   /** Whose notes a crew-note write is for. Notes belong to a crew member, so
@@ -284,9 +284,9 @@ export function makeServer(
   }
 
   // Wake the sessions that care about a card event, best-effort and without
-  // blocking the response. Recipients: the card's live assignee plus every
-  // live scrum-master session, minus the actor (matched by session id when
-  // known, by display name otherwise). Each recipient is told whether an answer
+  // blocking the response. Recipients: the card's live assignee plus the live
+  // scrum-master sessions for the card's project (see scrumHears), minus the
+  // actor (see isActor). Each recipient is told whether an answer
   // is expected: the assignee is asked to reply to anything someone ELSE did
   // to its card; a scrum master gets everything as FYI. A forward move by a
   // non-assignee wakes nobody but the scrum master — there is nothing for the
@@ -299,7 +299,7 @@ export function makeServer(
     const card = board.cards.find((k) => k.id === cardId);
     if (!card) return [];
     const { agents } = readSnapshot(dir, Date.now());
-    const isActor = (a: AgentStatus) => (actor.sessionId ? a.sessionId === actor.sessionId : a.name === actor.name);
+    const isActor = (a: AgentStatus) => isActorSession(actor, a);
     const out: Delivery[] = [];
     for (const a of agents) {
       if (isActor(a)) continue;
@@ -310,7 +310,7 @@ export function makeServer(
           ? "(reply expected: this is rework -- pick the card back up and answer on it with a card-comment)"
           : "(reply expected: answer on the card with a card-comment)";
         out.push(await deliverTo(a, `${text}\n${ask}`));
-      } else if (a.persona === "scrum-master") {
+      } else if (a.persona === "scrum-master" && scrumHears(board, a, card)) {
         out.push(await deliverTo(a, `${text}\n(FYI, no reply needed unless it raises a problem or asks you something)`));
       }
     }
