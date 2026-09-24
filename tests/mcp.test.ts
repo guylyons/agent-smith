@@ -426,6 +426,14 @@ test("memory_add posts the fact signed with our name", async () => {
   expect(res.result.content[0].text).toContain("mem_1234abcd");
 });
 
+test("memory_add says so when the fact was not kept", async () => {
+  const { api } = fakeApi({ "/action/memory-add": { status: 409, body: { ok: false, dropped: true, error: "not kept: memory is full" } } });
+  const res = await call("memory_add", { kind: "note", title: "t" }, api);
+  expect(res.result.isError).toBe(true);
+  expect(res.result.content[0].text).toContain("not kept");
+  expect(res.result.content[0].text).not.toContain("Remembered");
+});
+
 test("memory_add without a title is a tool error and posts nothing", async () => {
   const { api, calls } = fakeApi();
   const res = await call("memory_add", { kind: "note" }, api);

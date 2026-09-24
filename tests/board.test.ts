@@ -467,6 +467,15 @@ test("cardTaskPrompt points the re-read at the one-card endpoint, not the whole 
   expect(p).not.toContain("/board as canonical");
 });
 
+test("cardTaskPrompt tells the worker to search the team memory before planning", () => {
+  let b = defaultBoard();
+  b = addCard(b, "backlog", "Fix login bug");
+  const id = b.cards[0]!.id;
+  const p = cardTaskPrompt(b, id, SRV);
+  expect(p).toMatch(/before you plan.*memory_search/i);
+  expect(p.indexOf("memory_search")).toBeLessThan(p.indexOf("STEP 2"));
+});
+
 test("cardTaskPrompt is pure ASCII outside the card's own text", () => {
   let b = defaultBoard();
   b = addCard(b, "backlog", "Fix login bug");

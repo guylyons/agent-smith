@@ -53,7 +53,13 @@ export const COMPACT_AFTER_MS = 30 * 86_400_000;
 /** The longest a summary gets, ellipsis included. */
 export const SUMMARY_MAX = 160;
 const TITLE_MAX = 200;
-const BODY_MAX = 4000;
+/** Caps per fact, held by the action body schema and again by
+ *  sanitizeMemory, so neither a request nor a hand-edited file can make one
+ *  fact (and every GET /memory, which parses the whole file) huge. */
+export const BODY_MAX = 4000;
+export const MAX_LINKS = 50;
+export const MAX_TAGS = 20;
+export const BY_MAX = 64;
 /** A card's body: its description, then its last comment (usually how it
  *  ended). Each half is capped on its own so a long description can never
  *  push the outcome out. */
@@ -97,26 +103,22 @@ export function normalizeLink(raw: string): string | null {
   return v ? `${kind}:${v}` : null;
 }
 
-function cleanLinks(raw: unknown): string[] {
+/** The distinct cleaned values of `raw`, the LAST `max` of them: a merge
+ *  lists old values before new ones, so it is the oldest that go. */
+function cleanList(raw: unknown, clean: (v: unknown) => string | null, max: number): string[] {
   if (!Array.isArray(raw)) return [];
-  const out: string[] = [];
-  for (const v of raw) {
-    const l = normalizeLink(v as string);
-    if (l && !out.includes(l)) out.push(l);
+  const out = new Set<string>();
+  for (let i = raw.length - 1; i >= 0 && out.size < max; i--) {
+    const v = clean(raw[i]);
+    if (v) out.add(v);
   }
-  return out;
+  return [...out].reverse();
 }
 
-function cleanTags(raw: unknown): string[] {
-  if (!Array.isArray(raw)) return [];
-  const out: string[] = [];
-  for (const v of raw) {
-    if (typeof v !== "string") continue;
-    const t = v.trim().toLowerCase().slice(0, TAG_MAX);
-    if (t && !out.includes(t)) out.push(t);
-  }
-  return out;
-}
+const cleanLinks = (raw: unknown) => cleanList(raw, (v) => normalizeLink(v as string), MAX_LINKS);
+const cleanTags = (raw: unknown) =>
+  cleanList(raw, (v) => (typeof v === "string" ? v.trim().toLowerCase().slice(0, TAG_MAX) : null), MAX_TAGS);
+const cleanBy = (raw: unknown) => (typeof raw === "string" ? raw.trim().slice(0, BY_MAX) : "");
 
 // ---- recording facts --------------------------------------------------------
 
@@ -153,7 +155,7 @@ export function remember(memory: Memory, input: RememberInput, now: number): { m
   const prev = memory.nodes.find((n) => n.kind !== "card" && titleKey(n.kind, n.title) === key);
   const links = cleanLinks([...(prev?.links ?? []), ...(input.links ?? [])]);
   const tags = cleanTags([...(prev?.tags ?? []), ...(input.tags ?? [])]);
-  const by = input.by?.trim() || prev?.by;
+  const by = cleanBy(input.by) || prev?.by;
   const node: MemoryNode = {
     id: prev?.id ?? newId(memory, key),
     kind: input.kind,
@@ -168,6 +170,17 @@ export function remember(memory: Memory, input: RememberInput, now: number): { m
   if (!body && prev?.compact) node.compact = true;
   const nodes = prev ? memory.nodes.map((n) => (n.id === prev.id ? node : n)) : [...memory.nodes, node];
   return { memory: { nodes }, node };
+}
+
+/** remember, then compact: the memory as it should be written. `dropped`
+ *  when compaction evicted the very fact just recorded (the store is full of
+ *  higher-ranked facts); the caller must then report it as not kept and
+ *  write nothing, and `memory` is the input unchanged. */
+export function record(memory: Memory, input: RememberInput, now: number): { memory: Memory; node: MemoryNode; dropped: boolean } {
+  const r = remember(memory, input, now);
+  const next = compactMemory(r.memory, now);
+  const dropped = !next.nodes.some((n) => n.id === r.node.id);
+  return { memory: dropped ? memory : next, node: r.node, dropped };
 }
 
 /** Drop a fact and every link pointing at it. Null when there is no such fact. */
@@ -383,7 +396,8 @@ export function sanitizeMemory(input: unknown): Memory {
     const node: MemoryNode = { id: o.id, kind: o.kind, title, links: cleanLinks(o.links), at: num(o.at) ?? 0 };
     if (typeof o.body === "string" && o.body.trim()) node.body = o.body.slice(0, BODY_MAX);
     if (tags.length) node.tags = tags;
-    if (typeof o.by === "string" && o.by.trim()) node.by = o.by.trim();
+    const by = cleanBy(o.by);
+    if (by) node.by = by;
     if (num(o.updatedAt) !== undefined) node.updatedAt = num(o.updatedAt);
     if (o.compact === true) node.compact = true;
     nodes.push(node);
