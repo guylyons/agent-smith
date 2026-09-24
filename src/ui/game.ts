@@ -177,15 +177,19 @@ export function spotFor(room: RoomId, i: number): Pt {
 
 export type Placement = { room: RoomId; slot: number; at: Pt };
 
-/** Every agent's room and spot. Someone who stays in the same room keeps the
- *  spot they had in `prev`, so an arrival never shuffles the people already
- *  there; everyone else takes the lowest free spot, in session-id order, so a
- *  snapshot that reorders the list moves nobody either. */
+/** An agent's identity on the map: its crew id when it has one, so a /clear
+ *  (new session id, same crew member) doesn't look like a new arrival. */
+export const agentKey = (a: Pick<AgentStatus, "sessionId" | "crew">) => a.crew?.id ?? a.sessionId;
+
+/** Every agent's room and spot, keyed by agentKey. Someone who stays in the
+ *  same room keeps the spot they had in `prev`, so an arrival never shuffles
+ *  the people already there; everyone else takes the lowest free spot, in key
+ *  order, so a snapshot that reorders the list moves nobody either. */
 export function placeAll(agents: AgentStatus[], board: Board, prev?: Map<string, Placement>): Map<string, Placement> {
   const byRoom = new Map<RoomId, string[]>();
   for (const a of agents) {
     const r = roomFor(a, board);
-    byRoom.set(r, [...(byRoom.get(r) ?? []), a.sessionId]);
+    byRoom.set(r, [...(byRoom.get(r) ?? []), agentKey(a)]);
   }
   const out = new Map<string, Placement>();
   for (const [room, ids] of byRoom) {
@@ -285,6 +289,55 @@ export function pointAlong(path: Pt[], dist: number): Pt {
     left -= seg;
   }
   return path[path.length - 1]!;
+}
+
+// Walking speed, in map pixels per second: a cross-ship trip takes a few seconds.
+export const SPEED = 260;
+
+/** An agent's current walk: the path from where it was to its placement,
+ *  begun at `start` (a performance.now() time). A walk that has arrived just
+ *  stays at its end. */
+export type Walk = { room: RoomId; to: Pt; path: Pt[]; len: number; start: number };
+
+/** Everyone's walks after a snapshot, keyed by agentKey. An agent whose
+ *  placement is unchanged keeps its walk as it was. A change of room or spot
+ *  starts a new walk from wherever it stands at `now`. A newcomer walks in
+ *  from the airlock, unless nothing is `primed` yet (the first snapshot:
+ *  everyone on it was already aboard) when it simply appears. With
+ *  `reduceMotion` every walk is a jump. Agents gone from the list are dropped;
+ *  one with no placement is skipped. `prev` is not changed. */
+export function stepWalks(
+  prev: Map<string, Walk>, agents: AgentStatus[], placements: Map<string, Placement>, now: number,
+  { reduceMotion, primed }: { reduceMotion: boolean; primed: boolean },
+): Map<string, Walk> {
+  const out = new Map<string, Walk>();
+  for (const a of agents) {
+    const k = agentKey(a);
+    const p = placements.get(k);
+    if (!p) continue;
+    const w = prev.get(k);
+    if (w && w.room === p.room && w.to.x === p.at.x && w.to.y === p.at.y) { out.set(k, w); continue; }
+    let path: Pt[];
+    if (reduceMotion) path = [p.at];
+    else if (w) path = pathBetween(w.room, pointAlong(w.path, (now - w.start) * SPEED / 1000), p.room, p.at);
+    else if (primed) path = pathBetween("airlock", spotFor("airlock", 0), p.room, p.at);
+    else path = [p.at];
+    out.set(k, { room: p.room, to: p.at, path, len: pathLength(path), start: now });
+  }
+  return out;
+}
+
+/** Where each walk has got to at `now`, and whether anyone is still moving
+ *  (so the view knows to keep ticking frames). */
+export function walkersAt(walks: Map<string, Walk>, now: number): { at: Map<string, Pt>; moving: boolean } {
+  const at = new Map<string, Pt>();
+  let moving = false;
+  for (const [k, w] of walks) {
+    const d = (now - w.start) * SPEED / 1000;
+    if (d < w.len) moving = true;
+    at.set(k, pointAlong(w.path, d));
+  }
+  return { at, moving };
 }
 
 export type Sleeper = { who: Assignee; cardId: string };
