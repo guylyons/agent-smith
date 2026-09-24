@@ -5,6 +5,7 @@
   "private": true,
   "scripts": {
     "dev": "bun run src/server.ts",
+    "sandbox": "bun run scripts/sandbox.ts",
     "app": "bun run scripts/app.ts",
     "build": "bun build src/ui/index.html --outdir dist --minify",
     "test": "bun test",
