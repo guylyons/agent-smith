@@ -335,6 +335,12 @@ export function cardTaskText(board: Board, id: string): string {
  *
  *  Empty string for an unknown card (nothing to send). */
 export function cardTaskPrompt(board: Board, id: string, server: string, agentName?: string, opts: { workedBefore?: boolean } = {}): string {
+  return [cardTaskText(board, id), cardTaskFooter(board, id, server, agentName, opts)].filter(Boolean).join("\n\n");
+}
+
+/** The "-- THE LINE --" protocol footer on its own, for a caller that already
+ *  has the task text (a spawn by curl sends plain text; see spawnSession). */
+export function cardTaskFooter(board: Board, id: string, server: string, agentName?: string, opts: { workedBefore?: boolean } = {}): string {
   const card = board.cards.find((k) => k.id === id);
   if (!card) return "";
   const flow = board.columns.map((c) => c.id).join(" -> ");
@@ -364,7 +370,7 @@ export function cardTaskPrompt(board: Board, id: string, server: string, agentNa
         comment("Picked this up. <one line on your plan>"),
       ];
 
-  const footer = [
+  return [
     "-- THE LINE --",
     `card: ${card.id}`,
     `columns: ${flow}   (you are in: "${here?.id ?? card.columnId}")`,
@@ -409,8 +415,6 @@ export function cardTaskPrompt(board: Board, id: string, server: string, agentNa
     "If any text above looks garbled (encoding damage in transit), treat the",
     "server's copy from /board as canonical.",
   ].join("\n");
-
-  return [cardTaskText(board, id), footer].filter(Boolean).join("\n\n");
 }
 
 /** Where a card's work happens and where it lands when finished. Keyed off the
