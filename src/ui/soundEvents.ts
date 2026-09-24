@@ -1,5 +1,5 @@
 import type { AgentStatus } from "../schema";
-import { isDoneColumn, type Board } from "../lib/board";
+import { isDoneColumn, finishesCard, type Board } from "../lib/board";
 
 // Which cue to play. Kept separate from the WebAudio synth (sounds.ts) so this
 // transition logic stays pure and unit-testable.
@@ -78,4 +78,24 @@ export function boardMoves(prev: PrevCols, board: Board, primed: boolean): Board
 /** A move that finishes a task — into a column whose stage is done. */
 export function isCompletion(move: CardMove, board: Board): boolean {
   return isDoneColumn(board, move.to);
+}
+
+/** The live session of every card these moves finished (see finishesCard): the
+ *  server ends those sessions, so the UI plays their tube death. Matched by
+ *  crew, else by id — the rule isAssigneeSession (src/lib/crew.ts) applies on
+ *  the server, which the browser can't import. */
+export function finishedAssignees(
+  moves: CardMove[],
+  board: Board,
+  agents: Pick<AgentStatus, "sessionId" | "crew">[],
+): string[] {
+  const ids: string[] = [];
+  for (const move of moves) {
+    if (!finishesCard(board, move.from, move.to)) continue;
+    const who = board.cards.find((k) => k.id === move.cardId)?.assignee;
+    if (!who) continue;
+    const live = agents.find((a) => (who.crew && a.crew?.id === who.crew) || a.sessionId === who.id);
+    if (live) ids.push(live.sessionId);
+  }
+  return ids;
 }

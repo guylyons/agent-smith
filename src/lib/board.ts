@@ -603,6 +603,20 @@ function isLandedColumn(board: Board, columnId: string): boolean {
   return !(board.columns[at] === stageColumn(board, "done") && doneAwaitsMerge(board));
 }
 
+/** Does moving a card from `fromColumnId` to `toColumnId` finish it? True when
+ *  it lands in Done or a column after it (a merge can skip Done) from a column
+ *  before Done. A card already finished, shuffling among those columns, is not
+ *  finished again. Its assignee's session is ended on a finish. By position
+ *  (isPastDone), not claims: a card waiting in Done to merge keeps its claims
+ *  (see doneAwaitsMerge) but its agent's work is over. */
+export function finishesCard(board: Board, fromColumnId: string, toColumnId: string): boolean {
+  const to = board.columns.findIndex((c) => c.id === toColumnId);
+  if (to < 0) return false;
+  const from = board.columns.findIndex((c) => c.id === fromColumnId);
+  const fromFinished = from < 0 ? LEGACY_STAGE[fromColumnId] === "done" : isPastDone(board, from);
+  return isPastDone(board, to) && !fromFinished;
+}
+
 /** Is this card holding its claim right now? Two things have to be true: it has
  *  been STAFFED (an agent is bound to it, or it sits where work happens, waits
  *  for review, or waits in Done to merge), and it has not landed yet (see isLandedColumn).

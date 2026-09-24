@@ -7,7 +7,7 @@ import { DrawerResizer, DrawerZoom } from "./DrawerSize";
 import { loadDrawerFont } from "./settings";
 import { renderMarkdown } from "./markdown";
 import { toast } from "./toast";
-import { dyingMs } from "./dying";
+import { dyingMs, subscribeDying } from "./dying";
 import {
   fetchConversation, fetchSubagents, fetchRepo, fetchPersonas, sendPromptTo, uploadImage, focusSession, pauseSession, renameSession, killAgent,
   type ChatMessage, type Subagent, type RepoInfo, type PendingQuestion, type PersonaInfo, type BlockingTool,
@@ -234,6 +234,10 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
     setConfirmStop(false);
     setDying(true);
   }
+
+  // Die with the desk when the agent is ended from elsewhere — its card was
+  // moved to Done (see Notifier) or the desk's ✕ was pressed.
+  useEffect(() => subscribeDying((id) => { if (id === agent.sessionId) setDying(true); }), [agent.sessionId]);
 
   // Close once the tube has finished collapsing. onClose comes in fresh on every
   // App render (a new snapshot arrives every ~20s), so it goes through a ref —

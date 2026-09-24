@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { Snapshot } from "../lib/snapshot";
-import { soundTransitions, boardMoves, isCompletion, type PrevState, type PrevCols } from "./soundEvents";
+import { soundTransitions, boardMoves, isCompletion, finishedAssignees, type PrevState, type PrevCols } from "./soundEvents";
+import { signalDying } from "./dying";
 import { playCue } from "./sounds";
 import { toast } from "./toast";
 
@@ -57,6 +58,10 @@ export function Notifier({ snap, enabled }: { snap: Snapshot; enabled: boolean }
         playCue("move");
       }
     }
+
+    // A finished card's agent is ended by the server (see endFinishedSession);
+    // play its tube death here, while this snapshot still has it on a desk.
+    for (const id of finishedAssignees(moves, snap.board, snap.agents)) signalDying(id);
 
     prevState.current = next;
     prevCols.current = nextCols;
