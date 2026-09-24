@@ -1,8 +1,8 @@
 import { useEffect, useRef } from "react";
 import type { Snapshot } from "../lib/snapshot";
 import { soundTransitions, boardMoves, isCompletion, finishedAssignees, type PrevState, type PrevCols } from "./soundEvents";
-import { signalDying } from "./dying";
-import { playCue } from "./sounds";
+import { signalDying, subscribeDying, dyingMs } from "./dying";
+import { playCue, playTubeOff } from "./sounds";
 import { toast } from "./toast";
 
 function notify(name: string, waitingReason: "permission" | "question" | "plan" | undefined, doing: string) {
@@ -27,6 +27,14 @@ export function Notifier({ snap, enabled }: { snap: Snapshot; enabled: boolean }
   const prevCols = useRef<PrevCols>(new Map());
   const primed = useRef(false);
   const boardPrimed = useRef(false);
+
+  // The tube death gets its sound here, not where it is signalled: every way an
+  // agent dies (drawer STOP, desk ✕, card reaching Done) goes through
+  // signalDying, and this is where the sound toggle lives.
+  useEffect(() => {
+    if (!enabled) return;
+    return subscribeDying(() => playTubeOff(dyingMs() < 1500));
+  }, [enabled]);
 
   useEffect(() => {
     const prev = prevState.current;
