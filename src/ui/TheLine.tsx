@@ -326,6 +326,7 @@ function ColumnView({
             onOpen={() => onOpenCard(card.id)}
             unread={unreadOn(card)}
             mergeWait={mergeWaitFlag(board, card.id)}
+            mergeNext={mergeNextFlag(board, card.id)}
           />
         ))}
       </div>
@@ -346,6 +347,19 @@ export function mergeWaitFlag(board: Board, cardId: string): { label: string; ti
   const first = board.cards.find((k) => k.id === ahead[0]!.cardId)?.title.trim() || ahead[0]!.cardId;
   const more = ahead.length > 1 ? ` +${ahead.length - 1}` : "";
   return { label: `⏳ after "${first}"${more}`, title: `Waiting to merge: ${mergeBlockReason(board, cardId)}` };
+}
+
+/** The other side of mergeWaitFlag: on the card at the FRONT of a merge line
+ *  (nothing ahead of it, something behind it), say so and how many wait, so a
+ *  person can see which card to merge first without opening each one. The
+ *  waiting cards' titles go in the tooltip. Null for a card that waits itself
+ *  or that nobody is waiting on. */
+export function mergeNextFlag(board: Board, cardId: string): { label: string; title: string } | null {
+  if (mergeBlockers(board, cardId).length) return null;
+  const behind = board.cards.filter((k) => mergeBlockers(board, k.id).some((c) => c.cardId === cardId));
+  if (!behind.length) return null;
+  const names = behind.map((k) => `"${k.title.trim() || k.id}"`).join(", ");
+  return { label: `next to merge · ${behind.length} waiting`, title: `Merge this first. Waiting behind it: ${names}` };
 }
 
 /** The face's repo chip: which project this card is for, so a board mixing
@@ -410,7 +424,7 @@ function edgeScroll(e: DragEvent<HTMLDivElement>) {
 // avatar, initials when the session has ended, or an UNASSIGNED chip when nobody
 // is on it) and a comment count. Detail lives in the modal.
 function CardView({
-  agents, mutate, card, index, dropBefore, dropAfterLast, onDragOverCard, onMoveByKey, onOpen, unread, mergeWait,
+  agents, mutate, card, index, dropBefore, dropAfterLast, onDragOverCard, onMoveByKey, onOpen, unread, mergeWait, mergeNext,
 }: {
   agents: AgentStatus[]; mutate: Mutate; card: Card; index: number;
   dropBefore: boolean; dropAfterLast: boolean;
@@ -421,6 +435,8 @@ function CardView({
   unread: number;
   /** the card(s) that must merge before this one, when any (mergeWaitFlag) */
   mergeWait: { label: string; title: string } | null;
+  /** the cards waiting behind this one, when it is at the front (mergeNextFlag) */
+  mergeNext: { label: string; title: string } | null;
 }) {
   const commentCount = card.comments?.length ?? 0;
   // The live session behind the assignee, if any — gives us its sprite. A card
@@ -503,6 +519,7 @@ function CardView({
             : <span className="card-unassigned" title="No agent assigned yet">Unassigned</span>}
           {card.description && <span className="card-flag" title="Has a description">≡</span>}
           {mergeWait && <span className="card-flag card-flag-wait" title={mergeWait.title}>{mergeWait.label}</span>}
+          {mergeNext && <span className="card-flag card-flag-wait card-flag-next" title={mergeNext.title}>{mergeNext.label}</span>}
           {/* Unread turns the count into "N NEW" and colours it, so a thread
               you've already read never looks the same as one that's moved on. */}
           {commentCount > 0 && (

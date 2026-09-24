@@ -20,7 +20,7 @@ import {
   type Card,
 } from "../src/lib/board";
 import { holdForClaims, type MergeState } from "../src/lib/merge";
-import { mergeWaitFlag } from "../src/ui/TheLine";
+import { mergeWaitFlag, mergeNextFlag } from "../src/ui/TheLine";
 
 function boardWith(...cards: Partial<Card>[]): Board {
   const base = defaultBoard();
@@ -313,6 +313,33 @@ test("mergeWaitFlag names the first card ahead and counts the rest", () => {
     { id: "card_b", columnId: "in-progress", assignee: other, touches: ["x.ts"] },
   );
   expect(mergeWaitFlag(b, "card_b")?.label).toMatch(/^⏳ after "(First|Second)" \+1$/);
+});
+
+test("mergeNextFlag marks the card at the front of the line with who waits on it", () => {
+  const b = boardWith(
+    { id: "card_a", title: "Rework the header", columnId: "review", assignee, touches: ["x.ts"] },
+    { id: "card_b", title: "Tidy the footer", columnId: "in-progress", assignee: other, touches: ["x.ts"] },
+    { id: "card_c", title: "Fix the logo", columnId: "in-progress", assignee: other, touches: ["x.ts"] },
+    { id: "card_d", title: "Unrelated", columnId: "in-progress", assignee: other, touches: ["y.ts"] },
+  );
+  const flag = mergeNextFlag(b, "card_a")!;
+  expect(flag.label).toBe("next to merge · 2 waiting");
+  expect(flag.title).toContain('"Tidy the footer"');
+  expect(flag.title).toContain('"Fix the logo"');
+  expect(flag.title).not.toContain("Unrelated");
+  // card_b waits itself, so it is not at the front even though card_c is behind it.
+  expect(mergeNextFlag(b, "card_b")).toBeNull();
+  // Nobody behind it: no flag.
+  expect(mergeNextFlag(b, "card_d")).toBeNull();
+});
+
+test("mergeNextFlag says 1 waiting for a single card behind", () => {
+  const b = boardWith(
+    { id: "card_a", title: "First", columnId: "review", assignee, touches: ["x.ts"] },
+    { id: "card_b", title: "Second", columnId: "review", assignee: other, touches: ["x.ts"] },
+  );
+  expect(mergeNextFlag(b, "card_a")?.label).toBe("next to merge · 1 waiting");
+  expect(mergeNextFlag(b, "card_b")).toBeNull();
 });
 
 // ---- over HTTP ---------------------------------------------------------------
