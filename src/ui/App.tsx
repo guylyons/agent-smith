@@ -12,6 +12,7 @@ import { CommandPalette } from "./CommandPalette";
 import { SettingsPanel } from "./SettingsPanel";
 import { FaceHud } from "./FaceHud";
 import { Toaster } from "./Toaster";
+import { EndConfirm } from "./EndConfirm";
 import { UpdateNotice } from "./UpdateNotice";
 import { Dictation } from "./Dictation";
 import { Notifier } from "./Notifier";
@@ -214,6 +215,7 @@ export function App() {
         />
       )}
       {faceEnabled && <FaceHud agents={snap.agents} board={snap.board} archived={snap.archived} />}
+      <EndConfirm />
       <Toaster />
       <UpdateNotice ui={snap.ui} />
       <Dictation />

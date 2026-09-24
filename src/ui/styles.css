@@ -2365,3 +2365,12 @@ body:has(#root > .game){display:flex;flex-direction:column;padding-bottom:0}
 /* Read to a screen reader, never drawn: live status lines whose news the
    visible UI already shows another way. */
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0}
+
+/* "Moving to Done ends RIPLEY's session." — asked before a move quits an agent
+   (EndConfirm.tsx). Above the card modal, since its STAGE select can ask too. */
+.endconfirm-backdrop{z-index:110;justify-content:center;align-items:flex-start}
+.endconfirm{width:min(440px,calc(100vw - 32px));margin:18vh auto 0;padding:20px;display:flex;flex-direction:column;gap:10px}
+.endconfirm-title{font-size:16px;letter-spacing:.5px;line-height:1.4;overflow-wrap:anywhere}
+.endconfirm-body{margin:0;font-size:14px;line-height:1.5;color:var(--dim)}
+.endconfirm-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;margin-top:8px}
+.endconfirm-actions .deskbtn{padding:6px 10px}

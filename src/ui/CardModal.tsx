@@ -11,6 +11,7 @@ import {
 import { ModalBackdrop } from "./Backdrop";
 import { MergeKey } from "./MergeKey";
 import { cardButton } from "./moveFocus";
+import { guardSessionEnd } from "./sessionEnd";
 import { renderMarkdown, imageSrc } from "./markdown";
 import { imagesIn, imageMarkdown, appendImage, removeImage } from "./cardImages";
 import { toast, toastError } from "./toast";
@@ -384,7 +385,10 @@ export function CardModal({
               value={card.columnId}
               onChange={(e) => {
                 const to = e.target.value;
-                mutate((b) => moveCard(b, card.id, to), () => moveCardAction(card.id, to));
+                // Held until confirmed when it would end the agent; the select
+                // is controlled, so a cancel leaves it showing the old stage.
+                guardSessionEnd(board, agents, card.id, to,
+                  () => mutate((b) => moveCard(b, card.id, to), () => moveCardAction(card.id, to)));
               }}
             >
               {board.columns.map((c) => (
