@@ -581,8 +581,21 @@
   }
   .archive-btn:hover{color:var(--bone);border-color:var(--gold)}
   .archive-list{list-style:none;margin:0;padding:0;width:100%;max-height:240px;overflow-y:auto}
-  .archive-list li{display:flex;gap:6px;align-items:center;justify-content:space-between;padding:2px 0}
-  .archive-title{font-family:var(--mono);font-size:13px;color:var(--bone);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+  .archive-list li{display:flex;gap:6px;align-items:flex-start;justify-content:space-between;padding:2px 0}
+  /* A row's title opens the card read-only; cut to one line at rest, the
+     whole title wraps into view on hover or keyboard focus. */
+  .archive-title{
+    flex:1;text-align:left;cursor:pointer;background:transparent;border:1px solid transparent;padding:1px 3px;
+    font-family:var(--mono);font-size:13px;color:var(--bone);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;
+  }
+  .archive-title:hover,.archive-title:focus-visible{white-space:normal;overflow-wrap:anywhere;border-color:var(--gold)}
+  .archive-btn:focus-visible,.archive-title:focus-visible{outline:2px solid var(--gold);outline-offset:1px}
+  .archive-btn:disabled{opacity:.6;cursor:default}
+  .archive-confirm{display:flex;flex-wrap:wrap;gap:6px;align-items:center;width:100%}
+  .archive-q{font-family:var(--mono);font-size:13px;color:var(--gold);flex:1 1 100%}
+  .archive-yes{color:var(--bone);border-color:var(--gold)}
+  .archive-note{font-family:var(--mono);font-size:12px;color:var(--dim)}
+  .archive-error{font-family:var(--mono);font-size:13px;color:var(--clay)}
   .col-instr{
     width:100%;box-sizing:border-box;resize:vertical;min-height:48px;
     font-family:var(--mono);font-size:14px;line-height:1.5;
@@ -1176,17 +1189,19 @@ body{background:transparent}
 
 /* toasts */
 .toaster{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:120;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}
-.toast{background:var(--clay);color:var(--on-danger);border:3px solid var(--bone);box-shadow:0 3px 0 rgba(0,0,0,.55);padding:9px 13px;font-size:14px;max-width:80vw;
+/* Routine notices sit on the panel colour; only a failure (.toast.error) is red. */
+.toast{background:var(--box);color:var(--bone);border:3px solid var(--bone);box-shadow:0 3px 0 rgba(0,0,0,.55);padding:9px 13px;font-size:14px;max-width:80vw;
   display:flex;align-items:center;gap:10px}
 /* The toaster ignores the pointer so it never blocks the board underneath; a
    toast carrying an action has to take it back, or its button is unclickable. */
 .toast:has(.toast-action){pointer-events:auto}
 .toast-text{flex:1;min-width:0}
+.toast.error{background:var(--clay);color:var(--on-danger)}
 .toast-action{
   flex:0 0 auto;cursor:pointer;font-family:inherit;font-size:13px;letter-spacing:.5px;
-  background:var(--on-danger);color:var(--clay);border:2px solid var(--on-danger);padding:3px 8px;
+  background:var(--gold);color:var(--on-accent);border:2px solid var(--gold);padding:3px 8px;
 }
-.toast-action:hover{background:transparent;color:var(--on-danger)}
+.toast-action:hover{background:transparent;color:var(--gold)}
 .toast-action:focus-visible{outline:3px solid var(--bone);outline-offset:2px}
 
 /* a11y: keyboard-focus outline for the "jump to terminal" button on a crew
@@ -1224,6 +1239,9 @@ body{background:transparent}
   color:var(--bone);background:var(--night);border:2px solid var(--bevel);padding:9px 10px;
 }
 .cardmodal-title:focus{outline:none;border-color:var(--gold)}
+/* ArchivedCardModal: the same fields, as text rather than inputs. */
+.archivedmodal-title{margin:0;font-family:var(--mono);font-size:17px;line-height:1.4;font-weight:600;color:var(--bone);overflow-wrap:anywhere}
+.archivedmodal-value{font-family:var(--mono);font-size:15px;color:var(--bone)}
 .cardmodal-row{display:flex;flex-direction:column;gap:7px}
 .cardmodal-label{font-size:13px;letter-spacing:.5px;color:var(--dim);text-transform:uppercase}
 .cardmodal-select{

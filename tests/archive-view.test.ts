@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { archivePrompt, archivedToast, neighbourAfter } from "../src/ui/archiveView";
+import { archivePrompt, archivedToast, neighbourAfter, archiveFilterNote, focusAfterRestore } from "../src/ui/archiveView";
 
 test("the archive prompt names the count and the repo", () => {
   expect(archivePrompt(12, { kind: "repo", repo: "agent-smith" })).toBe("Archive 12 agent-smith cards?");
@@ -20,4 +20,14 @@ test("focus moves to the next row, else the previous, else nowhere", () => {
   expect(neighbourAfter(["a", "b", "c"], "c")).toBe("b");
   expect(neighbourAfter(["a"], "a")).toBeNull();
   expect(neighbourAfter(["a", "b"], "zz")).toBe("a");
+});
+
+test("the filter note only shows when the filter hides something", () => {
+  expect(archiveFilterNote(87, 87)).toBeNull();
+  expect(archiveFilterNote(3, 87)).toBe("3 of 87 match the repo filter");
+});
+
+test("after a restore focus goes to a neighbour row, then ARCHIVE, then the toggle", () => {
+  expect(focusAfterRestore(["a", "b", "c"], "b")).toEqual(["row:c", "archive", "toggle"]);
+  expect(focusAfterRestore(["a"], "a")).toEqual(["archive", "toggle"]);
 });

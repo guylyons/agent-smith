@@ -370,7 +370,7 @@ function ColumnView({
       )}
 
       {mergedColumn(board)?.id === column.id && (
-        <ArchiveBar columnId={column.id} cardCount={all.length} archived={archived} />
+        <ArchiveBar columnId={column.id} shown={cards} filter={filter} archived={archived} />
       )}
 
       <InstructionField

@@ -189,3 +189,12 @@ test("columnAbbrev survives punctuation and empty names", () => {
   expect(columnAbbrev("")).toBe("?");
   expect(columnAbbrev("   ")).toBe("?");
 });
+
+test("archived cards count as finished, so archiving doesn't drop armor", () => {
+  const cols: [string, string, Stage?][] = [["todo", "Backlog", "todo"], ["done", "Done", "done"], ["merged", "Merged"]];
+  const before = hudStats([], board(cols, ["todo", "merged", "merged", "merged"]));
+  const after = hudStats([], board(cols, ["todo"]), 3);
+  expect(before.armor).toBe(75);
+  expect(after.armor).toBe(75);
+  expect(after.table.find((r) => r.label === "DONE")?.count).toBe(3);
+});

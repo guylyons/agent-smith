@@ -18,7 +18,7 @@ import type { MergePreview } from "../lib/mergePreview";
  *  for a busy one's Stop hook to collect when its turn ends. */
 export type Delivery = { sessionId: string; name: string; via: "typed" | "queued" };
 
-type Result = { ok: boolean; error?: string; archived?: number; cardId?: string; existing?: boolean; noteId?: string; linkId?: string; path?: string; url?: string; cancelled?: boolean; branch?: string; base?: string; delivery?: Delivery[] };
+type Result = { ok: boolean; error?: string; archived?: number; ids?: string[]; cardId?: string; existing?: boolean; noteId?: string; linkId?: string; path?: string; url?: string; cancelled?: boolean; branch?: string; base?: string; delivery?: Delivery[] };
 
 async function post(action: string, body: object): Promise<Result> {
   try {
@@ -78,20 +78,26 @@ export function renameColumnAction(columnId: string, name: string): void { void 
 export function setInstructionAction(columnId: string, instruction: string): void { void act("column-update", { columnId, instruction }); }
 export function setColumnStageAction(columnId: string, stage: Stage | null): void { void act("column-update", { columnId, stage }); }
 export function deleteColumnAction(columnId: string): void { void act("column-delete", { columnId }); }
-/** Archive a merged column's cards (see src/lib/archive.ts). How many went, or null on failure. */
-export async function archiveColumnAction(columnId: string): Promise<number | null> {
-  const r = await post("column-archive", { columnId });
+/** Archive a merged column's cards (see src/lib/archive.ts); with `cardIds`,
+ *  only those (the cards a repo-filtered view shows). The ids that went, or
+ *  null on failure. */
+export async function archiveColumnAction(columnId: string, cardIds?: string[]): Promise<string[] | null> {
+  const r = await post("column-archive", { columnId, ...(cardIds ? { cardIds } : {}) });
   if (!r.ok) { toastError(r.error ?? "column-archive failed"); return null; }
-  return r.archived ?? 0;
+  return r.ids ?? [];
 }
 export function unarchiveCardAction(cardId: string): Promise<boolean> { return act("card-unarchive", { cardId }); }
-/** The archived cards, newest first; [] when the server can't be reached. */
-export async function fetchArchive(): Promise<ArchivedCard[]> {
+/** Put a whole archived batch back: an archive's UNDO. */
+export function unarchiveCardsAction(cardIds: string[]): Promise<boolean> { return act("card-unarchive", { cardIds }); }
+/** The archived cards, newest first, or null when they can't be fetched (so
+ *  the list can say so rather than look empty). */
+export async function fetchArchive(): Promise<ArchivedCard[] | null> {
   try {
     const res = await fetch("/archive");
-    return ((await res.json()) as { cards?: ArchivedCard[] }).cards ?? [];
+    if (!res.ok) return null;
+    return ((await res.json()) as { cards?: ArchivedCard[] }).cards ?? null;
   } catch {
-    return [];
+    return null;
   }
 }
 export function reorderColumnAction(columnId: string, toIndex: number): void { void act("column-reorder", { columnId, toIndex }); }

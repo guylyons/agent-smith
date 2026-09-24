@@ -39,7 +39,7 @@ test("column-archive moves a merged column's cards to the archive file, comments
   const { server, base, post } = await start();
   const res = await post("/action/column-archive", { columnId: "merged" });
   expect(res.status).toBe(200);
-  expect(await res.json()).toEqual({ ok: true, archived: 2 });
+  expect(await res.json()).toEqual({ ok: true, archived: 2, ids: ["m1", "m2"] });
   expect(readBoard(dir).cards.map((k) => k.id)).toEqual(["b1"]);
   const onDisk = JSON.parse(readFileSync(archiveFile(dir), "utf8"));
   expect(onDisk.cards.map((k: any) => k.id).sort()).toEqual(["m1", "m2"]);
@@ -70,7 +70,7 @@ test("column-archive with olderThanDays keeps recent cards", async () => {
   b.cards[1]!.comments = [{ id: "c2", author: "You", text: "Merged.", at: Date.now() }];
   writeBoard(dir, b);
   const res = await post("/action/column-archive", { columnId: "merged", olderThanDays: 7 });
-  expect(await res.json()).toEqual({ ok: true, archived: 1 });
+  expect(await res.json()).toEqual({ ok: true, archived: 1, ids: ["m1"] });
   expect(readBoard(dir).cards.map((k) => k.id).sort()).toEqual(["b1", "m2"]);
   server.stop(true);
 });
@@ -150,5 +150,26 @@ test("/events sends the board on connect, then leaves it out of pushes where it 
   expect(withBoard.board.cards.map((k: any) => k.id)).toEqual(["b1"]);
   expect(withBoard.archived).toBe(2);
   await ev.cancel();
+  server.stop(true);
+});
+
+test("column-archive with cardIds archives only those cards (a repo-filtered view)", async () => {
+  const { server, post } = await start();
+  const res = await post("/action/column-archive", { columnId: "merged", cardIds: ["m2", "b1"] });
+  // b1 is in Backlog, so it is not archivable even when named.
+  expect(await res.json()).toEqual({ ok: true, archived: 1, ids: ["m2"] });
+  expect(readBoard(dir).cards.map((k) => k.id).sort()).toEqual(["b1", "m1"]);
+  server.stop(true);
+});
+
+test("card-unarchive with cardIds restores a whole batch in its old order (UNDO)", async () => {
+  const { server, post } = await start();
+  const archived = (await (await post("/action/column-archive", { columnId: "merged" })).json()) as { ids: string[] };
+  expect(archived.ids).toEqual(["m1", "m2"]);
+  const res = await post("/action/card-unarchive", { cardIds: archived.ids });
+  expect(await res.json()).toEqual({ ok: true });
+  expect(readBoard(dir).cards.filter((k) => k.columnId === "merged").map((k) => k.id)).toEqual(["m1", "m2"]);
+  const again = await post("/action/card-unarchive", { cardIds: archived.ids });
+  expect(again.status).toBe(404);
   server.stop(true);
 });

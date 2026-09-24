@@ -25,3 +25,17 @@ export function neighbourAfter(ids: string[], goneId: string): string | null {
   if (i < 0) return ids[0] ?? null;
   return ids[i + 1] ?? ids[i - 1] ?? null;
 }
+
+/** The line under an open ARCHIVED list when a repo filter hides some of it:
+ *  "3 of 87 match the repo filter", or null when nothing is hidden. */
+export function archiveFilterNote(shown: number, total: number): string | null {
+  return shown === total ? null : `${shown} of ${total} match the repo filter`;
+}
+
+/** Where focus goes after a restore: the neighbouring row, else the bar's
+ *  ARCHIVE button (the card is back in the column), else the ARCHIVED toggle.
+ *  Targets are tried in order, as each may not be mounted yet. */
+export function focusAfterRestore(rowIds: string[], restoredId: string): string[] {
+  const next = neighbourAfter(rowIds, restoredId);
+  return [...(next ? [`row:${next}`] : []), "archive", "toggle"];
+}

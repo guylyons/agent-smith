@@ -659,7 +659,7 @@ function RepoField({ value, path, known, onCommit }: {
 
 // Compact relative time for a comment timestamp ("just now", "5m", "3h", "2d");
 // older than a week falls back to a local date.
-function timeAgo(at: number): string {
+export function timeAgo(at: number): string {
   const s = Math.max(0, Math.round((Date.now() - at) / 1000));
   if (s < 45) return "just now";
   const m = Math.round(s / 60);
