@@ -673,6 +673,14 @@
     border:2px dashed var(--bevel);padding:8px 12px;
   }
   .add-col:hover{color:var(--gold);border-color:var(--gold)}
+  /* The fight strip (FightStrip.tsx): a window onto a dark corridor, so it
+     keeps its own dark ground on every theme. The canvas sizes itself in
+     whole art pixels; the ground fills any sliver it leaves. */
+  .fight{
+    margin-top:10px;height:64px;overflow:hidden;
+    background:#0b0e16;border:2px solid var(--bevel);border-radius:var(--radius-sm);
+  }
+  .fight canvas{display:block;image-rendering:pixelated}
   /* THE LINE's heading row: the title, and the one board-wide action. */
   .line-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
   .add-scrum{
