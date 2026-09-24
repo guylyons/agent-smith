@@ -6,13 +6,13 @@
 // panels tell the same story twice.
 
 import type { AgentStatus } from "../schema";
-import { isDoneColumn, type Board } from "./board";
+import { columnStage, isDoneColumn, isLandedColumn, STAGES, type Board } from "./board";
 import { fleetUsage } from "./usage";
 
 /** Weapon slots on DOOM's ARMS panel — the fleet gets one per agent. */
 export const ARMS_SLOTS = 6;
 
-/** Rows in the ammo table. DOOM has four ammo types; we show four columns. */
+/** Rows in the ammo table. DOOM has four ammo types; we show four stages. */
 export const TABLE_ROWS = 4;
 
 /** A single ARMS slot: an agent pulling its weight, one standing by, or no
@@ -28,9 +28,11 @@ export type HudStats = {
   health: number | null;
   /** Exactly ARMS_SLOTS entries, agents first, padded with "empty". */
   arms: ArmsSlot[];
-  /** Percentage of the board's cards sitting in the done column, 0..100. */
+  /** Percentage of the board's cards that are finished — in the done column
+   *  or landed past it (a "Merged") — 0..100. */
   armor: number;
-  /** Up to TABLE_ROWS board columns with their card counts. */
+  /** One row per stage (todo, doing, review, done+landed) with card counts;
+   *  the first TABLE_ROWS columns instead on a board with no stages. */
   table: TableRow[];
 };
 
@@ -62,18 +64,31 @@ export function hudStats(agents: AgentStatus[], board: Board): HudStats {
     return a.state === "working" ? "working" : "idle";
   });
 
-  // ARMOR is computed straight from the done column rather than from the table
-  // below, so a board that reorders its columns can't hide the one number that
-  // says how much work is actually finished.
+  // Finished means in Done or landed past it: merged cards leave Done for a
+  // "Merged" column, and they are the most finished work on the board.
+  const finished = (columnId: string) => isDoneColumn(board, columnId) || isLandedColumn(board, columnId);
   const total = board.cards.length;
-  const done = board.cards.filter((c) => isDoneColumn(board, c.columnId)).length;
+  const done = board.cards.filter((c) => finished(c.columnId)).length;
   const armor = total > 0 ? Math.round((done / total) * 100) : 0;
 
-  const table = board.columns.slice(0, TABLE_ROWS).map((col) => ({
-    label: columnAbbrev(col.name),
-    count: board.cards.filter((c) => c.columnId === col.id).length,
-    total,
-  }));
+  const count = (inRow: (columnId: string) => boolean) => board.cards.filter((c) => inRow(c.columnId)).length;
+
+  // Rows by stage, not by position, so extra columns can't push the finished
+  // row off the table. Each row is labelled by the stage's first column.
+  const staged = STAGES.flatMap((stage) => {
+    const col = board.columns.find((c) => columnStage(c) === stage);
+    if (!col) return [];
+    const inStage = (id: string) => board.columns.some((c) => c.id === id && columnStage(c) === stage);
+    return [{ label: columnAbbrev(col.name), count: count(stage === "done" ? finished : inStage), total }];
+  });
+
+  const table = staged.length
+    ? staged
+    : board.columns.slice(0, TABLE_ROWS).map((col) => ({
+        label: columnAbbrev(col.name),
+        count: count((id) => id === col.id),
+        total,
+      }));
 
   return { ammo, health, arms, armor, table };
 }
