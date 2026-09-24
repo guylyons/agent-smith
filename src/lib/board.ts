@@ -66,6 +66,11 @@ export type Card = {
   // list, and only the last MAX_REMOVED_CREWS are kept. Absent until a crew is
   // taken off.
   removedCrews?: string[];
+  // The one comment pinned as the card's handoff note (usually the worker's
+  // last: what changed, how it was verified, what wasn't). Shown above the
+  // description. Absent when nothing is pinned; dropped on load when it names a
+  // comment the card no longer has.
+  pinnedCommentId?: string;
 };
 export type CardKind = "scrum";
 export type CardWork = { cwd: string; branch?: string; root?: string };
@@ -348,10 +353,29 @@ export function addComment(board: Board, id: string, author: string, text: strin
 }
 
 export function deleteComment(board: Board, id: string, commentId: string): Board {
-  return mapCard(board, id, (k) => ({
-    ...k,
-    comments: (k.comments ?? []).filter((m) => m.id !== commentId),
-  }));
+  return mapCard(board, id, (k) => {
+    const next = { ...k, comments: (k.comments ?? []).filter((m) => m.id !== commentId) };
+    if (next.pinnedCommentId === commentId) delete next.pinnedCommentId;
+    return next;
+  });
+}
+
+/** Pin one of the card's comments as its handoff note, replacing any earlier
+ *  pin, or clear the pin with `null`. A comment the card doesn't have is a
+ *  no-op. */
+export function pinComment(board: Board, id: string, commentId: string | null): Board {
+  return mapCard(board, id, (k) => {
+    if (commentId === null) {
+      const { pinnedCommentId: _old, ...rest } = k;
+      return rest;
+    }
+    return (k.comments ?? []).some((m) => m.id === commentId) ? { ...k, pinnedCommentId: commentId } : k;
+  });
+}
+
+/** The card's pinned comment, if it has one. */
+export function pinnedComment(card: Pick<Card, "comments" | "pinnedCommentId">): Comment | undefined {
+  return card.pinnedCommentId ? card.comments?.find((m) => m.id === card.pinnedCommentId) : undefined;
 }
 
 /** The task text handed to an agent when a card is assigned/sent: the card
@@ -419,7 +443,8 @@ export function cardTaskFooter(board: Board, id: string, server: string, agentNa
   const post = (path: string, json: string) =>
     `  curl -s -X POST ${server}${path} -H 'content-type: application/json' -d '${json}'`;
   const sign = opts.crew ? `"as":"assignee","crew":"${opts.crew}"` : `"as":"assignee"`;
-  const comment = (text: string) => post("/action/card-comment", `{"cardId":"${card.id}",${sign},"text":"${text}"}`);
+  const comment = (text: string, pin = false) =>
+    post("/action/card-comment", `{"cardId":"${card.id}",${sign},"text":"${text}"${pin ? `,"pin":true` : ""}}`);
 
   // STEP 1 is a move only when the card isn't already where work happens — a
   // task re-sent to a card in progress must not push it forward before starting.
@@ -469,9 +494,11 @@ export function cardTaskFooter(board: Board, id: string, server: string, agentNa
     "short -- write like a quick note to a busy teammate, no jargon or filler,",
     "unless this card asks for more detail.",
     "STEP 3, when the work is done: post a final card-comment saying what you did",
-    `and how you verified it, then move the card to "${land.id}" (card-move with`,
-    `{"toColumnId":"${land.id}"}). Each column's instruction says what that stage`,
-    "expects of work landing in it.",
+    'and how you verified it, with "pin":true so it is pinned to the top of the',
+    "card as the handoff note the reviewer reads first:",
+    comment("<what changed, how you verified it, Not checked: ...>", true),
+    `Then move the card to "${land.id}" (card-move with {"toColumnId":"${land.id}"}).`,
+    "Each column's instruction says what that stage expects of work landing in it.",
     "If a check the card asks for can't be done (tools down, no access), list it",
     `in that final comment as "Not checked: ..." and move the card to "${land.id}"`,
     "anyway. Do not hold the card for it.",
@@ -962,6 +989,8 @@ export function sanitizeCard(v: unknown): Card | null {
   if (work) card.work = work;
   const removedCrews = sanitizeRemovedCrews(o.removedCrews);
   if (removedCrews.length) card.removedCrews = removedCrews;
+  const pinned = str(o.pinnedCommentId);
+  if (pinned && comments.some((m) => m.id === pinned)) card.pinnedCommentId = pinned;
   return card;
 }
 

@@ -645,6 +645,10 @@ function CardView({
                 : <span className="card-assignee" title={`${card.assignee.name} (session ended)`}>{initials(card.assignee.name)}</span>)
             : <span className="card-unassigned" title="No agent assigned yet">Unassigned</span>}
           {card.description && <span className="card-flag" title="Has a description">≡</span>}
+          {/* A pinned handoff note: the worker's summary is ready to read.
+              Glyph plus a word, so it never rests on colour; the card's
+              aria-label says it in full (see cardName). */}
+          {card.pinnedCommentId && <span className="card-flag card-flag-pin" title="Handoff note pinned">📌 NOTE</span>}
           {mergeWait && <span className="card-flag card-flag-wait" title={mergeWait.title}>{mergeWait.label}</span>}
           {mergeNext && <span className="card-flag card-flag-wait card-flag-next" title={mergeNext.title}>{mergeNext.label}</span>}
           {/* Unread turns the count into "N NEW" and colours it, so a thread
@@ -676,7 +680,7 @@ function CardView({
  *  what the face shows, in words. The chips inside the open button are only
  *  pictures and initials, so the name has to carry them. */
 export function cardName(
-  card: Pick<Card, "title" | "kind" | "assignee"> & Partial<Pick<Card, "id" | "num">>,
+  card: Pick<Card, "title" | "kind" | "assignee"> & Partial<Pick<Card, "id" | "num" | "pinnedCommentId">>,
   staffing: "live" | "ended" | "none",
   unread: number,
   commentCount: number,
@@ -688,6 +692,7 @@ export function cardName(
   } else parts.push("unassigned");
   if (unread) parts.push(`${unread} new comment${unread > 1 ? "s" : ""}`);
   else if (commentCount) parts.push(`${commentCount} comment${commentCount > 1 ? "s" : ""}`);
+  if (card.pinnedCommentId) parts.push("handoff note pinned");
   if (card.id) parts.push(`card ${cardRef({ id: card.id, num: card.num })}`);
   return parts.join(", ");
 }

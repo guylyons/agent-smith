@@ -2,11 +2,11 @@ import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from
 import type { AgentStatus } from "../schema";
 import type { Board, Card } from "../lib/board";
 import type { Assignee } from "../lib/board";
-import { renameCard, setCardDescription, setCardTouches, setCardRepo, assignCard, addComment, deleteComment, moveCard, cardTaskPrompt, claimBlockReason } from "../lib/board";
+import { renameCard, setCardDescription, setCardTouches, setCardRepo, assignCard, addComment, deleteComment, pinComment, pinnedComment, moveCard, cardTaskPrompt, claimBlockReason } from "../lib/board";
 import {
   sendCardTask, uploadImage, ME,
   renameCardAction, setCardDescriptionAction, setCardTouchesAction, setCardRepoAction, assignCardAction,
-  addCommentAction, deleteCommentAction, moveCardAction, type Delivery,
+  addCommentAction, deleteCommentAction, pinCommentAction, moveCardAction, type Delivery,
 } from "./actions";
 import { ModalBackdrop } from "./Backdrop";
 import { MergeKey } from "./MergeKey";
@@ -292,6 +292,9 @@ export function CardModal({
   }
 
   const comments = card.comments ?? [];
+  const pinned = pinnedComment(card);
+  const setPin = (commentId: string, pin: boolean) =>
+    mutate((b) => pinComment(b, card.id, pin ? commentId : null), () => pinCommentAction(card.id, commentId, pin));
 
   return (
     <ModalBackdrop onClose={close} labelledBy="cardmodal-title" returnTo={() => cardButton(card.id)}>
@@ -322,6 +325,29 @@ export function CardModal({
             value={card.title}
             onCommit={(v) => { if (v) mutate((b) => renameCard(b, card.id, v), () => renameCardAction(card.id, v)); }}
           />
+
+          {/* The handoff note: the one comment pinned to the top, usually the
+              worker's last (what changed, how it was verified, what wasn't).
+              It is also in the thread below, in its place in time. */}
+          {pinned && (
+            <section className="cardmodal-pinned" aria-labelledby="cardmodal-pinned-label">
+              <div className="comment-meta">
+                <span id="cardmodal-pinned-label" className="pix pinned-tag">
+                  <span aria-hidden="true">📌 </span>PINNED<span className="sr-only"> handoff note</span>
+                </span>
+                <span className="comment-author">{pinned.author}</span>
+                <span className="comment-time">{timeAgo(pinned.at)}</span>
+                {/* This section goes away with the pin, so focus moves on to
+                    the same comment's PIN in the thread first, rather than
+                    falling back to the page when this button unmounts. */}
+                <PinButton pinned author={pinned.author} onToggle={() => {
+                  document.querySelector<HTMLElement>(`.cardmodal-comments [data-pin-for="${pinned.id}"]`)?.focus();
+                  setPin(pinned.id, false);
+                }} />
+              </div>
+              <div className="comment-text">{renderMarkdown(pinned.text)}</div>
+            </section>
+          )}
 
           {/* Which project this card is for. Filled in when an agent is
               spawned for it; typed here for a card made by hand. Blank clears. */}
@@ -496,16 +522,18 @@ export function CardModal({
             <div className="cardmodal-comments">
               {comments.map((c) => {
                 const isTarget = c.id === targetCommentId;
+                const isPinned = c.id === pinned?.id;
                 return (
                   <div
                     key={c.id}
-                    className={`comment${isTarget ? " is-target" : ""}`}
+                    className={`comment${isTarget ? " is-target" : ""}${isPinned ? " is-pinned" : ""}`}
                     ref={isTarget ? setTargetEl : undefined}
                     tabIndex={isTarget ? -1 : undefined}
                   >
                     <div className="comment-meta">
                       <span className="comment-author">{c.author}</span>
                       <span className="comment-time">{timeAgo(c.at)}</span>
+                      <PinButton pinned={isPinned} onToggle={() => setPin(c.id, !isPinned)} author={c.author} commentId={c.id} />
                       <button
                         className="comment-del"
                         title="Delete comment"
@@ -656,6 +684,23 @@ function RepoField({ value, path, known, onCommit }: {
       </datalist>
       {path && <p className="cardmodal-empty cardmodal-repo-path" title={path}>{path}</p>}
     </>
+  );
+}
+
+/** Pin or unpin a comment as the card's handoff note. A real button, so Tab
+ *  reaches it and Enter/Space press it; aria-pressed carries the state for a
+ *  screen reader and the visible word carries it for everyone else. */
+function PinButton({ pinned, author, commentId, onToggle }: { pinned: boolean; author: string; commentId?: string; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      data-pin-for={commentId}
+      className={`pix comment-pin${pinned ? " is-on" : ""}`}
+      aria-pressed={pinned}
+      aria-label={pinned ? `Unpin ${author}'s handoff note` : `Pin ${author}'s comment as the handoff note`}
+      title={pinned ? "Unpin this handoff note" : "Pin to the top as the handoff note (replaces any other pin)"}
+      onClick={onToggle}
+    >{pinned ? "UNPIN" : "PIN"}</button>
   );
 }
 
