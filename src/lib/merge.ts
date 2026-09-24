@@ -331,3 +331,133 @@ export async function cleanupMergedWork(cwd: string, branch: string): Promise<Cl
     return { removed: true, branchDeleted: true };
   });
 }
+
+// The CONFIG sweep. Work merged by hand (git merge in a terminal) never goes
+// through MERGE, so its worktree and branch are never cleaned up. The sweep
+// finds every worktree under `<repo>/.claude/worktrees` that is safe to remove
+// and removes those through cleanupMergedWork — the same safe forms, the same
+// re-check under the repo's lock.
+
+export type WorktreeFacts = {
+  /** the branch checked out there ("" when detached) */
+  branch: string;
+  /** the trunk ("" when the repo has neither main nor master) */
+  base: string;
+  /** uncommitted changes, untracked files included */
+  dirty: boolean;
+  /** `branch` is an ancestor of `base` */
+  merged: boolean;
+  /** a live agent's cwd is this worktree or inside it */
+  live: boolean;
+  /** `git worktree lock`ed */
+  locked: boolean;
+};
+
+/** Why a worktree must stay, or "" when it can go. Pure. A live agent comes
+ *  first: a fresh worktree sits at the trunk's tip and so reads as merged, and
+ *  the agent in it is the reason that matters. */
+export function worktreeKeepReason(f: WorktreeFacts): string {
+  if (f.live) return "an agent is working in it";
+  if (f.locked) return "it is locked (git worktree lock)";
+  if (!f.branch) return "it is on a detached HEAD";
+  if (f.dirty) return "it has uncommitted changes";
+  if (!f.base) return "the repo has no main branch";
+  if (!f.merged) return `${f.branch} is not merged into ${f.base}`;
+  return "";
+}
+
+export type SweepEntry = { repo: string; path: string; branch: string };
+export type CleanupPlan = { remove: SweepEntry[]; keep: (SweepEntry & { why: string })[] };
+export type SweepResult = {
+  removed: (SweepEntry & { branchDeleted: boolean; why?: string })[];
+  kept: (SweepEntry & { why: string })[];
+};
+
+type Listed = { path: string; branch: string; locked: boolean; prunable: boolean };
+
+/** `git worktree list --porcelain`, one entry per worktree. */
+async function listWorktrees(root: string): Promise<Listed[]> {
+  const r = await git(root, ["worktree", "list", "--porcelain"]);
+  if (r.code !== 0) return [];
+  const out: Listed[] = [];
+  for (const block of r.stdout.split(/\n\n+/)) {
+    const lines = block.split("\n");
+    const path = lines.find((l) => l.startsWith("worktree "))?.slice("worktree ".length);
+    if (!path) continue;
+    const ref = lines.find((l) => l.startsWith("branch "))?.slice("branch ".length) ?? "";
+    out.push({
+      path,
+      branch: ref.replace(/^refs\/heads\//, ""),
+      locked: lines.some((l) => l === "locked" || l.startsWith("locked ")),
+      prunable: lines.some((l) => l === "prunable" || l.startsWith("prunable ")),
+    });
+  }
+  return out;
+}
+
+/** Each distinct repo root behind `dirs`; anything that isn't a repo is dropped. */
+async function distinctRoots(dirs: string[]): Promise<string[]> {
+  const roots = new Map<string, string>();
+  for (const d of dirs) {
+    if (!d || !existsSync(d)) continue;
+    const root = await repoRoot(d);
+    if (root && !roots.has(real(root))) roots.set(real(root), root);
+  }
+  return [...roots.values()];
+}
+
+/**
+ * Every worktree under `<repo>/.claude/worktrees` of each repo behind `repos`,
+ * split into the ones that can go and the ones that stay (with why). The main
+ * checkout and worktrees kept anywhere else are never listed. `liveCwds` are
+ * the working directories of the agents still running. Read-only.
+ */
+export async function planWorktreeCleanup(repos: string[], liveCwds: string[]): Promise<CleanupPlan> {
+  const live = liveCwds.filter(Boolean).map(real);
+  const plan: CleanupPlan = { remove: [], keep: [] };
+  for (const repo of await distinctRoots(repos)) {
+    const home = join(real(repo), ".claude", "worktrees");
+    const base = await pickBase(repo);
+    for (const w of await listWorktrees(repo)) {
+      const here = real(w.path);
+      if (dirname(here) !== home) continue;
+      const entry = { repo, path: w.path, branch: w.branch };
+      // Its folder is gone: git lists it until a prune, but there is nothing here to remove.
+      if (w.prunable || !existsSync(w.path)) {
+        plan.keep.push({ ...entry, why: "its folder is missing (git worktree prune clears it)" });
+        continue;
+      }
+      const [dirty, merged] = await Promise.all([
+        isDirty(w.path, true),
+        w.branch && base ? git(repo, ["merge-base", "--is-ancestor", w.branch, base]).then((r) => r.code === 0) : false,
+      ]);
+      const why = worktreeKeepReason({
+        branch: w.branch, base, dirty, merged, locked: w.locked,
+        live: live.some((c) => c === here || c.startsWith(here + "/")),
+      });
+      if (why) plan.keep.push({ ...entry, why });
+      else plan.remove.push(entry);
+    }
+  }
+  return plan;
+}
+
+/**
+ * Remove what `planWorktreeCleanup` says can go — re-planned now, so nothing
+ * that changed since a preview is taken on trust. With `only`, just those
+ * paths (what the human confirmed); anything confirmed that no longer
+ * qualifies is kept, with why. Every worktree that stays is reported, so the
+ * panel can say why. Each removal is cleanupMergedWork's: no --force, `git
+ * branch -d`, re-checked under the repo's lock. Never throws.
+ */
+export async function cleanupMergedWorktrees(repos: string[], liveCwds: string[], only?: string[]): Promise<SweepResult> {
+  const plan = await planWorktreeCleanup(repos, liveCwds);
+  const wanted = only ? new Set(only.map(real)) : null;
+  const res: SweepResult = { removed: [], kept: [...plan.keep] };
+  for (const w of wanted ? plan.remove.filter((w) => wanted.has(real(w.path))) : plan.remove) {
+    const r = await cleanupMergedWork(w.path, w.branch);
+    if (r.removed) res.removed.push({ ...w, branchDeleted: !!r.branchDeleted, ...(r.why ? { why: r.why } : {}) });
+    else res.kept.push({ ...w, why: r.why ?? "git would not remove it" });
+  }
+  return res;
+}

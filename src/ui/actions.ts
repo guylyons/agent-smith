@@ -11,7 +11,7 @@ import type { MoodKind, MoodLink, MoodNote, NotePatch } from "../lib/mood";
 import type { ChatMessage, QuestionOption, Question, PendingQuestion, BlockingTool } from "../lib/conversation";
 import type { Subagent } from "../lib/subagents";
 import type { RepoInfo } from "../repo";
-import type { MergeState, MergeResult } from "../lib/merge";
+import type { MergeState, MergeResult, CleanupPlan, SweepResult } from "../lib/merge";
 import type { MergePreview } from "../lib/mergePreview";
 
 /** Where a card event went: typed into an idle agent's terminal now, or queued
@@ -304,6 +304,20 @@ export async function fetchMergePreview(cardId: string): Promise<{ preview: Merg
  *  since the key lit up reads differently from a conflict (src/lib/mergeRace.ts). */
 export async function mergeCard(cardId: string): Promise<MergeResult> {
   return (await post("card-merge", { cardId, author: ME })) as MergeResult;
+}
+
+/** CONFIG's worktree sweep, read-only: which worktrees merged by hand can go,
+ *  and why the rest stay. */
+export async function previewWorktreeCleanup(): Promise<CleanupPlan | { error: string }> {
+  const r = (await post("worktree-cleanup", {})) as Result & Partial<CleanupPlan>;
+  return r.ok && r.remove && r.keep ? { remove: r.remove, keep: r.keep } : { error: r.error ?? "couldn't list the worktrees" };
+}
+
+/** Remove the worktrees the human confirmed. The server re-checks each one, so
+ *  anything that changed since the preview comes back kept, with why. */
+export async function runWorktreeCleanup(paths: string[]): Promise<SweepResult | { error: string }> {
+  const r = (await post("worktree-cleanup", { remove: paths })) as Result & Partial<SweepResult>;
+  return r.ok && r.removed && r.kept ? { removed: r.removed, kept: r.kept } : { error: r.error ?? "the clean-up failed" };
 }
 
 // ---- the MOOD board: one scoped call per edit, like THE LINE -----------------
