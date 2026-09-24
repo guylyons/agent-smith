@@ -166,6 +166,8 @@ export const CardMoveBody = Signature.extend({
 export const CardUpdateBody = body({
   // "" or null clears the card's project label
   repo: z.string({ error: "repo must be a string (or null to clear it)" }).nullable().optional(),
+  // where that repo lives, kept only alongside a repo name (as on card-add)
+  repoPath: maybeTrimmed().optional(),
   // a blank title would leave the card unidentifiable on the board
   title: maybeText()
     .refine((t) => t === undefined || t.trim() !== "", { error: "title cannot be blank" })

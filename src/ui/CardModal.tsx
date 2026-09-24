@@ -15,6 +15,7 @@ import { imagesIn, imageMarkdown, appendImage, removeImage } from "./cardImages"
 import { toast } from "./toast";
 import type { CardFocus } from "./nav";
 import { findLiveAssignee, sendTaskReadiness } from "../lib/sendTaskReady";
+import { knownRepos, normaliseRepo, type KnownRepo } from "./repoFilter";
 
 /** What the New Agent dialog starts with when a card asks for an agent, beyond
  *  its task: a persona to preselect and the folder to launch in. */
@@ -328,8 +329,13 @@ export function CardModal({
             <RepoField
               value={card.repo ?? ""}
               path={card.repoPath}
-              onCommit={(v) => {
-                if (v !== (card.repo ?? "")) mutate((b) => setCardRepo(b, card.id, v), () => setCardRepoAction(card.id, v));
+              known={knownRepos(board, agents)}
+              onCommit={(v, known) => {
+                // A path is saved as its folder name (+ the path), so every card
+                // for a project is spelled the same and routes the same.
+                const { repo, repoPath } = normaliseRepo(v, known);
+                if (repo === (card.repo ?? "") && (!repoPath || repoPath === card.repoPath)) return;
+                mutate((b) => setCardRepo(b, card.id, repo, repoPath), () => setCardRepoAction(card.id, repo, repoPath));
               }}
             />
           </div>
@@ -608,8 +614,11 @@ function TitleField({ value, onCommit }: { value: string; onCommit: (v: string) 
 }
 
 // The repo label: a one-line field with the same local-draft rule as the title.
-// The full path, when the spawn recorded one, sits under it as a hint.
-function RepoField({ value, path, onCommit }: { value: string; path?: string; onCommit: (v: string) => void }) {
+// The repos the board already knows are offered as suggestions, so a project is
+// picked rather than retyped. The full path, when known, sits under it as a hint.
+function RepoField({ value, path, known, onCommit }: {
+  value: string; path?: string; known: KnownRepo[]; onCommit: (v: string, known: KnownRepo[]) => void;
+}) {
   const [draft, setDraft] = useState(value);
   const [editing, setEditing] = useState(false);
   useEffect(() => { if (!editing) setDraft(value); }, [value, editing]);
@@ -622,13 +631,18 @@ function RepoField({ value, path, onCommit }: { value: string; path?: string; on
         value={editing ? draft : value}
         placeholder="Which repo is this for?  e.g. agent-smith"
         spellCheck={false}
+        autoComplete="off"
+        list="cardmodal-repo-known"
         onFocus={() => setEditing(true)}
         onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => { setEditing(false); onCommit(draft.trim()); }}
+        onBlur={() => { setEditing(false); onCommit(draft.trim(), known); }}
         onKeyDown={(e) => {
           if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
         }}
       />
+      <datalist id="cardmodal-repo-known">
+        {known.map((k) => <option key={k.name} value={k.name} />)}
+      </datalist>
       {path && <p className="cardmodal-empty cardmodal-repo-path" title={path}>{path}</p>}
     </>
   );

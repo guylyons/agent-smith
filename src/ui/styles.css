@@ -670,6 +670,18 @@
   }
   .add-scrum:hover{color:var(--on-scrum);background:var(--scrum)}
   .add-scrum:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+  /* The repo filter: pushed right, before the scrum button. Gold while it hides
+     cards, so a filtered board never passes for the whole one. */
+  .line-repo{margin-left:auto;display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--dim);min-width:0}
+  .line-repo select{
+    font-family:var(--mono);font-size:13px;min-width:0;max-width:22ch;cursor:pointer;
+    color:var(--bone);background:var(--night);
+    border:2px solid var(--bevel);border-radius:var(--radius-sm);padding:4px 4px;
+  }
+  .line-repo select:hover{border-color:var(--gold)}
+  .line-repo select:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+  .line-repo select.is-on{border-color:var(--gold);color:var(--gold)}
+  .col-count{margin:0;font-family:var(--mono);font-size:12px;color:var(--dim);padding:0 5px}
   /* The scrum master card: its own colour on the border, a tint over the face
      and a badge, so the one orchestrator card never reads as a ticket. Hover
      and focus still go gold like every card; the tint and badge keep saying
