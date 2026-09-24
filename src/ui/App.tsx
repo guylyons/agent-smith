@@ -202,7 +202,7 @@ export function App() {
           onClose={() => setSettingsOpen(false)}
         />
       )}
-      {faceEnabled && <FaceHud agents={snap.agents} board={snap.board} />}
+      {faceEnabled && <FaceHud agents={snap.agents} board={snap.board} archived={snap.archived} />}
       <Toaster />
       <Dictation />
       <Notifier snap={snap} enabled={alertsEnabled} />

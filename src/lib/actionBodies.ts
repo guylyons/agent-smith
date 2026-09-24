@@ -140,9 +140,17 @@ export const CardRestoreBody = body({
   index: z.number().catch(0),
 });
 
-// column-archive: optionally only cards quiet for this many days.
+// column-archive: optionally only cards quiet for this many days, and
+// optionally only these cards (the ones a repo-filtered view shows).
 export const ColumnArchiveBody = body({
   olderThanDays: z.number().positive().optional().catch(undefined),
+  cardIds: z.array(z.string()).optional().catch(undefined),
+});
+
+// card-unarchive: one card, or a batch (an archive's UNDO) with cardIds.
+export const CardUnarchiveBody = body({
+  cardId: text(),
+  cardIds: z.array(z.string()).optional().catch(undefined),
 });
 
 export const CardAddBody = body({

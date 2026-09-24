@@ -21,7 +21,7 @@ export function Toaster() {
       {toasts.map((t) => (
         <div
           key={t.id}
-          className="pix toast"
+          className={`pix toast${t.kind === "error" ? " error" : ""}`}
           role={t.kind === "error" ? "alert" : "status"}
           aria-live={t.kind === "error" ? "assertive" : "polite"}
           aria-atomic="true"

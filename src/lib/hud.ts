@@ -29,7 +29,7 @@ export type HudStats = {
   /** Exactly ARMS_SLOTS entries, agents first, padded with "empty". */
   arms: ArmsSlot[];
   /** Percentage of the board's cards that are finished — in the done column
-   *  or landed past it (a "Merged") — 0..100. */
+   *  or landed past it (a "Merged"), or archived — 0..100. */
   armor: number;
   /** One row per stage (todo, doing, review, done+landed) with card counts;
    *  the first TABLE_ROWS columns instead on a board with no stages. */
@@ -49,8 +49,11 @@ export function columnAbbrev(name: string): string {
   return longest.slice(0, 4);
 }
 
-/** Everything the status bar displays, from one snapshot of the fleet. */
-export function hudStats(agents: AgentStatus[], board: Board): HudStats {
+/** Everything the status bar displays, from one snapshot of the fleet.
+ *  `archived` cards were taken off the board from Merged, so they count as
+ *  finished work; without them, archiving would read as the team going
+ *  backwards. */
+export function hudStats(agents: AgentStatus[], board: Board, archived = 0): HudStats {
   const usage = fleetUsage(agents);
 
   // Remaining, not spent: this is a health bar, and a full one must mean a
@@ -67,8 +70,8 @@ export function hudStats(agents: AgentStatus[], board: Board): HudStats {
   // Finished means in Done or landed past it: merged cards leave Done for a
   // "Merged" column, and they are the most finished work on the board.
   const finished = (columnId: string) => isDoneColumn(board, columnId) || isLandedColumn(board, columnId);
-  const total = board.cards.length;
-  const done = board.cards.filter((c) => finished(c.columnId)).length;
+  const total = board.cards.length + archived;
+  const done = board.cards.filter((c) => finished(c.columnId)).length + archived;
   const armor = total > 0 ? Math.round((done / total) * 100) : 0;
 
   const count = (inRow: (columnId: string) => boolean) => board.cards.filter((c) => inRow(c.columnId)).length;
@@ -79,7 +82,7 @@ export function hudStats(agents: AgentStatus[], board: Board): HudStats {
     const col = board.columns.find((c) => columnStage(c) === stage);
     if (!col) return [];
     const inStage = (id: string) => board.columns.some((c) => c.id === id && columnStage(c) === stage);
-    return [{ label: columnAbbrev(col.name), count: count(stage === "done" ? finished : inStage), total }];
+    return [{ label: columnAbbrev(col.name), count: stage === "done" ? count(finished) + archived : count(inStage), total }];
   });
 
   const table = staged.length

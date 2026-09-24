@@ -65,7 +65,7 @@ export function cardInFilter(card: Card, filter: RepoFilter): boolean {
   return filter.kind === "none" ? !key : key === filter.repo;
 }
 
-export function filterCards(cards: Card[], filter: RepoFilter): Card[] {
+export function filterCards<T extends Card>(cards: T[], filter: RepoFilter): T[] {
   return filter.kind === "all" ? cards : cards.filter((c) => cardInFilter(c, filter));
 }
 

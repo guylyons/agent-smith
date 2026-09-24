@@ -28,7 +28,9 @@ export function headerSummary(agents: AgentStatus[]): { working: number; waiting
 export function Header({ snap, live, view, onView, onNewAgent, onFind, onSettings }: { snap: Snapshot; live: boolean; view: AppView; onView: (v: AppView) => void; onNewAgent: () => void; onFind: () => void; onSettings: () => void }) {
   const { agents, board } = snap;
   const idle = agents.filter((a) => a.state === "idle").length;
-  const onLine = board.cards.length;
+  // Archived cards are finished tasks, not lost ones: count them, and say so.
+  const archived = snap.archived ?? 0;
+  const tasks = board.cards.length + archived;
 
   const { working, waiting, repos } = headerSummary(agents);
   // Only surface segments that carry a signal; a quiet fleet says so plainly
@@ -54,7 +56,7 @@ export function Header({ snap, live, view, onView, onNewAgent, onFind, onSetting
         </div>
         <div className="pix statline">
           <span><b>{idle}</b> IDLE</span>
-          <span><b>{onLine}</b> TASKS</span>
+          <span title={`${board.cards.length} on the board, ${archived} archived`}><b>{tasks}</b> TASKS</span>
           {/* The pages: the desks + THE LINE, the big-picture MOOD board, or the GAME map. */}
           <span className="view-tabs" role="group" aria-label="View">
             <button className={`view-tab${view === "workshop" ? " on" : ""}`} aria-pressed={view === "workshop"} onClick={() => onView("workshop")}>WORKSHOP</button>
