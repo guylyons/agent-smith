@@ -3,8 +3,9 @@ import type { AgentStatus } from "../schema";
 import type { Board } from "../lib/board";
 import { Sprite } from "./Sprite";
 import mapUrl from "./nostromo.png";
+import { hashFlag } from "./view";
 import {
-  MAP_W, MAP_H, ROOMS, ROOM_IDS, placeAll, pathBetween, pathLength, pointAlong, spotFor, sleepers, cargoCount,
+  MAP_W, MAP_H, ROOMS, ROOM_IDS, placeAll, pathBetween, pathLength, pointAlong, spotFor, sleepers, cargoCount, roomsOverlay,
   type Pt, type RoomId, type Placement,
 } from "./game";
 
@@ -69,6 +70,45 @@ function useWalkers(agents: AgentStatus[], placed: Map<string, Placement>, ready
   return out;
 }
 
+/** Is a debug flag on in the URL hash (#game?rooms=1)? Follows hash changes. */
+function useHashFlag(name: string): boolean {
+  const [on, setOn] = useState(() => hashFlag(location.hash, name));
+  useEffect(() => {
+    const onHash = () => setOn(hashFlag(location.hash, name));
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, [name]);
+  return on;
+}
+
+/** Debug (#game?rooms=1): every room's rect, numbered spots, door, exit and
+ *  waypoints, the last leg of each walk, and the corridor lines, drawn over
+ *  the art so the points can be checked by eye. */
+function RoomsOverlay() {
+  const { rooms, lines } = roomsOverlay();
+  return (
+    <svg className="game-rooms" viewBox={`0 0 ${MAP_W} ${MAP_H}`} aria-hidden="true">
+      {rooms.map((r) => (
+        <rect key={r.id} className="rect" x={r.rect.x} y={r.rect.y} width={r.rect.w} height={r.rect.h} />
+      ))}
+      {lines.map((l, i) => <line key={i} className={l.kind} x1={l.a.x} y1={l.a.y} x2={l.b.x} y2={l.b.y} />)}
+      {rooms.map((r) => (
+        <g key={r.id}>
+          <circle className="exit" cx={r.exit.x} cy={r.exit.y} r={7} />
+          <circle className="door" cx={r.door.x} cy={r.door.y} r={7} />
+          {r.vias.map((v, i) => <circle key={i} className="via" cx={v.x} cy={v.y} r={6} />)}
+          {r.spots.map((p, i) => (
+            <g key={i}>
+              <circle className="spot" cx={p.x} cy={p.y} r={9} />
+              <text x={p.x} y={p.y}>{i}</text>
+            </g>
+          ))}
+        </g>
+      ))}
+    </svg>
+  );
+}
+
 const pct = (p: Pt) => ({ left: `${(p.x / MAP_W) * 100}%`, top: `${(p.y / MAP_H) * 100}%` });
 
 const WAIT_LABEL: Record<string, string> = { permission: "needs permission", question: "asking you", plan: "plan review" };
@@ -91,12 +131,14 @@ export function GameView({ agents, board, onOpen, onOpenCard }: {
   const asleep = useMemo(() => sleepers(board, agents), [board, agents]);
   const pods = ROOMS.hypersleep.spots.length;
   const cargo = cargoCount(board);
+  const showRooms = useHashFlag("rooms");
 
   return (
     <section className="game" aria-label="Ship map: each agent stands where its work is. Click one to open its conversation.">
       <div className="game-scroll">
         <div className="game-map">
           <img className="game-art" src={mapUrl} alt="" width={MAP_W} height={MAP_H} draggable={false} />
+          {showRooms && <RoomsOverlay />}
           {ROOM_IDS.map((id) => (
             <div key={id} className="pix game-room" style={pct({ x: ROOMS[id].rect.x, y: ROOMS[id].rect.y })} aria-hidden="true">
               {ROOMS[id].label}

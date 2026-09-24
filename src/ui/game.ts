@@ -23,6 +23,9 @@ type Room = {
   spots: Pt[];
   /** Just inside the room's doorway. */
   door: Pt;
+  /** By spot index: a point walked through between the door and that spot,
+   *  where a straight line would cross furniture. */
+  via?: Record<number, Pt>;
   /** The corridor point outside that doorway. */
   exit: Pt;
 };
@@ -38,56 +41,72 @@ export const ROOMS: Record<RoomId, Room> = {
     label: "COMPUTER ROOM",
     rect: { x: 95, y: 70, w: 360, h: 205 },
     spots: [{ x: 200, y: 262 }, { x: 290, y: 262 }, { x: 380, y: 262 }, { x: 150, y: 190 }, { x: 410, y: 190 }, { x: 240, y: 135 }],
+    // Round the central desk.
+    via: { 3: { x: 190, y: 250 }, 4: { x: 400, y: 250 }, 5: { x: 190, y: 250 } },
     door: { x: 320, y: 262 },
     exit: { x: 320, y: UPPER },
   },
   bridge: {
     label: "BRIDGE",
     rect: { x: 560, y: 150, w: 420, h: 120 },
-    spots: [{ x: 768, y: 200 }, { x: 700, y: 250 }, { x: 836, y: 250 }, { x: 610, y: 190 }, { x: 926, y: 190 }, { x: 768, y: 255 }],
+    spots: [{ x: 768, y: 200 }, { x: 700, y: 258 }, { x: 836, y: 258 }, { x: 600, y: 190 }, { x: 936, y: 190 }, { x: 768, y: 250 }],
+    // Round the two console banks.
+    via: { 3: { x: 600, y: 258 }, 4: { x: 936, y: 258 } },
     door: { x: TRUNK, y: 262 },
     exit: { x: TRUNK, y: UPPER },
   },
   comms: {
     label: "COMMS",
     rect: { x: 1085, y: 110, w: 360, h: 165 },
-    spots: [{ x: 1150, y: 262 }, { x: 1240, y: 262 }, { x: 1330, y: 262 }, { x: 1120, y: 190 }, { x: 1250, y: 200 }, { x: 1420, y: 262 }],
+    spots: [{ x: 1150, y: 262 }, { x: 1240, y: 262 }, { x: 1330, y: 262 }, { x: 1120, y: 190 }, { x: 1250, y: 200 }, { x: 1385, y: 262 }],
     door: { x: 1215, y: 262 },
     exit: { x: 1215, y: UPPER },
   },
   workshop: {
     label: "WORKSHOP",
     rect: { x: 90, y: 395, w: 420, h: 185 },
-    spots: [{ x: 200, y: 460 }, { x: 420, y: 470 }, { x: 300, y: 560 }, { x: 140, y: 560 }, { x: 420, y: 560 }, { x: 230, y: 420 }],
-    door: { x: 320, y: 380 },
+    spots: [{ x: 200, y: 460 }, { x: 420, y: 470 }, { x: 215, y: 560 }, { x: 195, y: 515 }, { x: 420, y: 560 }, { x: 230, y: 420 }],
+    // Round the central bench.
+    via: { 2: { x: 205, y: 460 }, 3: { x: 205, y: 460 }, 4: { x: 410, y: 470 } },
+    // Below the red cabinet beside the doorway, so walks to the left clear it.
+    door: { x: 320, y: 424 },
     exit: { x: 320, y: UPPER },
   },
   medbay: {
     label: "MEDBAY",
+    // The doorway is in the bottom wall, onto the lower corridor.
     rect: { x: 1050, y: 420, w: 360, h: 160 },
-    spots: [{ x: 1120, y: 480 }, { x: 1330, y: 480 }, { x: 1210, y: 560 }, { x: 1110, y: 560 }, { x: 1330, y: 560 }, { x: 1370, y: 430 }],
-    door: { x: 1215, y: 380 },
-    exit: { x: 1215, y: UPPER },
+    spots: [{ x: 1110, y: 480 }, { x: 1330, y: 480 }, { x: 1215, y: 560 }, { x: 1110, y: 560 }, { x: 1330, y: 560 }, { x: 1370, y: 490 }],
+    // Round the centre table.
+    via: { 0: { x: 1110, y: 560 }, 1: { x: 1330, y: 560 }, 5: { x: 1330, y: 560 } },
+    door: { x: 1215, y: 588 },
+    exit: { x: 1215, y: LOWER },
   },
   mess: {
     label: "MESS HALL",
+    // Entered at the top right, where the trunk comes down past the counter.
     rect: { x: 530, y: 740, w: 260, h: 170 },
-    spots: [{ x: 580, y: 800 }, { x: 700, y: 800 }, { x: 580, y: 880 }, { x: 680, y: 880 }, { x: 760, y: 820 }, { x: 760, y: 900 }],
-    door: { x: 640, y: 690 },
-    exit: { x: 640, y: LOWER },
+    spots: [{ x: 745, y: 760 }, { x: 705, y: 760 }, { x: 780, y: 805 }, { x: 545, y: 780 }, { x: 545, y: 850 }, { x: 720, y: 895 }],
+    // Left spots along the aisle under the counter; the bottom one round the small table.
+    via: { 3: { x: 548, y: 746 }, 4: { x: 548, y: 746 }, 5: { x: 785, y: 890 } },
+    // At the foot of the entrance, level with the aisle under the counter.
+    door: { x: TRUNK, y: 742 },
+    exit: { x: TRUNK, y: LOWER },
   },
   hypersleep: {
     label: "HYPERSLEEP",
-    // Five pods, left to right; a sleeper stands in front of one.
+    // Five pods, left to right; a sleeper lies in one. The art has no doorway
+    // of its own: it opens off the mess's entrance, under the trunk.
     rect: { x: 805, y: 700, w: 200, h: 210 },
     spots: [{ x: 830, y: 820 }, { x: 868, y: 820 }, { x: 906, y: 820 }, { x: 944, y: 820 }, { x: 982, y: 820 }],
-    door: { x: 900, y: 690 },
-    exit: { x: 900, y: LOWER },
+    door: { x: 785, y: 742 },
+    exit: { x: TRUNK, y: LOWER },
   },
   cargo: {
     label: "CARGO",
+    // Label-only: it carries the "N DONE" count, and nobody is sent here.
     rect: { x: 80, y: 690, w: 360, h: 220 },
-    spots: [{ x: 320, y: 720 }],
+    spots: [],
     door: { x: 320, y: 690 },
     exit: { x: 320, y: LOWER },
   },
@@ -178,17 +197,62 @@ export function placeAll(agents: AgentStatus[], board: Board, prev?: Map<string,
   return out;
 }
 
+/** The in-room waypoint for a point in a room: that of the marked spot it is
+ *  nearest, so an agent fanned out past the last spot uses its base spot's. */
+export function viaFor(room: RoomId, at: Pt): Pt | undefined {
+  const { spots, via } = ROOMS[room];
+  if (!via || !spots.length) return undefined;
+  let best = 0;
+  for (let i = 1; i < spots.length; i++) {
+    if (Math.hypot(spots[i]!.x - at.x, spots[i]!.y - at.y) < Math.hypot(spots[best]!.x - at.x, spots[best]!.y - at.y)) best = i;
+  }
+  return via[best];
+}
+
 /** The waypoints from a spot in one room to a spot in another: out through the
  *  door, along the corridors (via the trunk if they're on different ones), in
  *  through the other door. Within one room it is a straight step. */
 export function pathBetween(from: RoomId, fromAt: Pt, to: RoomId, toAt: Pt): Pt[] {
   if (from === to) return [fromAt, toAt];
   const a = ROOMS[from], b = ROOMS[to];
-  const pts: Pt[] = [fromAt, a.door, a.exit];
+  const va = viaFor(from, fromAt), vb = viaFor(to, toAt);
+  const pts: Pt[] = [fromAt, ...(va ? [va] : []), a.door, a.exit];
   if (a.exit.y !== b.exit.y) pts.push({ x: TRUNK, y: a.exit.y }, { x: TRUNK, y: b.exit.y });
-  pts.push(b.exit, b.door, toAt);
+  pts.push(b.exit, b.door, ...(vb ? [vb] : []), toAt);
   // Drop repeats (a door that is also the spot, a room whose exit is the trunk).
   return pts.filter((p, i) => i === 0 || p.x !== pts[i - 1]!.x || p.y !== pts[i - 1]!.y);
+}
+
+export type OverlayLine = { a: Pt; b: Pt; kind: "corridor" | "exit" | "leg" };
+export type Overlay = {
+  rooms: { id: RoomId; rect: Room["rect"]; spots: Pt[]; door: Pt; exit: Pt; vias: Pt[] }[];
+  lines: OverlayLine[];
+};
+
+/** What the ROOMS debug overlay (#game?rooms=1) draws, in map pixels: every
+ *  room's rect, spots, door, exit and in-room waypoints, the door-exit legs,
+ *  the last leg of the walk to each spot, and the corridor lines. */
+export function roomsOverlay(): Overlay {
+  const rooms = ROOM_IDS.map((id) => {
+    const { rect, spots, door, exit, via } = ROOMS[id];
+    return { id, rect, spots, door, exit, vias: Object.values(via ?? {}) };
+  });
+  // Each corridor is drawn as far as walks use it: its outermost exits, and
+  // the trunk.
+  const span = (y: number) => {
+    const xs = [TRUNK, ...rooms.filter((r) => r.exit.y === y).map((r) => r.exit.x)];
+    return { a: { x: Math.min(...xs), y }, b: { x: Math.max(...xs), y }, kind: "corridor" as const };
+  };
+  const lines: OverlayLine[] = [span(UPPER), span(LOWER), { a: { x: TRUNK, y: UPPER }, b: { x: TRUNK, y: LOWER }, kind: "corridor" }];
+  for (const r of rooms) {
+    lines.push({ a: r.door, b: r.exit, kind: "exit" });
+    for (const p of r.spots) {
+      const v = viaFor(r.id, p);
+      if (v) lines.push({ a: r.door, b: v, kind: "leg" }, { a: v, b: p, kind: "leg" });
+      else lines.push({ a: r.door, b: p, kind: "leg" });
+    }
+  }
+  return { rooms, lines };
 }
 
 export function pathLength(path: Pt[]): number {
