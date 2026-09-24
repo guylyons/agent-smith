@@ -60,6 +60,12 @@ export type Card = {
   // status file is deleted when its session ends, and the MERGE key still has
   // to find the branch after that. Absent on a card no agent has worked.
   work?: CardWork;
+  // The crews this card was taken off (by a reassign or an unassign), oldest
+  // first, so their later writes are refused however they sign, even after a
+  // server restart. Kept by assignCard: a crew put back on the card leaves the
+  // list, and only the last MAX_REMOVED_CREWS are kept. Absent until a crew is
+  // taken off.
+  removedCrews?: string[];
 };
 export type CardKind = "scrum";
 export type CardWork = { cwd: string; branch?: string; root?: string };
@@ -308,9 +314,23 @@ export function scrumBrief(repo: string | undefined, repoPath?: string): string 
   ].join("\n");
 }
 
-/** Assign the card to a live agent session, or clear it with `null`. */
+/** How many taken-off crews a card remembers (see Card.removedCrews). */
+export const MAX_REMOVED_CREWS = 20;
+
+/** Assign the card to a live agent session, or clear it with `null`. The crew
+ *  it was with, if any and not the new one, goes on its removedCrews; the new
+ *  crew comes off it. */
 export function assignCard(board: Board, id: string, assignee: Assignee | null): Board {
-  return mapCard(board, id, (k) => ({ ...k, assignee }));
+  return mapCard(board, id, (k) => {
+    const was = k.assignee?.crew;
+    const now = assignee?.crew;
+    let removed = (k.removedCrews ?? []).filter((c) => c !== now);
+    if (was && was !== now) removed = [...removed.filter((c) => c !== was), was];
+    const next: Card = { ...k, assignee };
+    delete next.removedCrews;
+    if (removed.length) next.removedCrews = removed.slice(-MAX_REMOVED_CREWS);
+    return next;
+  });
 }
 
 /** Record where a card's work lives (see Card.work). */
@@ -864,6 +884,14 @@ function sanitizeWork(v: unknown): CardWork | null {
   return work;
 }
 
+/** Repair a card's taken-off crews: valid crew ids only, each once (its last
+ *  place wins), capped to the most recent MAX_REMOVED_CREWS. */
+function sanitizeRemovedCrews(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  const crews = v.filter((c): c is string => typeof c === "string" && CREW_ID.test(c));
+  return crews.filter((c, i) => crews.lastIndexOf(c) === i).slice(-MAX_REMOVED_CREWS);
+}
+
 /** Repair a comment list, dropping any entry missing a valid id/author/text/at.
  *  The file is one an agent may hand-edit, so a bad comment is skipped rather
  *  than allowed to break the card. */
@@ -932,6 +960,8 @@ export function sanitizeCard(v: unknown): Card | null {
   if (o.kind === "scrum") card.kind = "scrum";
   const work = sanitizeWork(o.work);
   if (work) card.work = work;
+  const removedCrews = sanitizeRemovedCrews(o.removedCrews);
+  if (removedCrews.length) card.removedCrews = removedCrews;
   return card;
 }
 

@@ -1683,6 +1683,25 @@ test("an agent put back on a card it was taken off can write again", async () =>
   server.stop(true);
 });
 
+// The taken-off list is stored on the card, so a new server instance reading
+// the same board from disk still refuses the removed crew.
+test("after a server restart, a crew taken off the card is still refused", async () => {
+  const first = await reassignSetup();
+  await first.post("/action/card-assign", { cardId: first.cardId, sessionId: WORKER2 });
+  first.server.stop(true);
+  const { makeServer } = await import("../src/server");
+  const server = makeServer(0, { deliver: async () => ({ ok: true }), deliverFresh: async () => ({ ok: true }) });
+  const post = (path: string, body: object) =>
+    fetch(`http://localhost:${server.port}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  for (const sig of [{ as: "assignee", crew: RIPLEY.id }, { author: "RIPLEY", crew: RIPLEY.id }, { sessionId: WORKER }]) {
+    const c = await post("/action/card-comment", { cardId: first.cardId, ...sig, text: "still on it" });
+    expect(c.status).toBe(409);
+    expect(((await c.json()) as any).error).toContain("no longer assigned");
+  }
+  expect((await post("/action/card-comment", { cardId: first.cardId, author: "BISHOP", crew: BISHOP.id, text: "mine" })).status).toBe(200);
+  server.stop(true);
+});
+
 test("being taken off one card doesn't block writes to another", async () => {
   const { server, post, cardId } = await reassignSetup();
   await post("/action/card-assign", { cardId, sessionId: null });
