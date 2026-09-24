@@ -93,11 +93,7 @@ export function GameView({ agents, board, onOpen, onOpenCard }: {
   const cargo = cargoCount(board);
 
   return (
-    <section className="win game" aria-label="Ship map">
-      <div className="game-bar">
-        <h2 className="pix">NOSTROMO</h2>
-        <p className="pix hint">EACH AGENT STANDS WHERE ITS WORK IS · CLICK ONE TO OPEN ITS CONVERSATION</p>
-      </div>
+    <section className="game" aria-label="Ship map: each agent stands where its work is. Click one to open its conversation.">
       <div className="game-scroll">
         <div className="game-map">
           <img className="game-art" src={mapUrl} alt="" width={MAP_W} height={MAP_H} draggable={false} />
