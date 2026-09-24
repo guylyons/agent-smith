@@ -10,7 +10,7 @@ import { readOverrides, applyOverrides, setNameOverride, setSpriteOverride } fro
 import { loadPersonas, applyPersonas, spawnName } from "./lib/personas";
 import { applyCrew, mintCrewId, findAssigneeSession, isAssigneeSession, addNote, CREW_ID_RE } from "./lib/crew";
 import { sendTaskReadiness } from "./lib/sendTaskReady";
-import { readBoard, writeBoard, boardFile, addCard, moveCard, moveToWorkColumn, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, addColumn, renameColumn, setInstruction, setColumnStage, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, setCardTouches, setCardRepo, setCardKind, findScrumCard, scrumBrief, repoName, claimBlockReason, mergeBlockReason, landMergedCard, mergeReleaseNotes, finishesCard, type Board, type Card } from "./lib/board";
+import { readBoard, writeBoard, boardFile, addCard, moveCard, moveToWorkColumn, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, cardTaskFooter, addColumn, renameColumn, setInstruction, setColumnStage, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, setCardTouches, setCardRepo, setCardKind, findScrumCard, scrumBrief, repoName, claimBlockReason, mergeBlockReason, landMergedCard, mergeReleaseNotes, finishesCard, type Board, type Card } from "./lib/board";
 import { readMood, writeMood, moodFile, formatMood, addNote as addMoodNote, updateNote, raiseNote, deleteNote, restoreNote, addLink, linkBlockReason, setLinkLabel, deleteLink, type Mood, type MoodLink, type NotePatch } from "./lib/mood";
 import { mainCheckout } from "./lib/worktree";
 import { focusSession, interruptSession, killAgent, sendPrompt, sendFreshPrompt, spawnAgent } from "./ghostty";
@@ -557,11 +557,16 @@ export function makeServer(
     // watching. A human in the dialog gets exactly the mode they picked.
     const mode = permissionMode ?? (req.headers.get("sec-fetch-site") ? undefined : "auto");
     // The persona's model is only a default: one picked at launch wins.
-    const r = await spawn(cwd, task, { model: model ?? cast?.model, permissionMode: mode, worktree, branch, persona, serverUrl: url.origin, cardId, crew });
+    // A card spawn by curl (the scrum master staffing a card) sends plain
+    // text; the browser sends the full prompt. Either way the agent must get
+    // the card's protocol footer exactly once.
+    const footer = cardId && !task.includes("-- THE LINE --") ? cardTaskFooter(readBoard(dir), cardId, url.origin, name) : "";
+    const sent = footer ? `${task}\n\n${footer}` : task;
+    const r = await spawn(cwd, sent, { model: model ?? cast?.model, permissionMode: mode, worktree, branch, persona, serverUrl: url.origin, cardId, crew });
     // Bind the card to the new session once it shows up, hooks or not.
     if (r.ok && cardId && r.cwd) {
       pendingSpawns.push({
-        cardId, cwd: r.cwd, uniqueCwd: r.worktreeCreated === true, crewId: crew.id, task,
+        cardId, cwd: r.cwd, uniqueCwd: r.worktreeCreated === true, crewId: crew.id, task: sent,
         before: live.map((a) => a.sessionId), at: Date.now(), force: body.force,
       });
     }
