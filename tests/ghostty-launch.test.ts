@@ -1,5 +1,6 @@
 import { test, expect } from "bun:test";
-import { buildLaunchInput, asStr, workerPermissionSettings, freshTaskInput } from "../src/ghostty";
+import { readFileSync } from "node:fs";
+import { buildLaunchInput, asStr, workerPermissionSettings, freshTaskInput, ALLOWED_PERMISSION_MODES } from "../src/ghostty";
 import type { Persona } from "../src/lib/personas";
 
 const P: Persona = {
@@ -15,6 +16,23 @@ test("no persona keeps today's command shape", () => {
 
 test("auto is an allowed permission mode", () => {
   expect(buildLaunchInput("t", { permissionMode: "auto" }, null)).toBe("claude --permission-mode auto 't'\n");
+});
+
+test("the permission-mode allowlist matches the claude CLI's choices", () => {
+  // `claude --help`: acceptEdits, auto, bypassPermissions, manual, dontAsk, plan.
+  // dontAsk is left out on purpose: it denies anything not pre-approved, which
+  // stalls an agent working a card. "default" is no longer a listed choice.
+  expect([...ALLOWED_PERMISSION_MODES].sort()).toEqual(["acceptEdits", "auto", "bypassPermissions", "manual", "plan"]);
+  expect(buildLaunchInput("t", { permissionMode: "manual" }, null)).toBe("claude --permission-mode manual 't'\n");
+  expect(buildLaunchInput("t", { permissionMode: "default" }, null)).toBe("claude 't'\n");
+});
+
+test("the New Agent dialog only offers allowlisted modes", () => {
+  const src = readFileSync(new URL("../src/ui/NewAgentModal.tsx", import.meta.url), "utf8");
+  const select = src.slice(src.indexOf('id="na-perm"'), src.indexOf("</select>", src.indexOf('id="na-perm"')));
+  const values = [...select.matchAll(/<option value="([^"]*)"/g)].map((m) => m[1]).filter((v) => v !== "");
+  expect(values.length).toBeGreaterThan(0);
+  for (const v of values) expect(ALLOWED_PERMISSION_MODES.has(v)).toBe(true);
 });
 
 test("model and permission mode are allowlisted", () => {

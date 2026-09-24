@@ -168,7 +168,10 @@ export async function sendFreshPrompt(t: Target, text: string): Promise<ActionRe
 }
 
 export const ALLOWED_MODELS = new Set(["opus", "sonnet", "haiku"]);
-export const ALLOWED_PERMISSION_MODES = new Set(["default", "plan", "acceptEdits", "auto", "bypassPermissions"]);
+/** The `--permission-mode` choices `claude --help` lists, less dontAsk (it
+ *  denies anything not pre-approved, which stalls an agent working a card).
+ *  "default" is no longer a listed choice; its name now is "manual". */
+export const ALLOWED_PERMISSION_MODES = new Set(["manual", "plan", "acceptEdits", "auto", "bypassPermissions"]);
 
 function shq(s: string): string {
   return "'" + s.replace(/'/g, "'\\''") + "'";

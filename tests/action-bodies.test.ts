@@ -74,6 +74,12 @@ test("SpawnBody: folder and task required; optional fields trimmed or dropped", 
     cwd: "/w", text: "t", cardId: undefined, force: false, model: undefined, permissionMode: undefined,
     worktree: undefined, branch: undefined, persona: undefined,
   });
+  // "default" is gone from the CLI's list; it means the prompt-for-everything
+  // mode, now called "manual" — mapped, not dropped (a dropped mode on an API
+  // spawn falls back to auto).
+  expect(ok(SpawnBody, { cwd: "/w", text: "t", permissionMode: "default" }).permissionMode).toBe("manual");
+  expect(ok(SpawnBody, { cwd: "/w", text: "t", permissionMode: "manual" }).permissionMode).toBe("manual");
+  expect(ok(SpawnBody, { cwd: "/w", text: "t", permissionMode: "dontAsk" }).permissionMode).toBeUndefined();
   for (const body of [{ text: "t" }, { cwd: "", text: "t" }, { cwd: "/w" }, { cwd: "/w", text: "   " }, { cwd: 5, text: 5 }]) {
     expect(err(SpawnBody, body)).toBe("folder and task are required");
   }
