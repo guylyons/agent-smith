@@ -25,6 +25,10 @@ import {
   canPrime, loadMarks, markCardRead, newestCommentAt, primeMarks, saveMarks,
   unreadCommentCount,
 } from "./cardUnread";
+import {
+  knownRepos, filterCards, filterRepo, dropIndex, visibleMoveTarget, loadRepoFilter, saveRepoFilter,
+  parseRepoFilter, serialiseRepoFilter, type RepoFilter,
+} from "./repoFilter";
 
 const CARD_MIME = "application/x-line-card";
 const COL_MIME = "application/x-line-column";
@@ -134,10 +138,32 @@ export function TheLine({
 
   const unreadOn = (card: Card) => unreadCommentCount(card, read.marks, ME);
 
+  // Which project's cards to show. Remembered per browser; it only hides cards,
+  // never changes them. A remembered repo that has since left the board is still
+  // offered, so the view is never stuck on a filter you can't pick your way out of.
+  const [repoFilter, setRepoFilter] = useState(loadRepoFilter);
+  const known = knownRepos(board, agents);
+  const filterNames = known.map((k) => k.name);
+  if (repoFilter.kind === "repo" && !filterNames.includes(repoFilter.repo)) filterNames.push(repoFilter.repo);
+  function pickFilter(f: RepoFilter) { setRepoFilter(f); saveRepoFilter(f); }
+
   return (
     <section className="win line">
       <div className="line-head">
         <h2 className="pix">THE LINE</h2>
+        <label className="line-repo">
+          <span className="pix">REPO</span>
+          <select
+            className={repoFilter.kind === "all" ? "" : "is-on"}
+            value={serialiseRepoFilter(repoFilter)}
+            title="Show only one project's cards (just in this browser; the cards don't change)"
+            onChange={(e) => pickFilter(parseRepoFilter(e.target.value))}
+          >
+            <option value="all">All</option>
+            {filterNames.map((n) => <option key={n} value={serialiseRepoFilter({ kind: "repo", repo: n })}>{n}</option>)}
+            <option value="none">No repo</option>
+          </select>
+        </label>
         <button
           className="pix add-scrum"
           onClick={onAddScrum}
@@ -162,6 +188,8 @@ export function TheLine({
             onOpenCard={showCard}
             unreadOn={unreadOn}
             archived={archived}
+            filter={repoFilter}
+            newCardRepo={filterRepo(repoFilter, known)}
           />
         ))}
         <button className="pix add-col" onClick={onAddColumn} title="Add a column">+ COLUMN</button>
@@ -185,7 +213,7 @@ export function TheLine({
 }
 
 function ColumnView({
-  board, agents, mutate, column, index, rows, autoFocusName, onNamed, onOpenCard, unreadOn, archived,
+  board, agents, mutate, column, index, rows, autoFocusName, onNamed, onOpenCard, unreadOn, archived, filter, newCardRepo,
 }: {
   board: Board; agents: AgentStatus[]; mutate: Mutate; column: Column; index: number;
   rows: number; autoFocusName: boolean;
@@ -193,13 +221,17 @@ function ColumnView({
   /** unread comments on a card — computed by TheLine, which owns the read marks */
   unreadOn: (card: Card) => number;
   archived: number;
+  /** THE LINE's repo filter: which cards to show, and the repo a card added here carries */
+  filter: RepoFilter; newCardRepo: { repo: string; repoPath?: string } | null;
 }) {
   const [dragOver, setDragOver] = useState(false);
   // Which slot a dropped card would take in this column: 0 = above the first
   // card, cards.length = below the last. Null while nothing is hovering, which
   // also means "append" for a drop on the column's empty space.
   const [dropAt, setDropAt] = useState<number | null>(null);
-  const cards = board.cards.filter((c) => c.columnId === column.id);
+  const all = board.cards.filter((c) => c.columnId === column.id);
+  const cards = filterCards(all, filter);
+  const filtered = filter.kind !== "all";
   const listRef = useRef<HTMLDivElement>(null);
   useStackCap(listRef, rows, cards.length);
 
@@ -212,7 +244,8 @@ function ColumnView({
     const cardId = e.dataTransfer.getData(CARD_MIME);
     if (cardId) {
       // A drop straight onto the column (not onto a card) appends, as before.
-      const to = at ?? undefined;
+      // Filtered, the slot is among the visible cards; place it by those.
+      const to = at === null ? undefined : filtered ? dropIndex(all, cards, at, cardId) : at;
       mutate((b) => moveCard(b, cardId, column.id, to), () => moveCardAction(cardId, column.id, to));
       return;
     }
@@ -225,7 +258,7 @@ function ColumnView({
   // Move a card with the keyboard. Drag-and-drop is mouse-only, so without this
   // there is no way to reorder or re-stage a card without a pointer.
   function moveByKey(cardId: string, dir: "left" | "right" | "up" | "down") {
-    const t = cardMoveTarget(board, cardId, dir);
+    const t = filtered ? visibleMoveTarget(board, cardId, dir, filter) : cardMoveTarget(board, cardId, dir);
     if (!t) return;
     mutate(
       (b) => moveCard(b, cardId, t.toColumnId, t.toIndex),
@@ -308,9 +341,14 @@ function ColumnView({
           onClick={onDelete}
         >✕</button>
       </div>
+      {filtered && (
+        <p className="col-count" title={`${cards.length} of ${all.length} cards in this column match the repo filter`}>
+          {cards.length} of {all.length} shown
+        </p>
+      )}
 
       {mergedColumn(board)?.id === column.id && (
-        <ArchiveBar columnId={column.id} cardCount={cards.length} archived={archived} />
+        <ArchiveBar columnId={column.id} cardCount={all.length} archived={archived} />
       )}
 
       <InstructionField
@@ -340,7 +378,10 @@ function ColumnView({
         ))}
       </div>
 
-      <AddCard mutate={mutate} columnId={column.id} columnName={column.name} onCreated={(id) => onOpenCard(id, { kind: "new" })} />
+      <AddCard
+        mutate={mutate} columnId={column.id} columnName={column.name} repo={newCardRepo}
+        onCreated={(id) => onOpenCard(id, { kind: "new" })}
+      />
     </div>
   );
 }
@@ -606,8 +647,11 @@ function initials(name: string): string {
 // Enter makes the card and opens it, ready to fill in, so a new ticket never
 // sits there as a bare title. Blur (clicking away) still saves it but leaves
 // you where you clicked — that click was about something else.
-function AddCard({ mutate, columnId, columnName, onCreated }: {
-  mutate: Mutate; columnId: string; columnName: string; onCreated: (cardId: string) => void;
+// Added while the board is filtered to a repo, the card carries that repo, so it
+// stays in view and is labelled from the start.
+function AddCard({ mutate, columnId, columnName, repo, onCreated }: {
+  mutate: Mutate; columnId: string; columnName: string;
+  repo: { repo: string; repoPath?: string } | null; onCreated: (cardId: string) => void;
 }) {
   const [value, setValue] = useState("");
   function commit(open: boolean) {
@@ -615,15 +659,15 @@ function AddCard({ mutate, columnId, columnName, onCreated }: {
     if (!t) return;
     // The server mints the id; the modal shows once the SSE echo brings the
     // card in, whichever of the two lands first.
-    mutate(null, () => { void addCardAction(columnId, t).then((id) => { if (id && open) onCreated(id); }); });
+    mutate(null, () => { void addCardAction(columnId, t, repo).then((id) => { if (id && open) onCreated(id); }); });
     setValue("");
   }
   return (
     <input
       className="add-card"
       value={value}
-      placeholder="+ add card"
-      aria-label={`Add card to ${columnName || "Untitled"}`}
+      placeholder={repo ? `+ add ${repo.repo} card` : "+ add card"}
+      aria-label={`Add card to ${columnName || "Untitled"}${repo ? ` for ${repo.repo}` : ""}`}
       onChange={(e) => setValue(e.target.value)}
       onKeyDown={(e) => { if (e.key === "Enter") commit(true); }}
       onBlur={() => commit(false)}
