@@ -2,7 +2,8 @@ import { test, expect } from "bun:test";
 import { fixtureDir } from "./fixtures";
 import { mkdirSync, rmSync, writeFileSync, readFileSync, utimesSync } from "node:fs";
 import { join } from "node:path";
-import { parsePersona, loadPersonas, getPersona, composePrompt, composeIdentityPrompt, PERSONA_ID_RE } from "../src/lib/personas";
+import { parsePersona, loadPersonas, getPersona, composePrompt, composeIdentityPrompt, spawnName, PERSONA_ID_RE } from "../src/lib/personas";
+import { ROSTER } from "../src/lib/crew";
 
 const dir = fixtureDir("personas-test");
 function reset() { rmSync(dir, { recursive: true, force: true }); mkdirSync(dir, { recursive: true }); }
@@ -114,8 +115,50 @@ test("a nameless persona sets role and sprite but leaves the name alone", () => 
   expect(a.sprite).toEqual({ body: "engineer", palette: 2, gear: "" });
 });
 
-test("the shipped personas carry no fixed name", () => {
-  for (const p of loadPersonas()) expect(p.name).toBeUndefined();
+test("each shipped persona has its own roster name and a fixed look", () => {
+  const shipped = loadPersonas();
+  for (const p of shipped) {
+    expect(ROSTER).toContain(p.name!);
+    expect(p.sprite).toBeDefined();
+  }
+  expect(new Set(shipped.map((p) => p.name)).size).toBe(shipped.length);
+  expect(new Set(shipped.map((p) => p.sprite!.body)).size).toBe(shipped.length);
+});
+
+test("editor and release manager launch on sonnet", () => {
+  expect(getPersona("editor")!.model).toBe("sonnet");
+  expect(getPersona("release-manager")!.model).toBe("sonnet");
+});
+
+test("a persona's model must be one the launcher allows", () => {
+  expect(parsePersona(GOOD.replace("skills:", "model: sonnet\nskills:"), "frontend-ux")!.model).toBe("sonnet");
+  expect(parsePersona(GOOD, "frontend-ux")!.model).toBeUndefined();
+  expect(parsePersona(GOOD.replace("skills:", "model: gpt\nskills:"), "frontend-ux")).toBeNull();
+});
+
+test("a persona name is normalized to uppercase and must be a single word", () => {
+  expect(parsePersona(GOOD.replace("name: PIXEL", "name: Pixel"), "frontend-ux")!.name).toBe("PIXEL");
+  expect(parsePersona(GOOD.replace("name: PIXEL", "name: Pix El"), "frontend-ux")).toBeNull();
+});
+
+test("spawnName gives a persona its own name, suffixed when a copy is live", () => {
+  const personas = [parsePersona(GOOD, "frontend-ux")!, parsePersona(NAMELESS.replace("id: frontend-ux", "id: plain"), "plain")!];
+  expect(spawnName("frontend-ux", personas, [])).toBe("PIXEL");
+  expect(spawnName("frontend-ux", personas, ["PIXEL"])).toBe("PIXEL-2");
+  expect(spawnName("frontend-ux", personas, ["pixel", "PIXEL-2"])).toBe("PIXEL-3");
+});
+
+test("spawnName never hands a persona's name to anyone else", () => {
+  const personas = loadPersonas();
+  const owned = new Set(personas.map((p) => p.name));
+  for (let i = 0; i < 200; i++) {
+    const n = spawnName(undefined, personas, [], () => i / 200);
+    expect(owned.has(n)).toBe(false);
+    expect(ROSTER).toContain(n);
+  }
+  // a nameless persona draws from the same pool
+  const withNameless = [...personas, parsePersona(NAMELESS.replace("id: frontend-ux", "id: plain"), "plain")!];
+  for (let i = 0; i < 200; i++) expect(owned.has(spawnName("plain", withNameless, [], () => i / 200))).toBe(false);
 });
 
 test("composePrompt teaches the board protocol to every persona", () => {
@@ -142,7 +185,7 @@ test("composePrompt's generated lines are pure ASCII", () => {
 
 test("the shipped built-in personas all load", () => {
   const ids = loadPersonas().map((p) => p.id);
-  expect(ids).toEqual(["backend-dev", "editor", "frontend-ux", "scrum-master"]);
+  expect(ids).toEqual(["backend-dev", "editor", "frontend-ux", "release-manager", "scrum-master"]);
 });
 
 import { applyPersonas } from "../src/lib/personas";
@@ -229,10 +272,6 @@ test("a persona without a sprite is valid and leaves the desk's sprite alone", (
   expect(a.sprite).toEqual({ palette: 1, gear: "hood", body: "cat" });
   const [bare] = applyPersonas([A({ persona: "x" })], [p]);
   expect(bare.sprite).toBeUndefined();
-});
-
-test("the shipped personas leave the sprite to the crew name", () => {
-  for (const p of loadPersonas()) expect(p.sprite, p.id).toBeUndefined();
 });
 
 // loadPersonas runs on every snapshot, so it caches: the directory listing by

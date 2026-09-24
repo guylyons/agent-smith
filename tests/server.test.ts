@@ -156,8 +156,9 @@ test("GET /personas lists the built-ins without prompt text", async () => {
   const res = await fetch(`http://localhost:${srv.port}/personas`);
   expect(res.status).toBe(200);
   const list = (await res.json()) as any[];
-  expect(list.map((p) => p.id)).toEqual(["backend-dev", "editor", "frontend-ux", "scrum-master"]);
-  expect(list[0].name).toBeUndefined(); // a persona is a role; the crew member brings the name
+  expect(list.map((p) => p.id)).toEqual(["backend-dev", "editor", "frontend-ux", "release-manager", "scrum-master"]);
+  expect(list[0].name).toBe("VASQUEZ"); // each role has its own crew member
+  expect(list.find((p) => p.id === "editor").model).toBe("sonnet");
   expect(list[0].role).toBeTruthy();
   expect(Array.isArray(list[0].skills)).toBe(true);
   expect(list[0].prompt).toBeUndefined();
@@ -168,10 +169,9 @@ test("readSnapshot resolves a persona onto the agent", () => {
   reset();
   writeFileSync(join(dir, "a.json"), valid({ sessionId: "a", persona: "backend-dev", name: "NOVA", role: "General" }));
   const [agent] = readSnapshot(dir, Date.now()).agents;
-  expect(agent.name).toBe("NOVA"); // the shipped personas carry no name
+  expect(agent.name).toBe("VASQUEZ"); // the persona's own name
   expect(agent.role).toBe("Backend Dev");
-  // the shipped personas carry no sprite either: the look follows the crew name
-  expect(agent.sprite).toBeUndefined();
+  expect(agent.sprite?.body).toBe("vasquez"); // and its own look
 });
 
 test("readSnapshot leaves a persona-less agent alone", () => {
@@ -252,7 +252,7 @@ test("GET /agents lists live sessions with resolved names", async () => {
   const out = (await res.json()) as { agents: any[] };
   expect(out.agents.length).toBe(1);
   expect(out.agents[0].sessionId).toBe("a");
-  expect(out.agents[0].name).toBe("A");
+  expect(out.agents[0].name).toBe("VASQUEZ"); // the persona's name
   expect(out.agents[0].state).toBe("working");
   server.stop(true);
 });

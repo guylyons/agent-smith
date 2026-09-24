@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import type { AgentStatus } from "../schema";
 import { BODIES, PALETTES } from "../ui/sprite-data";
+import { castName, pickName } from "./crew";
 
 // Also duplicated in hooks/status.ts: the hook keeps its own copy deliberately
 // so it never has to load this registry.
@@ -15,15 +16,16 @@ export const PERSONA_ID_RE = /^[a-z0-9-]{1,64}$/;
 
 const PersonaMetaSchema = z.object({
   id: z.string().regex(PERSONA_ID_RE),
-  // Optional, and the shipped personas leave it out: a persona is a ROLE, and
-  // the name belongs to the crew member the dashboard spawns into it (see
-  // src/lib/crew.ts), so two frontend-ux agents are RIPLEY and VASQUEZ rather
-  // than PIXEL twice. A persona that still names itself is a fixed codename.
-  name: z.string().min(1).optional(),
+  // The name every agent spawned into this persona goes by, so a role always
+  // reads as the same crew member on the board. The shipped personas each take
+  // a name from the Alien roster (src/lib/crew.ts) that random picks then skip;
+  // a second live copy is suffixed (RIPLEY-2, see castName). Optional: a
+  // persona without one takes a random roster name at spawn.
+  name: z.string().regex(/^[A-Za-z0-9]{1,24}$/).transform((s) => s.toUpperCase()).optional(),
   role: z.string().min(1),
-  // Optional, like `name`: without it the desk wears the look its crew name
-  // earns (the Alien cast in src/ui/sprite-alien.ts), so a persona only sets a
-  // sprite when the role should look the same whoever plays it.
+  // Optional: without it the desk wears the look its crew name earns (the
+  // Alien cast in src/ui/sprite-alien.ts). The shipped personas set it anyway
+  // so the role keeps its look even as RIPLEY-2 or under a name typed by hand.
   sprite: z.object({
     body: z.string().min(1),
     palette: z.number().int().min(0).max(PALETTES.length - 1),
@@ -32,6 +34,10 @@ const PersonaMetaSchema = z.object({
     gear: z.string().default(""),
   }).optional(),
   skills: z.array(z.string().min(1)).default([]),
+  // The model this role launches on when the launcher does not pick one.
+  // Mirrors ALLOWED_MODELS in src/ghostty.ts (which imports this module, so
+  // it cannot be imported here).
+  model: z.enum(["opus", "sonnet", "haiku"]).optional(),
 });
 
 export type Persona = z.infer<typeof PersonaMetaSchema> & { prompt: string };
@@ -101,6 +107,18 @@ export function loadPersonas(dir: string = PERSONAS_DIR): Persona[] {
 export function getPersona(id: string, dir: string = PERSONAS_DIR): Persona | null {
   if (!PERSONA_ID_RE.test(id)) return null;
   return loadPersonas(dir).find((p) => p.id === id) ?? null;
+}
+
+/** The name a new agent spawns under. A persona with a fixed name always
+ *  gets it (suffixed when a copy is already live, see castName); anyone else
+ *  draws a random roster name that no live desk and no persona owns, so a
+ *  plain worker is never mistaken for one of the named roles. Pure. */
+export function spawnName(
+  personaId: string | undefined, personas: Persona[], taken: string[], rand: () => number = Math.random,
+): string {
+  const cast = personaId ? personas.find((p) => p.id === personaId) : undefined;
+  if (cast?.name) return castName(cast.name, taken);
+  return pickName([...taken, ...personas.flatMap((p) => (p.name ? [p.name] : []))], rand);
 }
 
 /** The shared board protocol every launched agent plays by, addressed to the
