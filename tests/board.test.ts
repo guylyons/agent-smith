@@ -466,6 +466,15 @@ test("cardTaskPrompt is pure ASCII outside the card's own text", () => {
   expect(/^[\x00-\x7f]*$/.test(p)).toBe(true);
 });
 
+test("cardTaskPrompt tells the worker not to hold a finished card for a check it can't do", () => {
+  let b = defaultBoard();
+  b = addCard(b, "backlog", "Fix login bug");
+  const p = cardTaskPrompt(b, b.cards[0]!.id, SRV);
+  // a worker once sat in in-progress waiting on a browser check whose tools had dropped
+  expect(p).toContain('"Not checked: ..."');
+  expect(p.replace(/\s+/g, " ")).toContain(`move the card to "review" anyway`);
+});
+
 test("cardTaskPrompt reflects the card's current column", () => {
   let b = defaultBoard();
   b = addCard(b, "backlog", "Fix login bug");
