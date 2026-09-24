@@ -10,6 +10,7 @@ import {
 } from "./actions";
 import { ModalBackdrop } from "./Backdrop";
 import { MergeKey } from "./MergeKey";
+import { cardButton } from "./moveFocus";
 import { renderMarkdown, imageSrc } from "./markdown";
 import { imagesIn, imageMarkdown, appendImage, removeImage } from "./cardImages";
 import { toast } from "./toast";
@@ -292,7 +293,7 @@ export function CardModal({
   const comments = card.comments ?? [];
 
   return (
-    <ModalBackdrop onClose={close} labelledBy="cardmodal-title">
+    <ModalBackdrop onClose={close} labelledBy="cardmodal-title" returnTo={() => cardButton(card.id)}>
       <div
         className={`win cardmodal${dragOver ? " drag-over" : ""}`}
         onDragOver={(e: DragEvent) => { if (e.dataTransfer?.types.includes("Files")) { e.preventDefault(); setDragOver(true); } }}

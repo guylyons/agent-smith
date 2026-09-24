@@ -1,6 +1,7 @@
 // tests/dialog-focus.test.ts — where Tab goes inside a modal dialog, DOM-free.
 import { test, expect } from "bun:test";
-import { escCloses, trapIndex } from "../src/ui/Backdrop";
+import { escCloses, returnTarget, trapIndex } from "../src/ui/Backdrop";
+import { paletteStatus } from "../src/ui/CommandPalette";
 
 test("trapIndex: Tab on the last control wraps to the first", () => {
   expect(trapIndex(4, 3, false)).toBe(0);
@@ -51,4 +52,44 @@ test("escCloses: Esc already handled inside (e.g. an open picker) is left alone"
 
 test("escCloses: Esc that cancels an IME composition doesn't close", () => {
   expect(escCloses(esc({ isComposing: true }), true)).toBe(false);
+});
+
+// A stand-in for an element: returnTarget only asks whether it's still on the page.
+const el = (name: string, isConnected = true) => ({ name, isConnected });
+
+test("returnTarget: focus goes back to the opener when it's still there", () => {
+  const opener = el("card button");
+  expect(returnTarget(true, [opener, el("fallback")])).toBe(opener);
+});
+
+test("returnTarget: an opener that unmounted (a FIND row) falls back to the card's button", () => {
+  const card = el("card button");
+  expect(returnTarget(true, [el("palette input", false), card])).toBe(card);
+});
+
+test("returnTarget: a card that changed column is found by its fresh button", () => {
+  const moved = el("button in new column");
+  expect(returnTarget(true, [el("button in old column", false), moved, el("dialog below")])).toBe(moved);
+});
+
+test("returnTarget: with no opener and no card button, the dialog underneath gets focus", () => {
+  const below = el("card modal's first control");
+  expect(returnTarget(true, [null, undefined, below])).toBe(below);
+  expect(returnTarget(true, [el("palette input", false), null, below])).toBe(below);
+});
+
+test("returnTarget: nothing left on the page -> leave focus alone", () => {
+  expect(returnTarget(true, [el("gone", false), null, undefined])).toBeNull();
+});
+
+test("returnTarget: focus someone else already took (a dialog opening as this closes) stays put", () => {
+  expect(returnTarget(false, [el("opener")])).toBeNull();
+});
+
+test("paletteStatus: silent while browsing, a count once there's a query", () => {
+  expect(paletteStatus(12, "")).toBe("");
+  expect(paletteStatus(12, "   ")).toBe("");
+  expect(paletteStatus(1, "smith")).toBe("1 result");
+  expect(paletteStatus(3, "smith")).toBe("3 results");
+  expect(paletteStatus(0, "zzz")).toBe("Nothing found.");
 });

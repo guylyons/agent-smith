@@ -28,9 +28,9 @@ export function SpritePicker({ agent, onClose }: { agent: AgentStatus; onClose: 
   }
 
   return (
-    <ModalBackdrop onClose={onClose}>
+    <ModalBackdrop onClose={onClose} labelledBy="spritepicker-title">
       <div className="win spritepicker">
-        <div className="pix spritepicker-title">CHOOSE SPRITE</div>
+        <div className="pix spritepicker-title" id="spritepicker-title">CHOOSE SPRITE</div>
 
         <div className="spritepicker-preview">
           <Sprite sessionId={agent.sessionId} role={agent.role} state="working" override={{ palette, gear, body }} />
