@@ -6,6 +6,7 @@ import { mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { fixtureDir } from "./fixtures";
 import { writeBoard } from "../src/lib/board";
+import { markWorktreeOwned } from "../src/lib/worktree";
 
 const dir = fixtureDir("worktree-cleanup-endpoint");
 const status = join(dir, "status");
@@ -20,6 +21,7 @@ async function git(cwd: string, ...args: string[]): Promise<string> {
 async function worktree(root: string, branch: string, merge: boolean): Promise<string> {
   const wt = join(root, ".claude", "worktrees", branch);
   await git(root, "worktree", "add", "-q", "-b", branch, wt, "HEAD");
+  await markWorktreeOwned(wt);
   writeFileSync(join(wt, `${branch}.txt`), `${branch}\n`);
   await git(wt, "add", "-A");
   await git(wt, "commit", "-q", "-m", branch);

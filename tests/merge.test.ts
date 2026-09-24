@@ -4,6 +4,7 @@ import { mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { mergeVerdict, readMergeState, mergeWork, repoRoot, cleanupMergedWork, type MergeFacts } from "../src/lib/merge";
 import { runExclusive } from "../src/lib/merge-queue";
+import { markWorktreeOwned } from "../src/lib/worktree";
 
 // --- the rules, without a repo ---------------------------------------------
 
@@ -271,6 +272,7 @@ test("a conflict against a detached main checkout is refused and main does not m
 async function agentWorktree(root: string, branch: string, file = "feature.txt"): Promise<string> {
   const wt = join(root, ".claude", "worktrees", branch);
   await git(root, "worktree", "add", "-q", "-b", branch, wt, "HEAD");
+  await markWorktreeOwned(wt);
   writeFileSync(join(wt, file), `${branch}\n`);
   await git(wt, "add", "-A");
   await git(wt, "commit", "-q", "-m", `work on ${branch}`);
@@ -302,6 +304,33 @@ test("files the repo ignores (the launcher's local settings) don't keep a worktr
 
   expect(await cleanupMergedWork(wt, "ag-ign")).toMatchObject({ removed: true });
   expect(existsSync(wt)).toBe(false);
+});
+
+test("the launcher's settings.local.json alone doesn't keep a worktree, even with no ignore rule anywhere", async () => {
+  const root = await freshRepo();
+  // Switch off this machine's global ignore (it lists settings.local.json).
+  await git(root, "config", "core.excludesFile", "/dev/null");
+  const wt = await agentWorktree(root, "ag-local");
+  mkdirSync(join(wt, ".claude"), { recursive: true });
+  writeFileSync(join(wt, ".claude", "settings.local.json"), "{}\n");
+  expect((await mergeWork(wt)).ok).toBe(true);
+
+  expect(await cleanupMergedWork(wt, "ag-local")).toMatchObject({ removed: true });
+  expect(existsSync(wt)).toBe(false);
+});
+
+test("a clean, merged worktree the dashboard didn't make is left alone, silently", async () => {
+  const root = await freshRepo();
+  const wt = join(root, ".claude", "worktrees", "foreign");
+  await git(root, "worktree", "add", "-q", "-b", "foreign", wt, "HEAD");
+  writeFileSync(join(wt, "f.txt"), "f\n");
+  await git(wt, "add", "-A");
+  await git(wt, "commit", "-q", "-m", "foreign work");
+  expect((await mergeWork(wt)).ok).toBe(true);
+
+  expect(await cleanupMergedWork(wt, "foreign")).toEqual({ removed: false });
+  expect(existsSync(wt)).toBe(true);
+  expect(await out(root, "branch", "--list", "foreign")).toContain("foreign");
 });
 
 test("a dirty worktree is left alone and says why", async () => {

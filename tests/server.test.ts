@@ -3,6 +3,7 @@ import { test, expect } from "bun:test";
 import { fixtureDir } from "./fixtures";
 import { readSnapshot } from "../src/server";
 import { setNameOverride } from "../src/lib/overrides";
+import { markWorktreeOwned } from "../src/lib/worktree";
 import { mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
@@ -1011,6 +1012,8 @@ async function mergeFixture(post: (p: string, b: object) => Promise<Response>, o
   await git(mergeRepo, "commit", "-q", "-m", "root");
   const wt = join(mergeRepo, opts.wt ?? "wt");
   await git(mergeRepo, "worktree", "add", "-q", "-b", "feature", wt, "HEAD");
+  // Made the way the launcher makes one, marker included.
+  await markWorktreeOwned(wt);
   writeFileSync(join(wt, "feature.txt"), "done\n");
   await git(wt, "add", "-A");
   await git(wt, "commit", "-q", "-m", "the work");

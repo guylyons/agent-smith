@@ -7,10 +7,11 @@
 // so the rules are unit-tested without a repo, and the git-touching functions
 // only gather facts and run the one command.
 import { dirname, join, resolve } from "node:path";
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, realpathSync, rmSync } from "node:fs";
 import { runExclusive, pending } from "./merge-queue";
 import { mergeBlockers, mergeBlockReason, type Board } from "./board";
 import { buildPreview, MAX_COMMITS, type MergePreview } from "./mergePreview";
+import { isOwnedWorktree } from "./worktree";
 
 /** The trunk we merge into, first one that exists. */
 const BASES = ["main", "master"] as const;
@@ -123,9 +124,14 @@ async function currentBranch(cwd: string): Promise<string> {
 /** Uncommitted work in `cwd`. `untracked` is the difference between the two
  *  questions we ask: "did the agent commit everything it made?" counts new
  *  files, while "can git merge here?" must not — an untracked file (a scratch
- *  dir, another agent's worktree) never blocks a merge. */
+ *  dir, another agent's worktree) never blocks a merge. The launcher's own
+ *  .claude/settings.local.json never counts: the repo may not ignore it, and
+ *  it isn't the agent's work. */
 async function isDirty(cwd: string, untracked: boolean): Promise<boolean> {
-  const st = await git(cwd, ["status", "--porcelain", untracked ? "--untracked-files=normal" : "--untracked-files=no"]);
+  const st = await git(cwd, [
+    "status", "--porcelain", untracked ? "--untracked-files=normal" : "--untracked-files=no",
+    "--", ":/", ":(top,exclude).claude/settings.local.json",
+  ]);
   return st.code === 0 && st.stdout !== "";
 }
 
@@ -322,6 +328,16 @@ function real(p: string): string {
   try { return realpathSync(p); } catch { return p; }
 }
 
+/** The launcher wrote .claude/settings.local.json into the worktree; where the
+ *  repo doesn't ignore it, `git worktree remove` (no --force) refuses to go.
+ *  Delete it just before removal, and only while git sees it as untracked: a
+ *  repo that tracks the file keeps its copy. */
+async function dropLauncherSettings(wt: string): Promise<void> {
+  const st = await git(wt, ["status", "--porcelain", "--untracked-files=all", "--", ":(top).claude/settings.local.json"]);
+  if (st.code !== 0 || st.stdout !== "?? .claude/settings.local.json") return;
+  try { rmSync(join(wt, ".claude", "settings.local.json")); } catch { /* git will say why it stays */ }
+}
+
 /**
  * After `branch` has landed, remove the worktree the dashboard made for it
  * (`<repo>/.claude/worktrees/<name>`) and delete the branch. Only a clean tree
@@ -338,6 +354,8 @@ export async function cleanupMergedWork(cwd: string, branch: string): Promise<Cl
   // The main checkout, a subfolder, or a worktree someone put elsewhere: not ours.
   if (top.code !== 0 || real(top.stdout) !== here) return { removed: false };
   if (dirname(here) !== join(real(root), ".claude", "worktrees")) return { removed: false };
+  // Claude Code's own worktrees share that folder; only ours are ours to remove.
+  if (!(await isOwnedWorktree(cwd))) return { removed: false };
 
   return runExclusive(root, async () => {
     const kept = (why: string): CleanupResult => ({ removed: false, why });
@@ -347,6 +365,7 @@ export async function cleanupMergedWork(cwd: string, branch: string): Promise<Cl
     if (!base || (await git(root, ["merge-base", "--is-ancestor", branch, base])).code !== 0) {
       return kept(`worktree kept: ${branch} is not merged into ${base || "a main branch"}`);
     }
+    await dropLauncherSettings(here);
     const rm = await git(root, ["worktree", "remove", here]);
     if (rm.code !== 0) return kept(`worktree kept: ${rm.stderr || "git worktree remove failed"}`);
     const del = await git(root, ["branch", "-d", branch]);
@@ -444,6 +463,8 @@ export async function planWorktreeCleanup(repos: string[], liveCwds: string[]): 
     for (const w of await listWorktrees(repo)) {
       const here = real(w.path);
       if (dirname(here) !== home) continue;
+      // Not made by the dashboard (claude --worktree, a subagent's): never listed.
+      if (existsSync(w.path) && !(await isOwnedWorktree(w.path))) continue;
       const entry = { repo, path: w.path, branch: w.branch };
       // Its folder is gone: git lists it until a prune, but there is nothing here to remove.
       if (w.prunable || !existsSync(w.path)) {
