@@ -5,6 +5,7 @@ import { flashSend } from "./flash";
 import { signalDying } from "./dying";
 import { playSubmit } from "./sounds";
 import type { Board, Card, Column, Stage } from "../lib/board";
+import type { MoodKind, MoodLink, MoodNote, NotePatch } from "../lib/mood";
 // Shared with the UI as types only — nothing server-side is bundled into the browser.
 import type { ChatMessage, QuestionOption, Question, PendingQuestion, BlockingTool } from "../lib/conversation";
 import type { Subagent } from "../lib/subagents";
@@ -15,7 +16,7 @@ import type { MergeState, MergeResult } from "../lib/merge";
  *  for a busy one's Stop hook to collect when its turn ends. */
 export type Delivery = { sessionId: string; name: string; via: "typed" | "queued" };
 
-type Result = { ok: boolean; error?: string; cardId?: string; path?: string; url?: string; cancelled?: boolean; branch?: string; base?: string; delivery?: Delivery[] };
+type Result = { ok: boolean; error?: string; cardId?: string; noteId?: string; linkId?: string; path?: string; url?: string; cancelled?: boolean; branch?: string; base?: string; delivery?: Delivery[] };
 
 async function post(action: string, body: object): Promise<Result> {
   try {
@@ -244,3 +245,22 @@ export async function fetchMergeState(cardId: string): Promise<MergeState | null
 export async function mergeCard(cardId: string): Promise<MergeResult> {
   return (await post("card-merge", { cardId, author: ME })) as MergeResult;
 }
+
+// ---- the MOOD board: one scoped call per edit, like THE LINE -----------------
+
+/** Add a note; resolves to its id so the caller can open it for editing. */
+export async function addMoodNoteAction(note: { title: string; x: number; y: number; kind?: MoodKind; body?: string; cardId?: string }): Promise<string | null> {
+  const r = await post("mood-note-add", { ...note, author: "You" });
+  if (!r.ok) { toastError(r.error ?? "couldn't add the note"); return null; }
+  return r.noteId ?? null;
+}
+export function updateMoodNoteAction(noteId: string, patch: NotePatch & { raise?: boolean }): void {
+  void act("mood-note-update", { noteId, ...patch });
+}
+export function deleteMoodNoteAction(noteId: string): void { void act("mood-note-delete", { noteId }); }
+export function restoreMoodNoteAction(note: MoodNote, links: MoodLink[]): void { void act("mood-note-restore", { note, links }); }
+export function addMoodLinkAction(from: string, to: string, label = ""): Promise<boolean> {
+  return act("mood-link-add", { from, to, label });
+}
+export function setMoodLinkLabelAction(linkId: string, label: string): void { void act("mood-link-update", { linkId, label }); }
+export function deleteMoodLinkAction(linkId: string): void { void act("mood-link-delete", { linkId }); }

@@ -2,6 +2,7 @@ import type { Snapshot } from "../lib/snapshot";
 import type { AgentStatus } from "../schema";
 import { UsageMeter } from "./UsageMeter";
 import { NotificationCenter } from "./NotificationCenter";
+import type { AppView } from "./view";
 
 function projectName(cwd: string): string {
   const parts = cwd.split("/").filter(Boolean);
@@ -24,7 +25,7 @@ export function headerSummary(agents: AgentStatus[]): { working: number; waiting
   return { working, waiting, repos };
 }
 
-export function Header({ snap, live, onNewAgent, onFind, onSettings }: { snap: Snapshot; live: boolean; onNewAgent: () => void; onFind: () => void; onSettings: () => void }) {
+export function Header({ snap, live, view, onView, onNewAgent, onFind, onSettings }: { snap: Snapshot; live: boolean; view: AppView; onView: (v: AppView) => void; onNewAgent: () => void; onFind: () => void; onSettings: () => void }) {
   const { agents, board } = snap;
   const idle = agents.filter((a) => a.state === "idle").length;
   const onLine = board.cards.length;
@@ -54,6 +55,11 @@ export function Header({ snap, live, onNewAgent, onFind, onSettings }: { snap: S
         <div className="pix statline">
           <span><b>{idle}</b> IDLE</span>
           <span><b>{onLine}</b> TASKS</span>
+          {/* The two pages: the desks + THE LINE, or the big-picture MOOD board. */}
+          <span className="view-tabs" role="group" aria-label="View">
+            <button className={`view-tab${view === "workshop" ? " on" : ""}`} aria-pressed={view === "workshop"} onClick={() => onView("workshop")}>WORKSHOP</button>
+            <button className={`view-tab${view === "mood" ? " on" : ""}`} aria-pressed={view === "mood"} onClick={() => onView("mood")} title="The big picture: what we're on, what's at risk, what's next">MOOD</button>
+          </span>
           {/* CONFIG used to be a cog pinned to the top-right corner, floating over
               whatever it happened to land on. It belongs with the other things you
               can do to the workshop, in the row the eye already scans. */}

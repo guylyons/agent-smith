@@ -16,6 +16,7 @@
 // handlers; these only judge the body itself.
 import { z } from "zod";
 import { STAGES, sanitizeCard, sanitizeColumn, type Card, type Column, type Stage } from "./board";
+import { MOOD_KINDS, sanitizeNote, type MoodKind, type MoodNote } from "./mood";
 import { ALLOWED_MODELS, ALLOWED_PERMISSION_MODES } from "../ghostty";
 
 /** A body's fields, or the message of the first rule it broke. A body that
@@ -211,3 +212,56 @@ export const PromptBody = body({
     .refine((t) => t.trim() !== "", { error: "empty prompt" })
     .max(10_000, { error: "prompt too long" }),
 });
+
+// ---- the MOOD board (src/lib/mood.ts) ------------------------------------------
+// The board's own sanitizer clamps coordinates and widths, so these only
+// judge what the handler can't repair.
+
+const moodKind = () => z.enum(MOOD_KINDS as [MoodKind, ...MoodKind[]], { error: `kind must be one of ${MOOD_KINDS.join(", ")}` });
+const finite = (message: string) => z.number({ error: message }).refine(Number.isFinite, { error: message });
+
+export const MoodNoteAddBody = body({
+  title: z.string({ error: "title is required" }).trim().min(1, { error: "title is required" }),
+  x: finite("x and y must be numbers").catch(0),
+  y: finite("x and y must be numbers").catch(0),
+  kind: moodKind().optional(),
+  body: text(),
+  w: z.number().optional().catch(undefined),
+  cardId: maybeTrimmed(),
+  author: trimmed(),
+});
+
+export const MoodNoteRef = body({ noteId: required("noteId is required") });
+
+export const MoodNoteUpdateBody = body({
+  title: maybeText()
+    .refine((t) => t === undefined || t.trim() !== "", { error: "title cannot be blank" })
+    .transform((t) => t?.trim()),
+  body: maybeText(),
+  kind: moodKind().optional(),
+  x: finite("x must be a number").optional(),
+  y: finite("y must be a number").optional(),
+  w: finite("w must be a number").optional(),
+  // "" or null unlinks the note from its card
+  cardId: z.string().nullable().optional().catch(undefined).transform((c) => (c === "" ? null : c?.trim())),
+  // true brings the note to the front
+  raise: flag(),
+}).refine((b) => [b.title, b.body, b.kind, b.x, b.y, b.w, b.cardId].some((v) => v !== undefined) || b.raise, {
+  error: "title, body, kind, x, y, w, cardId or raise is required",
+});
+
+// mood-note-restore hands back what was deleted; the board's sanitizer drops
+// any link whose other end is gone.
+export const MoodNoteRestoreBody = body({
+  note: sanitized<MoodNote>(sanitizeNote, "a valid note is required"),
+  links: z.array(z.unknown()).catch([]),
+});
+
+export const MoodLinkAddBody = body({
+  from: required("from and to are required"),
+  to: required("from and to are required"),
+  label: text(),
+});
+
+export const MoodLinkRef = body({ linkId: required("linkId is required") });
+export const MoodLinkUpdateBody = body({ label: text() });

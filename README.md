@@ -230,7 +230,7 @@ bun run install-mcp     # claude mcp add --scope user the-line -- bun run src/mc
 claude mcp list         # the-line: … - ✔ Connected
 ```
 
-Ten tools, named for what they do:
+Sixteen tools, named for what they do (the six `mood_*` ones are covered under [The MOOD board](#the-mood-board)):
 
 | Tool | What it does |
 | --- | --- |
@@ -244,6 +244,7 @@ Ten tools, named for what they do:
 | `card_send_task` | Hand the card's composed task to its assigned session |
 | `agents_list` | The live sessions — the only things a card can be assigned to |
 | `crew_note` | Add a line to (or rewrite) your own notes — see [Crew](#crew) |
+| `mood_read`, `mood_note_add`, `mood_note_update`, `mood_note_delete`, `mood_link`, `mood_unlink` | Read and write the [MOOD board](#the-mood-board) |
 
 Writes go through the dashboard's HTTP actions, not the board file, so an MCP
 write is exactly as safe as the `curl` it replaces: applied against a fresh read,
@@ -281,6 +282,35 @@ server sanitizes every write before saving.
   ]
 }
 ```
+
+## The MOOD board
+
+THE LINE says where each task is; the MOOD board says what it all adds up to.
+Press **MOOD** in the header (or open `/#mood`) for a free-form canvas of notes:
+what we're focused on, ideas, risks, open questions, what just landed, and big
+headings that name an area of the board. Notes can be joined by labelled arrows
+("blocks", "unblocks") and can point at a card on THE LINE — the ↗ chip opens it.
+
+It's where an agent tells you the high-level story without you reading every
+card. Agents write to it with the MCP tools (`mood_read` first, then
+`mood_note_add` / `mood_note_update` / `mood_link`) or the HTTP actions
+`/action/mood-note-add|update|delete|restore` and `/action/mood-link-add|update|delete`;
+`GET /mood` returns the board (`?format=text` for a readable digest). Writes land
+on the open page live, like the board's.
+
+| To… | Mouse | Keyboard |
+| --- | --- | --- |
+| Add a note | Double-click empty canvas, or **+ NOTE** (kind from the picker beside it) | — |
+| Edit a note | Double-click it | Tab to it, Enter (Enter again / Esc to finish) |
+| Move a note | Drag it | Arrows (Shift = further) |
+| Link two notes | Drag the ○ on its right edge onto the other; or click ○, then click the other | L, then Tab to the other and Enter |
+| Label / delete a link | Click the arrow | Delete while it's selected |
+| Delete a note | DELETE in its editor (UNDO in the toast) | Delete / Backspace |
+| Pan | Drag empty canvas, or scroll | — |
+| Zoom | ⌘/Ctrl + scroll, or pinch; − / % / + / FIT | + / − / 0 (fit) |
+
+Stored in `~/.agent-status/.mood.json`. Your pan and zoom are remembered per
+browser.
 
 ## The agent pane
 
