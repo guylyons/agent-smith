@@ -2,8 +2,8 @@
 // where, and the corridor path between rooms. Drawing it was checked in the
 // browser.
 import { test, expect } from "bun:test";
-import { roomFor, spotFor, placeAll, pathBetween, pathLength, pointAlong, sleepers, cargoCount, ROOMS, ROOM_IDS, MAP_W, MAP_H } from "../src/ui/game";
-import { viewFromHash, hashForView } from "../src/ui/view";
+import { roomFor, spotFor, placeAll, pathBetween, pathLength, pointAlong, sleepers, cargoCount, viaFor, roomsOverlay, ROOMS, ROOM_IDS, MAP_W, MAP_H } from "../src/ui/game";
+import { viewFromHash, hashForView, hashFlag } from "../src/ui/view";
 import type { AgentStatus } from "../src/schema";
 import type { Board } from "../src/lib/board";
 
@@ -86,8 +86,92 @@ test("every room's spots, doors and exits are on the map, and spots sit in the r
   }
 });
 
+test("every door lies on its room's rect edge, or within 30 px of it", () => {
+  for (const id of ROOM_IDS) {
+    const { rect: r, door: d } = ROOMS[id];
+    // Distance from the door to the rect's outline, inside or out.
+    const dx = Math.max(r.x - d.x, 0, d.x - (r.x + r.w));
+    const dy = Math.max(r.y - d.y, 0, d.y - (r.y + r.h));
+    const inside = dx === 0 && dy === 0;
+    const toEdge = inside ? Math.min(d.x - r.x, r.x + r.w - d.x, d.y - r.y, r.y + r.h - d.y) : Math.hypot(dx, dy);
+    expect({ id, near: toEdge <= 30 }).toEqual({ id, near: true });
+  }
+});
+
+test("every door-exit leg is straight up or down, so it goes through the doorway", () => {
+  for (const id of ROOM_IDS) {
+    const { door, exit } = ROOMS[id];
+    if (id === "hypersleep") continue; // shares the mess's doorway at an angle
+    expect({ id, x: door.x }).toEqual({ id, x: exit.x });
+  }
+});
+
+test("waypoints: only for real spots, and inside the room", () => {
+  for (const id of ROOM_IDS) {
+    const { via = {}, spots, rect: r } = ROOMS[id];
+    for (const [i, p] of Object.entries(via)) {
+      expect(Number(i)).toBeLessThan(spots.length);
+      expect(p.x).toBeGreaterThanOrEqual(r.x - 30); expect(p.x).toBeLessThanOrEqual(r.x + r.w + 30);
+      expect(p.y).toBeGreaterThanOrEqual(r.y - 30); expect(p.y).toBeLessThanOrEqual(r.y + r.h + 30);
+    }
+  }
+});
+
+test("cargo is label-only: no spots, and roomFor never sends anyone there", () => {
+  expect(ROOMS.cargo.spots).toEqual([]);
+  for (const state of ["working", "idle", "waiting"] as const)
+    for (const persona of ["frontend-ux", "backend-dev", "editor", "scrum-master", ""])
+      expect(roomFor(agent({ state, persona }), withCard("review", { id: "s1", name: "A" }))).not.toBe("cargo");
+});
+
+test("viaFor: a spot's own waypoint, also for agents fanned out past it; none where the line is clear", () => {
+  expect(viaFor("medbay", ROOMS.medbay.spots[0]!)).toEqual(ROOMS.medbay.via![0]!);
+  expect(viaFor("medbay", ROOMS.medbay.spots[2]!)).toBeUndefined();
+  const n = ROOMS.medbay.spots.length;
+  expect(viaFor("medbay", spotFor("medbay", n))).toEqual(ROOMS.medbay.via![0]!);
+  expect(viaFor("comms", ROOMS.comms.spots[0]!)).toBeUndefined();
+  expect(viaFor("cargo", { x: 300, y: 800 })).toBeUndefined();
+});
+
+test("pathBetween: goes round furniture through the spot's waypoint, both ways", () => {
+  const from = ROOMS.computer.spots[0]!, to = ROOMS.medbay.spots[0]!;
+  const p = pathBetween("computer", from, "medbay", to);
+  expect(p.slice(-3)).toEqual([ROOMS.medbay.door, ROOMS.medbay.via![0]!, to]);
+  const back = pathBetween("medbay", to, "computer", from);
+  expect(back.slice(0, 3)).toEqual([to, ROOMS.medbay.via![0]!, ROOMS.medbay.door]);
+});
+
+test("pathBetween: medbay is reached from the lower corridor", () => {
+  const p = pathBetween("comms", ROOMS.comms.spots[0]!, "medbay", ROOMS.medbay.spots[2]!);
+  expect(p).toContainEqual({ x: 768, y: 638 });
+  expect(p).toContainEqual({ x: 1215, y: 638 });
+  expect(p).not.toContainEqual({ x: 1215, y: 380 });
+});
+
+test("roomsOverlay: every room with its points, the corridors, and a leg per spot", () => {
+  const o = roomsOverlay();
+  expect(o.rooms.map((r) => r.id)).toEqual(ROOM_IDS);
+  expect(o.rooms.find((r) => r.id === "medbay")!.vias).toHaveLength(3);
+  const corridors = o.lines.filter((l) => l.kind === "corridor");
+  expect(corridors).toContainEqual({ a: { x: 768, y: 312 }, b: { x: 768, y: 638 }, kind: "corridor" });
+  expect(corridors.some((l) => l.a.y === 312 && l.b.y === 312)).toBe(true);
+  expect(corridors.some((l) => l.a.y === 638 && l.b.y === 638)).toBe(true);
+  expect(o.lines.filter((l) => l.kind === "exit")).toHaveLength(ROOM_IDS.length);
+  for (const id of ROOM_IDS) {
+    const { spots, door, via = {} } = ROOMS[id];
+    spots.forEach((s, i) => {
+      const v = via[i];
+      if (v) {
+        expect(o.lines).toContainEqual({ a: door, b: v, kind: "leg" });
+        expect(o.lines).toContainEqual({ a: v, b: s, kind: "leg" });
+      } else expect(o.lines).toContainEqual({ a: door, b: s, kind: "leg" });
+    });
+  }
+});
+
 test("spotFor: no two of the first twenty agents in a room share a spot", () => {
   for (const id of ROOM_IDS) {
+    if (!ROOMS[id].spots.length) continue;
     const seen = new Set<string>();
     for (let i = 0; i < 20; i++) { const p = spotFor(id, i); seen.add(`${p.x},${p.y}`); }
     expect(seen.size).toBe(20);
@@ -198,4 +282,15 @@ test("viewFromHash / hashForView: the game view has its own hash", () => {
   expect(hashForView("mood")).toBe("mood");
   expect(hashForView("workshop")).toBe("");
   for (const v of ["workshop", "mood", "game"] as const) expect(viewFromHash(`#${hashForView(v)}`)).toBe(v);
+});
+
+test("hashFlag: the ROOMS overlay is on only with rooms=1 after the page", () => {
+  expect(viewFromHash("#game?rooms=1")).toBe("game");
+  expect(hashFlag("#game?rooms=1", "rooms")).toBe(true);
+  expect(hashFlag("#game?x=2&rooms=1", "rooms")).toBe(true);
+  expect(hashFlag("#game", "rooms")).toBe(false);
+  expect(hashFlag("", "rooms")).toBe(false);
+  expect(hashFlag("#game?rooms=0", "rooms")).toBe(false);
+  expect(hashFlag("#game?rooms", "rooms")).toBe(false);
+  expect(hashFlag("#rooms=1", "rooms")).toBe(false);
 });
