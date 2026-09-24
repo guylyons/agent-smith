@@ -281,19 +281,12 @@ export function CardModal({
   // Every field here saves on blur, and unmounting a focused field never blurs
   // it — so Esc straight out of a half-typed description (the editor a new
   // card opens in) would drop it. Blur first, while it's still mounted, so its
-  // own commit runs; then close.
+  // own commit runs; then close. ModalBackdrop calls this on Esc too.
   function close() {
     const el = document.activeElement;
     if (el instanceof HTMLElement && el.closest(".cardmodal")) el.blur();
     onClose();
   }
-
-  // Esc closes from anywhere in the modal.
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) { if (e.key === "Escape") close(); }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  });
 
   const comments = card.comments ?? [];
 

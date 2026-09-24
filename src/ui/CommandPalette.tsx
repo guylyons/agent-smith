@@ -108,7 +108,6 @@ export function CommandPalette({ snap, onClose }: { snap: Snapshot; onClose: () 
   useEffect(() => { inputRef.current?.focus(); }, []);
 
   function onKeyDown(e: React.KeyboardEvent) {
-    if (e.key === "Escape") { e.preventDefault(); onClose(); return; }
     if (e.key === "ArrowDown") { e.preventDefault(); setSel((s) => (entries.length ? (s + 1) % entries.length : 0)); }
     else if (e.key === "ArrowUp") { e.preventDefault(); setSel((s) => (entries.length ? (s - 1 + entries.length) % entries.length : 0)); }
     else if (e.key === "Enter") { e.preventDefault(); entries[sel]?.activate(); }

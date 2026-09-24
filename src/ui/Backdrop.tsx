@@ -32,6 +32,13 @@ export function trapIndex(count: number, index: number, shift: boolean): number 
   return null;
 }
 
+// Whether an Esc keydown should close the dialog. Only the top dialog closes,
+// and never when something inside already handled the key (preventDefault) or
+// an IME is mid-composition, where Esc cancels the composition instead.
+export function escCloses(e: { key: string; defaultPrevented: boolean; isComposing: boolean }, isTop: boolean): boolean {
+  return e.key === "Escape" && isTop && !e.defaultPrevented && !e.isComposing;
+}
+
 const TABBABLE = [
   "a[href]", "button:not([disabled])", "input:not([disabled]):not([type=hidden])",
   "select:not([disabled])", "textarea:not([disabled])", "[tabindex]:not([tabindex='-1'])",
@@ -55,13 +62,16 @@ const openDialogs: HTMLElement[] = [];
 //
 // Given a name (`labelledBy`, the id of the dialog's title, or `label`), it is
 // also a modal dialog: announced as one, focus moves in on open (unless the
-// dialog already focused a field of its own), Tab cycles inside, and on close
-// focus goes back to whatever opened it.
+// dialog already focused a field of its own), Tab cycles inside, Esc calls
+// onClose, and on close focus goes back to whatever opened it.
 export function ModalBackdrop({ className = "drawer-backdrop", onClose, labelledBy, label, children }: {
   className?: string; onClose: () => void; labelledBy?: string; label?: string; children: ReactNode;
 }) {
   const downOnSelf = useRef(false);
   const ref = useRef<HTMLDivElement>(null);
+  // The latest onClose, so the key listener below needn't resubscribe per render.
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   const isDialog = Boolean(labelledBy || label);
   // Read during the first render, before any autoFocus inside has moved focus.
   const [opener] = useState(() => (typeof document === "undefined" ? null : document.activeElement));
@@ -73,7 +83,9 @@ export function ModalBackdrop({ className = "drawer-backdrop", onClose, labelled
     if (!root.contains(document.activeElement)) (tabbables(root)[0] ?? root).focus();
 
     function onKey(e: KeyboardEvent) {
-      if (e.key !== "Tab" || openDialogs[openDialogs.length - 1] !== root) return;
+      const isTop = openDialogs[openDialogs.length - 1] === root;
+      if (escCloses(e, isTop)) { e.preventDefault(); closeRef.current(); return; }
+      if (e.key !== "Tab" || !isTop) return;
       const list = tabbables(root!);
       const to = trapIndex(list.length, list.indexOf(document.activeElement as HTMLElement), e.shiftKey);
       if (to === null) return;
