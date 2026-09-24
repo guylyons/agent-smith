@@ -83,8 +83,11 @@ export function restoreColumnAction(column: Column, index: number, cards: Card[]
 }
 
 /** Add a card; resolves to the id the server minted, or null if it refused. */
-export async function addCardAction(columnId: string, title: string): Promise<string | null> {
-  const r = await post("card-add", { columnId, title });
+/** Add a card; `repo` labels it (THE LINE passes its repo filter's project). */
+export async function addCardAction(
+  columnId: string, title: string, repo?: { repo: string; repoPath?: string } | null,
+): Promise<string | null> {
+  const r = await post("card-add", { columnId, title, ...(repo ?? {}) });
   if (!r.ok) { toastError(r.error ?? "card-add failed"); return null; }
   return r.cardId ?? null;
 }
@@ -104,7 +107,9 @@ export function setCardDescriptionAction(cardId: string, description: string): v
  *  An empty list clears it. */
 export function setCardTouchesAction(cardId: string, touches: string[]): void { void act("card-update", { cardId, touches }); }
 /** Label the card with its repo by hand; a blank name clears it. */
-export function setCardRepoAction(cardId: string, repo: string): void { void act("card-update", { cardId, repo }); }
+export function setCardRepoAction(cardId: string, repo: string, repoPath?: string): void {
+  void act("card-update", { cardId, repo, ...(repoPath ? { repoPath } : {}) });
+}
 export function moveCardAction(cardId: string, toColumnId: string, toIndex?: number): void {
   void act("card-move", { cardId, toColumnId, author: ME, ...(toIndex === undefined ? {} : { toIndex }) });
 }

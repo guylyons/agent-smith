@@ -751,7 +751,7 @@ export function makeServer(
     if (body.title !== undefined) next = renameCard(next, cardId, body.title);
     if (body.description !== undefined) next = setCardDescription(next, cardId, body.description);
     if (body.touches !== undefined) next = setCardTouches(next, cardId, body.touches);
-    if (body.repo !== undefined) next = setCardRepo(next, cardId, body.repo);
+    if (body.repo !== undefined) next = setCardRepo(next, cardId, body.repo, body.repoPath);
     writeBoard(dir, next);
     push();
     return json({ ok: true });
