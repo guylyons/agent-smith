@@ -1030,6 +1030,8 @@ body{background:transparent}
 .msg-tool{opacity:.7}
 .msg-tool .msg-text{font-size:var(--msg,14px);color:var(--dim)}
 .msg-tool .msg-text::before{content:"⚙ "}
+/* a run of tool calls reads as one tight list, not a line per 12px gap */
+.msg-tool + .msg-tool{margin-top:-8px}
 .msg-empty{color:var(--dim);font-size:var(--msg,14px);text-align:center;margin:auto}
 .drawer-foot{display:flex;gap:6px;padding:12px 14px;border-top:var(--rule);align-items:flex-end}
 /* min-height has to follow the text size, or a one-line placeholder is clipped

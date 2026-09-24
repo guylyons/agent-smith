@@ -337,7 +337,9 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
               {loaded && messages.length === 0 && pending.length === 0 && <div className="msg-empty">No conversation yet.</div>}
               {messages.map((m, i) => (
                 <div key={i} className={`msg msg-${m.role}`}>
-                  <span className="msg-who">{m.role === "user" ? "YOU" : m.role === "assistant" ? agent.name : "»"}</span>
+                  {/* A tool call is one quiet line (its ⚙ says what it is) — a
+                      "»" label above each one doubled every step into two lines. */}
+                  {m.role !== "tool" && <span className="msg-who">{m.role === "user" ? "YOU" : agent.name}</span>}
                   <span className="msg-text">{m.role === "tool" ? m.text : renderMarkdown(m.text)}</span>
                 </div>
               ))}
