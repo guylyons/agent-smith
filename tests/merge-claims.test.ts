@@ -343,7 +343,7 @@ async function setup() {
   mkdirSync(dir, { recursive: true });
   process.env.AGENT_STATUS_DIR = dir;
   const { makeServer } = await import("../src/server");
-  const server = makeServer(0);
+  const server = makeServer(0, { quit: async () => ({ ok: true }) });
   const base = `http://localhost:${server.port}`;
   const post = (path: string, body: object, headers: Record<string, string> = {}) =>
     fetch(`${base}${path}`, {
