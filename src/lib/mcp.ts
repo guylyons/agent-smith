@@ -9,6 +9,7 @@
 // clobber each other, and the open UI updates live.
 import { cardView, type Board } from "./board";
 import { MOOD_KINDS, formatMood, moodBounds, type Mood } from "./mood";
+import { FACT_KINDS, formatResults } from "./memory";
 
 export type ApiResult = { status: number; body: any };
 export type Api = {
@@ -550,6 +551,75 @@ TOOLS.push(
       const linkId = str(args, "linkId");
       await request(ctx, "POST", "/action/mood-link-delete", { linkId });
       return `Removed ${linkId}.`;
+    },
+  },
+);
+
+// ---- the team memory -----------------------------------------------------------
+// What was done before and why (see src/lib/memory.ts): recorded facts plus
+// every card on the board and in the archive, searchable by keyword and filter.
+
+TOOLS.push(
+  {
+    name: "memory_search",
+    description:
+      "Search the team memory: past cards (board and archive) plus the decisions, gotchas, notes and summaries agents recorded. Words must all match; filters narrow: kind:decision,gotcha  repo:<name>  file:<path or folder>  person:<NAME>  tag:<t>  card:<card id>  near:<node id> (linked nodes)  since:14d. An empty query lists the newest. Pass id instead to see one node and everything linked to it. Search before planning work, so you build on what is known.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Words and filters, e.g. \"merge race repo:agent-smith kind:decision\"." },
+        id: { type: "string", description: "A node id (mem_1a2b3c4d or card:card_1a2b) to show with its neighbours, instead of a search." },
+        limit: { type: "number", description: "Most results to return (default 20)." },
+      },
+    },
+    async run(args, ctx) {
+      const id = optionalStr(args, "id")?.trim();
+      if (id) {
+        const r = await request(ctx, "GET", `/memory?${new URLSearchParams({ id })}`);
+        return formatResults([r.node, ...(r.neighbours ?? [])]);
+      }
+      const q = new URLSearchParams({ q: optionalStr(args, "query") ?? "" });
+      const limit = optionalNum(args, "limit");
+      if (limit !== undefined) q.set("limit", String(limit));
+      return formatResults((await request(ctx, "GET", `/memory?${q}`)).results ?? []);
+    },
+  },
+  {
+    name: "memory_add",
+    description:
+      "Record something the team should remember: a decision (and why), a gotcha that bit you, a note, or a summary rolling up several cards. Link it so it can be found: repo:<name>, file:<path>, person:<NAME>, a card id, or another memory's id. The same kind and title again updates that memory instead of adding a copy. Old memories are compacted to one line automatically, so lead with the point.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        kind: { type: "string", enum: [...FACT_KINDS], description: "decision, gotcha, note, or summary." },
+        title: { type: "string", description: "The point, in one short line." },
+        body: { type: "string", description: "Optional detail. First sentence first: it is what survives compaction." },
+        links: { type: "array", items: { type: "string" }, description: "What it is about: repo:<name>, file:<path>, person:<NAME>, card_<id>, mem_<id>." },
+        tags: { type: "array", items: { type: "string" }, description: "Optional free labels." },
+      },
+      required: ["kind", "title"],
+    },
+    async run(args, ctx) {
+      const body = {
+        kind: str(args, "kind"),
+        title: str(args, "title"),
+        body: optionalStr(args, "body") ?? "",
+        links: optionalStrList(args, "links") ?? [],
+        tags: optionalStrList(args, "tags") ?? [],
+        author: await moodAuthor(ctx),
+      };
+      const r = await request(ctx, "POST", "/action/memory-add", body);
+      return `Remembered:\n${formatResults([r.node])}`;
+    },
+  },
+  {
+    name: "memory_forget",
+    description: "Delete a recorded memory that is wrong or no longer true, by its mem_ id (from memory_search). Cards cannot be forgotten here; they come from the board.",
+    inputSchema: { type: "object", properties: { id: { type: "string", description: "The memory's id, e.g. mem_1a2b3c4d." } }, required: ["id"] },
+    async run(args, ctx) {
+      const id = str(args, "id");
+      await request(ctx, "POST", "/action/memory-forget", { id });
+      return `Forgot ${id}.`;
     },
   },
 );

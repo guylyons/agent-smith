@@ -279,3 +279,17 @@ export const MoodLinkAddBody = body({
 
 export const MoodLinkRef = body({ linkId: required("linkId is required") });
 export const MoodLinkUpdateBody = body({ label: text() });
+
+// ---- memory-*: the team memory (src/lib/memory.ts) ----------------------------
+
+/** kind and title are judged by remember(), which words the refusal. */
+const strings = () => z.array(z.unknown()).catch([]).transform((a) => a.filter((x): x is string => typeof x === "string"));
+export const MemoryAddBody = body({
+  kind: text(),
+  title: text(),
+  body: text(),
+  tags: strings(),
+  links: strings(),
+  author: trimmed(),
+});
+export const MemoryForgetBody = body({ id: trimmed() });

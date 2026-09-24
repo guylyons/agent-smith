@@ -37,6 +37,21 @@ card_create, card_update, card_move, card_comment, card_assign, card_send_task,
 agents_list), prefer them over these curls -- same board, same effect. Spawning
 has no tool; that stays a curl.
 
+You have a memory: the team's past cards (board and archive) plus the
+decisions, gotchas and summaries recorded on purpose. Use it:
+
+    curl -s "$AGENT_WORKSHOP_URL/memory?q=<words and filters>&format=text"
+    /action/memory-add     {"kind":"decision","title":"...","body":"...",
+                            "links":["repo:<name>","file:<path>","card_<id>"],
+                            "author":"<your name>"}
+
+(MCP: memory_search, memory_add, memory_forget.) Filters: kind:, repo:, file:,
+person:, tag:, card:, near:<id>, since:14d. Before you plan or split work,
+search it for the repo and the files involved, so you build on what is known
+and don't repeat a mistake. When a card lands, or a decision is made, record it
+in one line (kind decision or gotcha; summary to roll up several cards), linked
+to its repo, files and card. It compacts itself; keep each entry short anyway.
+
 Columns carry a stage: todo (new work waits), doing (an agent is on it), review
 (finished work, for a human to accept), done. Read them from /board rather than
 assuming an order; the human may have added columns of their own.
