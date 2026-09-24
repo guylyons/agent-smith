@@ -5,7 +5,7 @@ import type { Board, Column, Card, Stage } from "../lib/board";
 import {
   renameColumn, setInstruction, setColumnStage, deleteColumn, reorderColumn,
   deleteCard, restoreCard, moveCard, restoreColumn, cardMoveTarget, STAGES,
-  mergeBlockers, mergeBlockReason, repoName,
+  mergeBlockers, mergeBlockReason, repoName, mergedColumn,
 } from "../lib/board";
 import {
   addColumnAction, renameColumnAction, setInstructionAction, setColumnStageAction, deleteColumnAction,
@@ -16,6 +16,7 @@ import { toast } from "./toast";
 import { onOpenCard, type CardFocus } from "./nav";
 import { CardModal, type SpawnSeed } from "./CardModal";
 import { Sprite } from "./Sprite";
+import { ArchiveBar } from "./ArchiveBar";
 import { stackMaxHeight } from "./stackCap";
 import { loadRecentFolders, projectFolder } from "./recentFolders";
 import { findLiveAssignee } from "../lib/sendTaskReady";
@@ -42,9 +43,11 @@ type Mutate = (fn: ((b: Board) => Board) | null, send: () => void) => void;
 // it against a fresh read and echoes the result back over SSE, so a rename here
 // and an agent's comment there compose instead of overwriting each other.
 export function TheLine({
-  board: incoming, agents, lineRows, onSpawnForCard,
+  board: incoming, agents, lineRows, onSpawnForCard, archived = 0,
 }: {
   board: Board; agents: AgentStatus[]; lineRows: number;
+  /** cards in the archive, shown on the Merged column (see ArchiveBar) */
+  archived?: number;
   onSpawnForCard: (task: string, cardId: string, seed?: SpawnSeed) => void;
 }) {
   const [board, setBoard] = useState(incoming);
@@ -158,6 +161,7 @@ export function TheLine({
             onNamed={() => setAddingCol(false)}
             onOpenCard={showCard}
             unreadOn={unreadOn}
+            archived={archived}
           />
         ))}
         <button className="pix add-col" onClick={onAddColumn} title="Add a column">+ COLUMN</button>
@@ -181,13 +185,14 @@ export function TheLine({
 }
 
 function ColumnView({
-  board, agents, mutate, column, index, rows, autoFocusName, onNamed, onOpenCard, unreadOn,
+  board, agents, mutate, column, index, rows, autoFocusName, onNamed, onOpenCard, unreadOn, archived,
 }: {
   board: Board; agents: AgentStatus[]; mutate: Mutate; column: Column; index: number;
   rows: number; autoFocusName: boolean;
   onNamed: () => void; onOpenCard: (id: string, focus?: CardFocus) => void;
   /** unread comments on a card — computed by TheLine, which owns the read marks */
   unreadOn: (card: Card) => number;
+  archived: number;
 }) {
   const [dragOver, setDragOver] = useState(false);
   // Which slot a dropped card would take in this column: 0 = above the first
@@ -303,6 +308,10 @@ function ColumnView({
           onClick={onDelete}
         >✕</button>
       </div>
+
+      {mergedColumn(board)?.id === column.id && (
+        <ArchiveBar columnId={column.id} cardCount={cards.length} archived={archived} />
+      )}
 
       <InstructionField
         value={column.instruction}

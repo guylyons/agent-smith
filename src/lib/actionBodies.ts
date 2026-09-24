@@ -140,6 +140,11 @@ export const CardRestoreBody = body({
   index: z.number().catch(0),
 });
 
+// column-archive: optionally only cards quiet for this many days.
+export const ColumnArchiveBody = body({
+  olderThanDays: z.number().positive().optional().catch(undefined),
+});
+
 export const CardAddBody = body({
   columnId: text(),
   title: z.string({ error: "title is required" }).trim().min(1, { error: "title is required" }),
