@@ -6,61 +6,30 @@ import mapUrl from "./nostromo.png";
 import { hashFlag } from "./view";
 import { inStateFor, isStaleIdle } from "./inState";
 import {
-  MAP_W, MAP_H, ROOMS, ROOM_IDS, placeAll, pathBetween, pathLength, pointAlong, spotFor, sleepers, cargoCount, roomsOverlay,
-  type Pt, type RoomId, type Placement,
+  MAP_W, MAP_H, ROOMS, ROOM_IDS, placeAll, stepWalks, walkersAt, agentKey, spotFor, sleepers, cargoCount, roomsOverlay,
+  type Pt, type Placement, type Walk,
 } from "./game";
-
-// Walking speed, in map pixels per second: a cross-ship trip takes a few seconds.
-const SPEED = 260;
-
-type Walk = { room: RoomId; to: Pt; path: Pt[]; len: number; start: number };
-
-/** An agent's identity on the map: its crew id when it has one, so a /clear
- *  (new session id, same crew member) doesn't look like a new arrival. */
-const keyOf = (a: AgentStatus) => a.crew?.id ?? a.sessionId;
 
 function prefersReducedMotion(): boolean {
   return typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-/** Where everyone is drawn this frame. Each agent keeps a walk: the path from
- *  where it was to where it now belongs. A change of room starts a new walk from
- *  wherever it currently stands; a newcomer walks in from the airlock. With
- *  reduced motion every walk is a jump. */
+/** Where everyone is drawn this frame. stepWalks does the bookkeeping on each
+ *  new placement; this only ticks frames while someone is still walking. */
 function useWalkers(agents: AgentStatus[], placed: Map<string, Placement>, ready: boolean): Map<string, Pt> {
   const walks = useRef(new Map<string, Walk>());
+  // Anyone on the map before the first real snapshot was already aboard; only
+  // later arrivals come in through the airlock.
   const primed = useRef(false);
   const [now, setNow] = useState(() => performance.now());
 
-  const t = performance.now();
-  const reduce = prefersReducedMotion();
-  const keep = new Set<string>();
-  for (const a of agents) {
-    const p = placed.get(a.sessionId);
-    if (!p) continue;
-    const k = keyOf(a);
-    keep.add(k);
-    const w = walks.current.get(k);
-    if (w && w.room === p.room && w.to.x === p.at.x && w.to.y === p.at.y) continue;
-    let path: Pt[];
-    if (reduce) path = [p.at];
-    else if (w) path = pathBetween(w.room, pointAlong(w.path, (t - w.start) * SPEED / 1000), p.room, p.at);
-    else if (primed.current) path = pathBetween("airlock", spotFor("airlock", 0), p.room, p.at);
-    else path = [p.at];
-    walks.current.set(k, { room: p.room, to: p.at, path, len: pathLength(path), start: t });
-  }
-  for (const k of [...walks.current.keys()]) if (!keep.has(k)) walks.current.delete(k);
-  // Anyone on the map before the first real snapshot was already aboard; only
-  // later arrivals come in through the airlock.
-  if (ready) primed.current = true;
-
-  const out = new Map<string, Pt>();
-  let moving = false;
-  for (const [k, w] of walks.current) {
-    const d = (now - w.start) * SPEED / 1000;
-    if (d < w.len) moving = true;
-    out.set(k, pointAlong(w.path, d));
-  }
+  const current = useMemo(() => {
+    const next = stepWalks(walks.current, agents, placed, performance.now(), { reduceMotion: prefersReducedMotion(), primed: primed.current });
+    walks.current = next;
+    if (ready) primed.current = true;
+    return next;
+  }, [agents, placed, ready]);
+  const { at, moving } = walkersAt(current, now);
 
   // Tick frames only while someone is still walking.
   useEffect(() => {
@@ -68,7 +37,7 @@ function useWalkers(agents: AgentStatus[], placed: Map<string, Placement>, ready
     const id = requestAnimationFrame((ts) => setNow(ts));
     return () => cancelAnimationFrame(id);
   });
-  return out;
+  return at;
 }
 
 /** Is a debug flag on in the URL hash (#game?rooms=1)? Follows hash changes. */
@@ -164,14 +133,14 @@ export function GameView({ agents, board, onOpen, onOpenCard }: {
             </div>
           )}
           {agents.map((a) => {
-            const p = at.get(keyOf(a));
-            const room = placed.get(a.sessionId)?.room;
+            const p = at.get(agentKey(a));
+            const room = placed.get(agentKey(a))?.room;
             if (!p || !room) return null;
             const dur = inStateFor(a.stateSince, now);
             const state = `${stateText(a)}${dur ? ` · ${dur}` : ""}`;
             const label = `${a.name}, ${ROOMS[room].label.toLowerCase()}, ${stateText(a)}${dur ? ` for ${dur}` : ""}${a.doing ? `: ${a.doing}` : ""}`;
             return (
-              <button key={keyOf(a)} className={`game-agent is-${a.state}${isStaleIdle(a, now) ? " is-stale" : ""}`}
+              <button key={agentKey(a)} className={`game-agent is-${a.state}${isStaleIdle(a, now) ? " is-stale" : ""}`}
                 style={{ ...pct(p), zIndex: Math.round(p.y) }} aria-label={label} onClick={() => onOpen(a.sessionId)}>
                 <Sprite sessionId={a.sessionId} role={a.role} name={a.name} state={a.state} override={a.sprite} />
                 {a.state === "waiting" && <span className="pix bubble" aria-hidden="true">{a.waitingReason === "question" ? "?" : "!"}</span>}

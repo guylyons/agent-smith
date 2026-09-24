@@ -4,7 +4,7 @@
 import { test, expect } from "bun:test";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
-import { roomFor, PERSONA_ROOM, spotFor, placeAll, pathBetween, pathLength, pointAlong, sleepers, cargoCount, viaFor, roomsOverlay, ROOMS, ROOM_IDS, MAP_W, MAP_H } from "../src/ui/game";
+import { roomFor, PERSONA_ROOM, spotFor, placeAll, stepWalks, walkersAt, agentKey, pathBetween, pathLength, pointAlong, sleepers, cargoCount, viaFor, roomsOverlay, ROOMS, ROOM_IDS, MAP_W, MAP_H } from "../src/ui/game";
 import { viewFromHash, hashForView, hashFlag } from "../src/ui/view";
 import type { AgentStatus } from "../src/schema";
 import type { Board } from "../src/lib/board";
@@ -311,4 +311,105 @@ test("hashFlag: the ROOMS overlay is on only with rooms=1 after the page", () =>
   expect(hashFlag("#game?rooms=0", "rooms")).toBe(false);
   expect(hashFlag("#game?rooms", "rooms")).toBe(false);
   expect(hashFlag("#rooms=1", "rooms")).toBe(false);
+});
+
+// Walks: the bookkeeping GameView redraws every frame. At 260 px/s.
+const crewAgent = (sessionId: string, crew: string, p: Partial<AgentStatus> = {}) => agent({ sessionId, crew: { id: crew, name: crew }, ...p });
+
+test("stepWalks: the first snapshot places everyone where they stand, no walking", () => {
+  const a = agent({ sessionId: "a", state: "idle" });
+  const placed = placeAll([a], board);
+  const walks = stepWalks(new Map(), [a], placed, 1000, { reduceMotion: false, primed: false });
+  expect(walks.get("a")!.path).toEqual([placed.get("a")!.at]);
+  expect(walks.get("a")!.len).toBe(0);
+});
+
+test("stepWalks: once primed, a newcomer walks in from the airlock", () => {
+  const a = agent({ sessionId: "a", state: "idle" });
+  const placed = placeAll([a], board);
+  const w = stepWalks(new Map(), [a], placed, 1000, { reduceMotion: false, primed: true }).get("a")!;
+  expect(w.path[0]).toEqual(spotFor("airlock", 0));
+  expect(w.path.at(-1)).toEqual(placed.get("a")!.at);
+  expect(w.start).toBe(1000);
+  expect(w.len).toBeGreaterThan(0);
+});
+
+test("stepWalks: nothing changed keeps the walk as it was", () => {
+  const a = agent({ sessionId: "a", state: "idle" });
+  const placed = placeAll([a], board);
+  const one = stepWalks(new Map(), [a], placed, 1000, { reduceMotion: false, primed: true });
+  const two = stepWalks(one, [a], placed, 2000, { reduceMotion: false, primed: true });
+  expect(two.get("a")).toBe(one.get("a")!);
+});
+
+test("stepWalks: a room change mid-walk sets off from where the agent is now, not the old target", () => {
+  const idle = agent({ sessionId: "a", state: "idle" });
+  const p1 = placeAll([idle], board);
+  const one = stepWalks(new Map(), [idle], p1, 0, { reduceMotion: false, primed: true });
+  const w1 = one.get("a")!;
+  // Half a second into the walk in from the airlock, it is sent to the workshop.
+  const busy = agent({ sessionId: "a", state: "working" });
+  const p2 = placeAll([busy], board, p1);
+  const w2 = stepWalks(one, [busy], p2, 500, { reduceMotion: false, primed: true }).get("a")!;
+  const here = pointAlong(w1.path, 130);
+  expect(w2.path[0]).toEqual(here);
+  expect(w2.path[0]).not.toEqual(p1.get("a")!.at);
+  expect(w2.path.at(-1)).toEqual(p2.get("a")!.at);
+  expect(w2.room).toBe("workshop");
+  expect(w2.start).toBe(500);
+});
+
+test("stepWalks: with reduced motion every move is a jump", () => {
+  const idle = agent({ sessionId: "a", state: "idle" });
+  const p1 = placeAll([idle], board);
+  const one = stepWalks(new Map(), [idle], p1, 0, { reduceMotion: true, primed: true });
+  expect(one.get("a")!.path).toEqual([p1.get("a")!.at]);
+  const busy = agent({ sessionId: "a", state: "working" });
+  const p2 = placeAll([busy], board, p1);
+  expect(stepWalks(one, [busy], p2, 100, { reduceMotion: true, primed: true }).get("a")!.path).toEqual([p2.get("a")!.at]);
+});
+
+test("stepWalks: an agent that leaves is dropped", () => {
+  const a = agent({ sessionId: "a", state: "idle" }), b = agent({ sessionId: "b", state: "idle" });
+  const p1 = placeAll([a, b], board);
+  const one = stepWalks(new Map(), [a, b], p1, 0, { reduceMotion: false, primed: true });
+  const p2 = placeAll([b], board, p1);
+  const two = stepWalks(one, [b], p2, 100, { reduceMotion: false, primed: true });
+  expect([...two.keys()]).toEqual(["b"]);
+});
+
+test("stepWalks: an agent with no placement is skipped, not crashed on", () => {
+  const a = agent({ sessionId: "a", state: "idle" });
+  expect(stepWalks(new Map(), [a], new Map(), 0, { reduceMotion: false, primed: true }).size).toBe(0);
+});
+
+test("placeAll + stepWalks: a /clear (new session id, same crew) keeps the spot and the walk", () => {
+  // Two in the mess. The one on spot 0 leaves as the one on spot 1 is cleared:
+  // spot 0 is now free, but the cleared agent must stay on spot 1, not walk.
+  const gone = crewAgent("g", "g-1", { state: "idle" }), cleared = crewAgent("z", "z-1", { state: "idle" });
+  const p1 = placeAll([gone, cleared], board);
+  expect(p1.get("z-1")!.slot).toBe(1);
+  const one = stepWalks(new Map(), [gone, cleared], p1, 0, { reduceMotion: false, primed: true });
+  const after = crewAgent("a-new", "z-1", { state: "idle" });
+  const p2 = placeAll([after], board, p1);
+  expect(p2.get("z-1")).toEqual(p1.get("z-1")!);
+  const two = stepWalks(one, [after], p2, 5000, { reduceMotion: false, primed: true });
+  expect(two.get("z-1")).toBe(one.get("z-1")!);
+});
+
+test("agentKey: crew id when there is one, else the session id", () => {
+  expect(agentKey(crewAgent("s", "c-1"))).toBe("c-1");
+  expect(agentKey(agent({ sessionId: "s" }))).toBe("s");
+});
+
+test("walkersAt: where each walk is at a time, and whether anyone is still moving", () => {
+  const a = agent({ sessionId: "a", state: "idle" });
+  const walks = stepWalks(new Map(), [a], placeAll([a], board), 0, { reduceMotion: false, primed: true });
+  const w = walks.get("a")!;
+  const mid = walkersAt(walks, 1000);
+  expect(mid.moving).toBe(true);
+  expect(mid.at.get("a")).toEqual(pointAlong(w.path, 260));
+  const end = walkersAt(walks, 60_000);
+  expect(end.moving).toBe(false);
+  expect(end.at.get("a")).toEqual(w.to);
 });
