@@ -285,6 +285,36 @@ test("a lone session in its folder signs by session id, an explicit author still
   expect(second.sessionId).toBeUndefined();
 });
 
+// Our crew id rides on every card write, whatever signs it, so a write from an
+// agent taken off the card is refused by the server (409) on any card.
+test("card writes always carry the crew id: spawn card, other card, explicit author", async () => {
+  const agents = [{ sessionId: "s1", name: "VOLT", role: "r", state: "working", doing: "x", cwd: "/w/one" }];
+  const { api, calls } = fakeApi({ "/agents": { status: 200, body: { agents } } });
+  const c: Ctx = { api, url: "http://localhost:4173", cwd: "/w/one", card: "card_1", crew: "volt-1a2b" };
+  const tool = (id: number, name: string, args: object) => handleMessage({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } }, c);
+  await tool(1, "card_comment", { cardId: "card_1", text: "hi" });
+  await tool(2, "card_move", { cardId: "card_2", toColumnId: "review" });
+  await tool(3, "card_comment", { cardId: "card_2", text: "hi" });
+  await tool(4, "card_comment", { cardId: "card_2", text: "hi", author: "VOLT" });
+  await handleMessage(
+    { jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "card_move", arguments: { cardId: "card_2", toColumnId: "review" } } },
+    { ...c, author: "VOLT", card: undefined },
+  );
+  const writes = calls.filter((x) => x.path === "/action/card-comment" || x.path === "/action/card-move").map((x) => x.body as any);
+  expect(writes.length).toBe(5);
+  for (const w of writes) expect(w.crew).toBe("volt-1a2b");
+  expect(writes[0].as).toBe("assignee");
+  expect(writes[1].sessionId).toBe("s1");
+  expect(writes[3].author).toBe("VOLT");
+  expect(writes[4].author).toBe("VOLT");
+});
+
+test("without a crew id nothing extra is sent", async () => {
+  const { api, calls } = fakeApi();
+  await call("card_comment", { cardId: "card_1", text: "done" }, api);
+  expect((calls[0]!.body as any).crew).toBeUndefined();
+});
+
 // ---- crew_note: a crew member's notes for its future self -------------------
 
 test("tools/list includes crew_note", async () => {

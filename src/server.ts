@@ -255,6 +255,17 @@ export function makeServer(
   type Actor = { name: string; sessionId?: string; crew?: string };
 
   type Unsignable = { error: string; status: number };
+  const NO_LONGER_ASSIGNED = "you are no longer assigned to this card; stop work on it";
+
+  /** The crews each card was taken off (by card-assign, or a spawn binding
+   *  someone else), so their later writes can be refused however they sign.
+   *  In memory, like the inbox: a restart forgets it, and a taken-off agent
+   *  still has the stop notice and the "as" check against the assignee. */
+  const takenOff = new Map<string, Set<string>>();
+  const noteTakenOff = (cardId: string, was: Card["assignee"], to: Card["assignee"]) => {
+    if (!was?.crew || was.crew === to?.crew) return;
+    takenOff.set(cardId, (takenOff.get(cardId) ?? new Set()).add(was.crew));
+  };
 
   /** A signature read off a card write, before anyone asks it for anything in
    *  particular. Every write path — move, comment, merge, crew-note — takes the
@@ -276,7 +287,35 @@ export function makeServer(
    *  caller that doesn't (crew-note) passes `cardId` in the body instead. */
   type Signer = { via: "assignee" | "session" | "crew" | "author"; name?: string; sessionId?: string; crew?: string };
 
+  /** The crew the card is with right now: a pending respawn's, else the live
+   *  assignee session's, else the one recorded on the card. */
+  function currentCrew(k: Card, live: AgentStatus | undefined): string | undefined {
+    if (!k.assignee) return undefined;
+    const respawn = live ? undefined : pendingSpawns.findLast((p) => p.cardId === k.id && p.crewName);
+    return respawn?.crewId ?? live?.crew?.id ?? k.assignee.crew;
+  }
+
+  /** A card write from a crew this card was taken off, and which is not back
+   *  on it now, is refused whatever convention signs it. The crew is the one
+   *  sent, or the one behind the session sent. Nothing else is checked: the
+   *  human (no crew), the scrum master and any crew never taken off this card
+   *  sign as before. */
+  function takenOffWriter(body: Signature, k: Card): Unsignable | undefined {
+    const gone = takenOff.get(k.id);
+    if (!gone?.size) return;
+    const crew = body.crew && CREW_ID_RE.test(body.crew) ? body.crew
+      : body.sessionId && validSessionId(body.sessionId) ? resolveAssignee(dir, body.sessionId)?.crew : undefined;
+    if (!crew || !gone.has(crew)) return;
+    const live = k.assignee ? findAssigneeSession(readSnapshot(dir, Date.now()).agents, k.assignee) : undefined;
+    if (crew === currentCrew(k, live)) return;
+    return { error: NO_LONGER_ASSIGNED, status: 409 };
+  }
+
   function resolveSigner(body: Signature, card?: Card): Signer | Unsignable {
+    if (card) {
+      const refused = takenOffWriter(body, card);
+      if (refused) return refused;
+    }
     if (body.as === "assignee") {
       const k = card ?? readBoard(dir).cards.find((c) => c.id === body.cardId);
       if (!k) return { error: `unknown card: ${body.cardId ?? ""}`, status: 404 };
@@ -290,9 +329,9 @@ export function makeServer(
       // not the assignee was taken off the card: signing it as the assignee
       // would put its words under the new agent's name. Without a crew id on
       // both sides there is nothing to compare, so old footers sign as before.
-      const current = respawn?.crewId ?? live?.crew?.id ?? k.assignee.crew;
+      const current = currentCrew(k, live);
       if (body.crew && CREW_ID_RE.test(body.crew) && current && body.crew !== current) {
-        return { error: "you are no longer assigned to this card; stop work on it", status: 409 };
+        return { error: NO_LONGER_ASSIGNED, status: 409 };
       }
       if (respawn) return { via: "assignee", name: respawn.crewName, crew: respawn.crewId };
       const fresh = live ?? resolveAssignee(dir, k.assignee.id);
@@ -427,6 +466,7 @@ export function makeServer(
         const who = resolveAssignee(dir, sessionId);
         if (!who) continue;
         writeBoard(dir, assignCard(board, p.cardId, who));
+        noteTakenOff(p.cardId, card.assignee, who);
         wrote = true;
       }
       if (wrote) push();
@@ -961,6 +1001,7 @@ export function makeServer(
       pendingSpawns = pendingSpawns.filter((p) => p.cardId !== cardId);
       const next = assignCard(board, cardId, null);
       writeBoard(dir, next);
+      noteTakenOff(cardId, card.assignee, null);
       push();
       const delivery = await notifyTakenOff(next, card, null, title);
       return json({ ok: true, delivery });
@@ -977,6 +1018,7 @@ export function makeServer(
     pendingSpawns = pendingSpawns.filter((p) => p.cardId !== cardId);
     const next = assignCard(board, cardId, resolved);
     writeBoard(dir, next);
+    noteTakenOff(cardId, card.assignee, resolved);
     push();
     const delivery = await notifyTakenOff(next, card, resolved, title);
     return json({ ok: true, delivery });
