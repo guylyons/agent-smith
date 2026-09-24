@@ -136,6 +136,87 @@ export function playKeyClick(down: boolean): void {
   }
 }
 
+// The tube death (see @keyframes tube-die): a CRT losing its signal and
+// switching off. Timed to the 1.5s animation — crackling static through the
+// glitch frames, a rising flyback whine as the phosphor flares, then the
+// "thoop" of the picture collapsing to a dot, and a click as it goes.
+// `short` is the reduced-motion version: the window only fades for 0.3s there,
+// so it gets just the collapse and the click. Several desks dying in one
+// snapshot play it once — a stack of identical deaths is just louder, not more.
+let lastTubeOff = 0;
+export function playTubeOff(short = false): void {
+  const c = audioCtx();
+  if (!c) return;
+  if (c.currentTime - lastTubeOff < 0.25 && lastTubeOff > 0) return;
+  lastTubeOff = c.currentTime;
+  try {
+    const now = c.currentTime;
+    const out = c.createGain();
+    out.gain.value = 0.5;
+    out.connect(c.destination);
+
+    // Static: noise whose loudness jumps between frames, like the steps() in
+    // the glitch keyframes, and gutters out as the picture does (to ~66%).
+    const staticEnd = short ? 0 : 1.0;
+    if (staticEnd > 0) {
+      const len = Math.ceil(c.sampleRate * staticEnd);
+      const buf = c.createBuffer(1, len, c.sampleRate);
+      const data = buf.getChannelData(0);
+      const frame = Math.ceil(c.sampleRate * 0.045);
+      let level = 0;
+      for (let i = 0; i < len; i++) {
+        if (i % frame === 0) level = Math.random() < 0.3 ? 0.15 : 0.4 + Math.random() * 0.6;
+        const fade = 1 - (i / len) ** 2;
+        data[i] = (Math.random() * 2 - 1) * level * fade;
+      }
+      const src = c.createBufferSource();
+      src.buffer = buf;
+      const hp = c.createBiquadFilter();
+      hp.type = "highpass";
+      hp.frequency.value = 1400;
+      const g = c.createGain();
+      g.gain.value = 0.16;
+      src.connect(hp);
+      hp.connect(g);
+      g.connect(out);
+      src.start(now);
+    }
+
+    // Flyback whine rising into the flare, then the collapse: a sine that
+    // dives from high to a low thump as the image shrinks to a line.
+    const t0 = now + (short ? 0 : 1.0);
+    const whine = c.createOscillator();
+    const wg = c.createGain();
+    whine.type = "triangle";
+    whine.frequency.setValueAtTime(short ? 1800 : 900, t0);
+    if (!short) whine.frequency.exponentialRampToValueAtTime(2400, t0 + 0.18);
+    whine.frequency.exponentialRampToValueAtTime(55, t0 + (short ? 0.26 : 0.46));
+    wg.gain.setValueAtTime(0.0001, t0);
+    wg.gain.exponentialRampToValueAtTime(0.18, t0 + 0.03);
+    wg.gain.setValueAtTime(0.18, t0 + (short ? 0.06 : 0.2));
+    wg.gain.exponentialRampToValueAtTime(0.0001, t0 + (short ? 0.28 : 0.5));
+    whine.connect(wg);
+    wg.connect(out);
+    whine.start(t0);
+    whine.stop(t0 + (short ? 0.3 : 0.52));
+
+    // The dot going out: one tiny click.
+    const tc = t0 + (short ? 0.28 : 0.48);
+    const click = c.createBuffer(1, Math.ceil(c.sampleRate * 0.012), c.sampleRate);
+    const cd = click.getChannelData(0);
+    for (let i = 0; i < cd.length; i++) cd[i] = (Math.random() * 2 - 1) * (1 - i / cd.length) ** 4;
+    const cs = c.createBufferSource();
+    cs.buffer = click;
+    const cg = c.createGain();
+    cg.gain.value = 0.25;
+    cs.connect(cg);
+    cg.connect(out);
+    cs.start(tc);
+  } catch {
+    /* autoplay/AudioContext may be blocked — ignore */
+  }
+}
+
 // Play the cue named by a SoundCue value (from soundTransitions / boardMoves).
 export function playCue(cue: SoundCue): void {
   if (cue === "completion") playCompletion();
