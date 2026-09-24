@@ -3,7 +3,7 @@ import { fixtureDir } from "./fixtures";
 import { mkdirSync, rmSync, existsSync, realpathSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { slugify, slugifyBranch } from "../src/lib/slug";
-import { createWorktree, createBranch, prepareLaunch } from "../src/lib/worktree";
+import { createWorktree, createBranch, prepareLaunch, isOwnedWorktree } from "../src/lib/worktree";
 
 test("slugify turns a task into a branch-safe slug", () => {
   expect(slugify("Fix the phantom agent bug")).toBe("fix-the-phantom-agent-bug");
@@ -66,6 +66,18 @@ test("createWorktree makes an isolated worktree + branch off HEAD", async () => 
   expect(r.branch).toBe("fix-thing");
   expect(r.path).toBe(join(repo, ".claude", "worktrees", "fix-thing"));
   expect(existsSync(r.path!)).toBe(true);
+});
+
+test("createWorktree marks the worktree as the dashboard's; one made by hand is not", async () => {
+  const repo = await freshRepo();
+  const r = await createWorktree(repo, "ours");
+  expect(await isOwnedWorktree(r.path!)).toBe(true);
+  const foreign = join(repo, ".claude", "worktrees", "foreign");
+  await git(repo, "worktree", "add", "-q", "-b", "foreign", foreign, "HEAD");
+  expect(await isOwnedWorktree(foreign)).toBe(false);
+  // The main checkout and a non-repo are never ours either.
+  expect(await isOwnedWorktree(repo)).toBe(false);
+  expect(await isOwnedWorktree(emptyDir())).toBe(false);
 });
 
 test("createWorktree reports the main checkout's real path as repoRoot", async () => {

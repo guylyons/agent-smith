@@ -3,6 +3,7 @@ import { fixtureDir } from "./fixtures";
 import { mkdirSync, rmSync, writeFileSync, existsSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { worktreeKeepReason, planWorktreeCleanup, cleanupMergedWorktrees } from "../src/lib/merge";
+import { markWorktreeOwned } from "../src/lib/worktree";
 
 // The CONFIG sweep: worktrees merged by hand (git merge in a terminal) never
 // went through MERGE, so nothing removed them. The sweep lists every one under
@@ -56,6 +57,7 @@ async function freshRepo(): Promise<string> {
 /** A worktree where the launcher puts one; `commit` puts a file on its branch. */
 async function agentWorktree(root: string, branch: string, commit = true, where = join(root, ".claude", "worktrees", branch)): Promise<string> {
   await git(root, "worktree", "add", "-q", "-b", branch, where, "HEAD");
+  await markWorktreeOwned(where);
   if (commit) {
     writeFileSync(join(where, `${branch}.txt`), `${branch}\n`);
     await git(where, "add", "-A");
@@ -172,4 +174,46 @@ test("a locked worktree is kept and says so", async () => {
   const plan = await planWorktreeCleanup([root], []);
   expect(plan.remove).toEqual([]);
   expect(plan.keep[0]!.why).toMatch(/locked/);
+});
+
+// Claude Code's own worktrees (claude --worktree, subagent isolation) live in
+// the same folder. Only the ones the dashboard made are ever ours to remove.
+
+test("a worktree the dashboard didn't make is never listed, even clean and merged", async () => {
+  const root = await freshRepo();
+  const ours = await agentWorktree(root, "ag-ours");
+  await mergeByHand(root, "ag-ours");
+  // Made by hand at main's tip, the way `claude --worktree` would: reads as clean and merged.
+  const foreign = join(root, ".claude", "worktrees", "foreign");
+  await git(root, "worktree", "add", "-q", "-b", "foreign", foreign, "HEAD");
+
+  const plan = await planWorktreeCleanup([root], []);
+  expect(plan.remove.map((w) => w.branch)).toEqual(["ag-ours"]);
+  expect([...plan.remove, ...plan.keep].some((w) => w.branch === "foreign")).toBe(false);
+
+  // Even named explicitly, the sweep leaves it alone.
+  const res = await cleanupMergedWorktrees([root], [], [foreign, ours]);
+  expect(res.removed.map((w) => w.branch)).toEqual(["ag-ours"]);
+  expect(existsSync(foreign)).toBe(true);
+  expect(await git(root, "branch", "--list", "foreign")).toContain("foreign");
+});
+
+test("a worktree whose only change is the launcher's settings.local.json counts as clean", async () => {
+  // No repo .gitignore entry and no global ignore: a machine that isn't this one.
+  const root = await freshRepo();
+  // Switch off this machine's global ignore (it lists settings.local.json).
+  await git(root, "config", "core.excludesFile", "/dev/null");
+  const wt = await agentWorktree(root, "ag-local");
+  await mergeByHand(root, "ag-local");
+  mkdirSync(join(wt, ".claude"), { recursive: true });
+  writeFileSync(join(wt, ".claude", "settings.local.json"), "{}\n");
+  expect(await git(wt, "status", "--porcelain")).toContain(".claude/");
+
+  const plan = await planWorktreeCleanup([root], []);
+  expect(plan.keep).toEqual([]);
+  expect(plan.remove.map((w) => w.branch)).toEqual(["ag-local"]);
+
+  // Anything else beside it still counts.
+  writeFileSync(join(wt, ".claude", "notes.md"), "wip\n");
+  expect((await planWorktreeCleanup([root], [])).keep[0]!.why).toMatch(/uncommitted changes/);
 });

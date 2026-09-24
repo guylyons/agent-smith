@@ -5,7 +5,7 @@
 // throws — every path resolves to a { ok, ... } result the caller can surface
 // as a toast.
 import { join, dirname, resolve } from "node:path";
-import { mkdirSync, realpathSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { slugify, slugifyBranch } from "./slug";
 import { registerWorktreeTrust } from "./trust";
 
@@ -80,6 +80,8 @@ export async function createWorktree(cwd: string, name: string, branchName?: str
     ? await git(root, ["worktree", "add", path, branch])
     : await git(root, ["worktree", "add", "-b", branch, path, "HEAD"]);
   if (add.code !== 0) return { ok: false, error: add.stderr || "git worktree add failed" };
+  // Without the marker cleanup never removes it: kept, never lost.
+  await markWorktreeOwned(path);
 
   // Extend the repo root's existing trust to this derived worktree so an agent
   // launched here doesn't stall on the trust dialog before its first turn. Gated
@@ -138,4 +140,41 @@ export async function prepareLaunch(
   if (worktree) return createWorktree(cwd, worktree, branch || undefined);
   if (branch) return createBranch(cwd, branch);
   return { ok: true, path: cwd };
+}
+
+// Claude Code makes its own worktrees in the same .claude/worktrees folder
+// (`claude --worktree`, subagent isolation). Cleanup must tell ours apart, so
+// createWorktree drops a marker in the worktree's private git dir
+// (.git/worktrees/<name>/): outside the working tree, so it never shows as a
+// change, and `git worktree remove` takes it along.
+const OWNED_MARKER = "agent-smith-worktree";
+
+/** The private git dir of the linked worktree at `path`; null for the main
+ *  checkout (whose git dir is the common one) or a non-repo. */
+async function linkedGitDir(path: string): Promise<string | null> {
+  const r = await git(path, ["rev-parse", "--absolute-git-dir", "--git-common-dir", "--show-toplevel"]).catch(() => null);
+  if (!r || r.code !== 0) return null;
+  const [dir, common, top] = r.stdout.split("\n");
+  if (!dir || !common || !top) return null;
+  // Only the worktree's own top level counts, never a folder inside it.
+  if (realOr(top) !== realOr(path)) return null;
+  return realOr(dir) === realOr(resolve(path, common)) ? null : dir;
+}
+
+function realOr(p: string): string {
+  try { return realpathSync(p); } catch { return p; }
+}
+
+/** Record that the dashboard made the worktree at `path`. False when it isn't
+ *  a linked worktree or the write failed. Never throws. */
+export async function markWorktreeOwned(path: string): Promise<boolean> {
+  const dir = await linkedGitDir(path);
+  if (!dir) return false;
+  try { writeFileSync(join(dir, OWNED_MARKER), "made by the agent-smith dashboard\n"); return true; } catch { return false; }
+}
+
+/** Did the dashboard make the worktree at `path`? Never throws. */
+export async function isOwnedWorktree(path: string): Promise<boolean> {
+  const dir = await linkedGitDir(path);
+  return !!dir && existsSync(join(dir, OWNED_MARKER));
 }
