@@ -224,13 +224,25 @@ test("holdForClaims leaves a key with nothing committed alone", () => {
 
 test("mergeWaitFlag puts the blocking card on the face of the one waiting", () => {
   const b = boardWith(
-    { id: "card_a", columnId: "review", assignee, touches: ["x.ts"] },
+    { id: "card_a", title: "Rework the header", columnId: "review", assignee, touches: ["x.ts"] },
     { id: "card_b", columnId: "in-progress", assignee: other, touches: ["x.ts"] },
   );
   const flag = mergeWaitFlag(b, "card_b")!;
-  expect(flag.label).toContain("card_a");
+  // Named by title, which is what a person reads on the board; the id stays
+  // in the tooltip for anyone matching it against a comment.
+  expect(flag.label).toBe('⏳ after "Rework the header"');
+  expect(flag.title).toContain("card_a");
   expect(flag.title).toContain("merge that first");
   expect(mergeWaitFlag(b, "card_a")).toBeNull();
+});
+
+test("mergeWaitFlag names the first card ahead and counts the rest", () => {
+  const b = boardWith(
+    { id: "card_a", title: "First", columnId: "review", assignee, touches: ["x.ts"] },
+    { id: "card_c", title: "Second", columnId: "review", assignee, touches: ["x.ts"] },
+    { id: "card_b", columnId: "in-progress", assignee: other, touches: ["x.ts"] },
+  );
+  expect(mergeWaitFlag(b, "card_b")?.label).toMatch(/^⏳ after "(First|Second)" \+1$/);
 });
 
 // ---- over HTTP ---------------------------------------------------------------

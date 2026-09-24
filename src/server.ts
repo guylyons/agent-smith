@@ -10,7 +10,7 @@ import { readOverrides, applyOverrides, setNameOverride, setSpriteOverride } fro
 import { loadPersonas, applyPersonas } from "./lib/personas";
 import { applyCrew, pickName, mintCrewId, findAssigneeSession, isAssigneeSession, addNote, CREW_ID_RE } from "./lib/crew";
 import { sendTaskReadiness } from "./lib/sendTaskReady";
-import { readBoard, writeBoard, boardFile, addCard, moveCard, moveToWorkColumn, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, addColumn, renameColumn, setInstruction, setColumnStage, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, setCardTouches, setCardRepo, repoName, claimBlockReason, mergeBlockReason, landMergedCard, mergeReleaseNotes, type Board, type Card } from "./lib/board";
+import { readBoard, writeBoard, boardFile, addCard, moveCard, moveToWorkColumn, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, addColumn, renameColumn, setInstruction, setColumnStage, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, setCardTouches, setCardRepo, setCardKind, findScrumCard, scrumBrief, repoName, claimBlockReason, mergeBlockReason, landMergedCard, mergeReleaseNotes, type Board, type Card } from "./lib/board";
 import { readMood, writeMood, moodFile, formatMood, addNote as addMoodNote, updateNote, raiseNote, deleteNote, restoreNote, addLink, linkBlockReason, setLinkLabel, deleteLink, type Mood, type MoodLink, type NotePatch } from "./lib/mood";
 import { mainCheckout } from "./lib/worktree";
 import { focusSession, interruptSession, killAgent, sendPrompt, sendFreshPrompt, spawnAgent } from "./ghostty";
@@ -140,11 +140,14 @@ export function makeServer(
     idleGraceMs?: number;
     idleStartupGraceMs?: number;
     idleCheckMs?: number;
+    /** How often /events sends a keep-alive comment (see the stream below). */
+    heartbeatMs?: number;
   } = {},
 ) {
   const {
     scan = false, scanIntervalMs = SCAN_INTERVAL_MS, deliver = sendPrompt, deliverFresh = sendFreshPrompt, spawn = spawnAgent,
     onWindowsClosed, idleGraceMs = 5_000, idleStartupGraceMs = 30_000, idleCheckMs = 1_000,
+    heartbeatMs = 5_000,
   } = opts;
   const dir = ensureStatusDir();
 
@@ -530,7 +533,11 @@ export function makeServer(
     const live = readSnapshot(dir, Date.now()).agents;
     const name = pickName(live.map((a) => a.name));
     const crew = { id: mintCrewId(name), name };
-    const r = await spawn(cwd, task, { model, permissionMode, worktree, branch, persona, serverUrl: url.origin, cardId, crew });
+    // A worker an agent staffs (the scrum master's spawn) runs in auto mode
+    // unless the spawn names a mode, so it doesn't stall on prompts nobody is
+    // watching. A human in the dialog gets exactly the mode they picked.
+    const mode = permissionMode ?? (req.headers.get("sec-fetch-site") ? undefined : "auto");
+    const r = await spawn(cwd, task, { model, permissionMode: mode, worktree, branch, persona, serverUrl: url.origin, cardId, crew });
     // Bind the card to the new session once it shows up, hooks or not.
     if (r.ok && cardId && r.cwd) {
       pendingSpawns.push({
@@ -607,11 +614,23 @@ export function makeServer(
     return json({ ok: true });
   }
 
-  function cardAdd(_ctx: Ctx, { columnId, title, description }: z.output<typeof CardAddBody>): Response {
+  function cardAdd(_ctx: Ctx, { columnId, title, description, kind, repo, repoPath }: z.output<typeof CardAddBody>): Response {
     const board = readBoard(dir);
     if (!board.columns.some((c) => c.id === columnId)) return json({ ok: false, error: `unknown column: ${columnId}` }, 400);
+    // One scrum master card per project: asking again hands back the one there
+    // is, so a double-click (or a second tab) never makes two orchestrators.
+    if (kind === "scrum") {
+      const existing = findScrumCard(board, repo);
+      if (existing) return json({ ok: true, cardId: existing.id, existing: true });
+    }
     let next = addCard(board, columnId, title);
     const card = next.cards[next.cards.length - 1]!; // addCard appends
+    if (repo) next = setCardRepo(next, card.id, repo, repoPath);
+    if (kind === "scrum") {
+      // Top of the column, so it is the first thing in the backlog, not the last.
+      next = moveCard(setCardKind(next, card.id, kind), card.id, columnId, 0);
+      if (!description.trim()) description = scrumBrief(repo, repoPath);
+    }
     if (description.trim()) next = setCardDescription(next, card.id, description);
     writeBoard(dir, next);
     push();
@@ -966,14 +985,22 @@ export function makeServer(
       const url = new URL(req.url);
       if (url.pathname === "/events") {
         let send!: (s: Snapshot) => void;
+        let beat: ReturnType<typeof setInterval> | null = null;
         const stream = new ReadableStream({
           start(ctrl) {
             const enc = new TextEncoder();
             send = (s) => ctrl.enqueue(enc.encode(`data: ${JSON.stringify(s)}\n\n`));
             addClient(send);
             send(snapshot()); // initial
+            // Bun closes a connection after 10s with nothing sent, and this
+            // stream only speaks when the board changes: a quiet board lost
+            // it every ~10s and the header flashed RECONNECTING at a healthy
+            // server. A comment line (ignored by EventSource) keeps it open.
+            beat = setInterval(() => {
+              try { ctrl.enqueue(enc.encode(": ping\n\n")); } catch { if (beat) clearInterval(beat); }
+            }, heartbeatMs);
           },
-          cancel() { dropClient(send); },
+          cancel() { if (beat) clearInterval(beat); dropClient(send); },
         });
         return new Response(stream, { headers: {
           "content-type": "text/event-stream",

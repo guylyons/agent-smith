@@ -18,7 +18,7 @@ Writes (POST with -H 'content-type: application/json' -d '<json>'):
 
     /action/card-add       {"columnId":"...","title":"...","description":"..."}
     /action/spawn          {"cwd":"<repo folder>","text":"<task>","persona":"backend-dev",
-                            "permissionMode":"acceptEdits","worktree":"<short-name>",
+                            "permissionMode":"auto","worktree":"<short-name>",
                             "cardId":"<the card>"}
     /action/card-comment   {"cardId":"...","author":"<your name>","text":"..."}
     /action/card-move      {"cardId":"...","toColumnId":"...","author":"<your name>"}
@@ -46,8 +46,8 @@ what to change, where, what done means, and hard constraints stated bluntly
 
 To staff a card, spawn a FRESH agent for it: /action/spawn with the repo folder
 as cwd, a persona matched to the work (backend-dev, frontend-ux, editor),
-permissionMode "acceptEdits", a short worktree name, the card's task text, and
-the card's id as "cardId". That is the whole hand-off: the new session assigns
+permissionMode "auto" (also the default if you leave it out), a short worktree
+name, the card's task text, and the card's id as "cardId". That is the whole hand-off: the new session assigns
 itself to the card as it starts and already has the task, so do NOT card-assign
 or send-task after a spawn. Reuse a live agent only when it is idle: card-assign,
 then send-task (send-task is refused while the agent is working). Never leave a

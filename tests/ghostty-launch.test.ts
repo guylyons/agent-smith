@@ -13,6 +13,10 @@ test("no persona keeps today's command shape", () => {
   expect(buildLaunchInput("do a thing", {}, null)).toBe("claude 'do a thing'\n");
 });
 
+test("auto is an allowed permission mode", () => {
+  expect(buildLaunchInput("t", { permissionMode: "auto" }, null)).toBe("claude --permission-mode auto 't'\n");
+});
+
 test("model and permission mode are allowlisted", () => {
   expect(buildLaunchInput("t", { model: "opus", permissionMode: "plan" }, null))
     .toBe("claude --model opus --permission-mode plan 't'\n");

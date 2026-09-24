@@ -142,6 +142,11 @@ export const CardAddBody = body({
   columnId: text(),
   title: z.string({ error: "title is required" }).trim().min(1, { error: "title is required" }),
   description: text(),
+  // "scrum" makes the project's scrum master card; anything else is ignored.
+  kind: z.literal("scrum").optional().catch(undefined),
+  // The project the card is for, as on card-update; a path without a name is dropped.
+  repo: maybeTrimmed().optional(),
+  repoPath: maybeTrimmed().optional(),
 });
 
 export const CommentDeleteBody = body({ commentId: required("commentId is required") });

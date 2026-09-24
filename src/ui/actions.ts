@@ -16,7 +16,7 @@ import type { MergeState, MergeResult } from "../lib/merge";
  *  for a busy one's Stop hook to collect when its turn ends. */
 export type Delivery = { sessionId: string; name: string; via: "typed" | "queued" };
 
-type Result = { ok: boolean; error?: string; cardId?: string; noteId?: string; linkId?: string; path?: string; url?: string; cancelled?: boolean; branch?: string; base?: string; delivery?: Delivery[] };
+type Result = { ok: boolean; error?: string; cardId?: string; existing?: boolean; noteId?: string; linkId?: string; path?: string; url?: string; cancelled?: boolean; branch?: string; base?: string; delivery?: Delivery[] };
 
 async function post(action: string, body: object): Promise<Result> {
   try {
@@ -86,6 +86,16 @@ export async function addCardAction(columnId: string, title: string): Promise<st
   const r = await post("card-add", { columnId, title });
   if (!r.ok) { toastError(r.error ?? "card-add failed"); return null; }
   return r.cardId ?? null;
+}
+/** Make (or find) the project's scrum master card; resolves to its id and
+ *  whether it was already there, or null if the server refused. */
+export async function addScrumCardAction(
+  columnId: string, repo: string | undefined, repoPath: string | undefined,
+): Promise<{ id: string; existing: boolean } | null> {
+  const title = repo ? `Scrum master · ${repo}` : "Scrum master";
+  const r = await post("card-add", { columnId, title, kind: "scrum", repo, repoPath });
+  if (!r.ok || !r.cardId) { toastError(r.error ?? "card-add failed"); return null; }
+  return { id: r.cardId, existing: !!r.existing };
 }
 export function renameCardAction(cardId: string, title: string): void { void act("card-update", { cardId, title }); }
 export function setCardDescriptionAction(cardId: string, description: string): void { void act("card-update", { cardId, description }); }

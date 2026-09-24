@@ -24,7 +24,7 @@ export function App() {
   const { snap, live } = useSnapshot();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // null = closed; {} = blank; {task, cardId} = seeded from a card's "new agent for this card"
-  const [spawnSeed, setSpawnSeed] = useState<{ task?: string; cardId?: string } | null>(null);
+  const [spawnSeed, setSpawnSeed] = useState<{ task?: string; cardId?: string; persona?: string; folder?: string } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [alertsEnabled, setAlertsEnabled] = useState(false);
@@ -169,7 +169,7 @@ export function App() {
       ) : (
         <>
           <Crew agents={snap.agents} board={snap.board} unread={unread} onOpen={openAgent} />
-          <TheLine board={snap.board} agents={snap.agents} lineRows={display.lineRows} onSpawnForCard={(task, cardId) => setSpawnSeed({ task, cardId })} />
+          <TheLine board={snap.board} agents={snap.agents} lineRows={display.lineRows} onSpawnForCard={(task, cardId, seed) => setSpawnSeed({ task, cardId, ...seed })} />
         </>
       )}
       {selected && selected.sessionId === selectedId && (
@@ -180,6 +180,8 @@ export function App() {
           liveFolders={liveFolders}
           initialTask={spawnSeed.task}
           cardId={spawnSeed.cardId}
+          initialPersona={spawnSeed.persona}
+          initialFolder={spawnSeed.folder}
           onClose={() => setSpawnSeed(null)}
         />
       )}

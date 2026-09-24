@@ -22,6 +22,8 @@
     --gold:#f2b134;
     --leaf:#4fbf6a;
     --clay:#e0533d;
+    --scrum:#b58cff;           /* the scrum master card — a hue no other state uses */
+    --on-scrum:#160a2b;
     --on-accent:#1a1204;
     --on-ok:#08130c;
     --on-danger:#fff;
@@ -469,7 +471,9 @@
   .crew{
     max-width:1080px;margin:0 auto;
     display:grid;gap:14px;
-    grid-template-columns:repeat(auto-fit,minmax(300px,1fr));
+    /* minmax(0,…) not a bare 1fr: a bare track grows to its widest line of
+       text, which pushed the desks (and their buttons) off a narrow window. */
+    grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr));
   }
   /* The empty grid is one block, not a column of cards, so it drops out of the
      auto-fit track and centres under the header. */
@@ -642,6 +646,31 @@
     border:2px dashed var(--bevel);padding:8px 12px;
   }
   .add-col:hover{color:var(--gold);border-color:var(--gold)}
+  /* THE LINE's heading row: the title, and the one board-wide action. */
+  .line-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+  .add-scrum{
+    font-size:12px;letter-spacing:calc(.5px + var(--track));
+    color:var(--scrum);background:transparent;
+    border:2px solid var(--scrum);border-radius:var(--radius-sm);
+    padding:5px 8px;cursor:pointer;white-space:nowrap;
+  }
+  .add-scrum:hover{color:var(--on-scrum);background:var(--scrum)}
+  .add-scrum:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+  /* The scrum master card: its own colour on the border, a tint over the face
+     and a badge, so the one orchestrator card never reads as a ticket. Hover
+     and focus still go gold like every card; the tint and badge keep saying
+     what it is. A drop-line still shows because the box-shadow keeps its stack. */
+  .card.card-scrum{
+    border-color:var(--scrum);
+    background:linear-gradient(color-mix(in srgb,var(--scrum) 16%,transparent),color-mix(in srgb,var(--scrum) 16%,transparent)),var(--box);
+  }
+  .card.card-scrum:hover,.card.card-scrum:focus{border-color:var(--gold)}
+  .card-kind{
+    align-self:flex-start;
+    font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:calc(.5px + var(--track));
+    color:var(--on-scrum);background:var(--scrum);
+    border-radius:var(--radius-sm);padding:2px 5px;line-height:1.2;white-space:nowrap;
+  }
 
   footer{max-width:1080px;margin:22px auto 0;font-size:13px;color:var(--dim);line-height:2}
 
@@ -657,7 +686,7 @@
     .statline{gap:10px}
     /* One desk per row: two columns of 300px never fit, so auto-fit was
        overflowing rather than wrapping. */
-    .crew{grid-template-columns:1fr}
+    .crew{grid-template-columns:minmax(0,1fr)}
     .line{margin-top:16px;padding:12px}
     .line .hint{font-size:12px}
     /* A column just under the viewport, so the next one peeks in and the board
@@ -1511,9 +1540,14 @@ body{background:transparent}
   color:var(--on-danger);background:var(--clay);
   padding:2px 4px;letter-spacing:.5px;
 }
-/* Waiting behind another card's merge (mergeWaitFlag): the id of the card to
-   land first, in gold like the claim notes in the card modal. */
-.card-flag.card-flag-wait{color:var(--gold);font-size:11px}
+/* Waiting behind another card's merge (mergeWaitFlag): the title of the card to
+   land first, in gold like the claim notes in the card modal. One line, cut
+   with an ellipsis: a long title must not stretch the card. */
+.card-flag.card-flag-wait{
+  color:var(--gold);font-size:11px;line-height:1.3;
+  flex:1 1 100%;min-width:0;max-width:100%;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
 
 /* ---- tube death: STOP takes the agent's window out like a CRT ---------------
    Ending a session used to blink its window out between one frame and the next
@@ -1699,6 +1733,8 @@ body{background:transparent}
   --gold:#ffb000;
   --leaf:#2fe37a;
   --clay:#ff4438;
+  --scrum:#5fe3ff;
+  --on-scrum:#001419;
   --on-accent:#150a00;
   --on-ok:#02170b;
   --on-danger:#1a0300;
@@ -1767,6 +1803,8 @@ body{background:transparent}
   --gold:#6750a4;
   --leaf:#146c2e;
   --clay:#b3261e;
+  --scrum:#006a6a;
+  --on-scrum:#fff;
   --on-accent:#fff;
   --on-ok:#fff;
   --on-danger:#fff;
@@ -1791,6 +1829,10 @@ body{background:transparent}
   --win-shadow-hover:0 2px 4px rgba(28,27,31,.12),0 10px 28px rgba(103,80,164,.20);
   --win-shadow-send:0 2px 4px rgba(28,27,31,.12),0 0 0 2px var(--leaf);
 }
+/* The theme card rules above and below outrank .card.card-scrum, so the
+   scrum master card restates its colour for them. */
+:root[data-theme="alien"] .card.card-scrum{border-color:var(--scrum)}
+:root[data-theme="material"] .card.card-scrum{border:2px solid var(--scrum)}
 /* elevation instead of bevels */
 :root[data-theme="material"] .card,
 :root[data-theme="material"] .facehud,
