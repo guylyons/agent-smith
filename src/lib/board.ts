@@ -406,6 +406,7 @@ export function cardTaskFooter(board: Board, id: string, server: string, agentNa
     "If a check the card asks for can't be done (tools down, no access), list it",
     `in that final comment as "Not checked: ..." and move the card to "${land.id}"`,
     "anyway. Do not hold the card for it.",
+    "Do not merge your branch. Merging is the human's call.",
     "",
     'A message starting with "[THE LINE]" is a board notification. One that says',
     "a reply is expected: answer it on the card with a card-comment. One marked",

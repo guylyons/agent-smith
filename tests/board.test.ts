@@ -475,6 +475,13 @@ test("cardTaskPrompt tells the worker not to hold a finished card for a check it
   expect(p.replace(/\s+/g, " ")).toContain(`move the card to "review" anyway`);
 });
 
+test("cardTaskPrompt tells the worker that merging is the human's call", () => {
+  let b = defaultBoard();
+  b = addCard(b, "backlog", "Fix login bug");
+  const p = cardTaskPrompt(b, b.cards[0]!.id, SRV);
+  expect(p).toContain("Do not merge your branch. Merging is the human's call.");
+});
+
 test("cardTaskPrompt reflects the card's current column", () => {
   let b = defaultBoard();
   b = addCard(b, "backlog", "Fix login bug");
