@@ -1775,6 +1775,43 @@ body{background:transparent}
 /* ---- settings: background upload + dim -------------------------------------- */
 .settings-bgfile{margin-top:8px}
 .settings-sweep{margin:4px 0 0;padding-left:18px;max-height:180px;overflow:auto;font-size:13px;line-height:1.6;color:var(--dim);overflow-wrap:anywhere}
+/* TEAM MEMORY (MemoryPanel.tsx): the kind is spelled out in each row, so the
+   left rule's colour is a second cue, never the only one. */
+.memory-panel{width:min(760px,94vw)}
+.memory-controls{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:flex-end}
+.memory-field{display:flex;flex-direction:column;gap:2px;min-width:0}
+.memory-field:first-child{flex:1 1 260px}
+.memory-field .settings-label{margin-top:0}
+.memory-input{
+  width:100%;box-sizing:border-box;font-family:var(--mono);font-size:15px;
+  color:var(--bone);background:var(--night);border:2px solid var(--bevel);padding:7px 8px;
+}
+.memory-input:focus-visible,.memory-scope:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+.memory-scope{min-width:0}
+.memory-count{margin-top:4px}
+.memory-error{display:flex;gap:8px;align-items:center;font-family:var(--mono);font-size:13px;color:var(--clay)}
+.memory-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.memory-row{border:2px solid var(--bevel);border-left:6px solid var(--dim);background:var(--box-lo);padding:8px 10px;font-family:var(--mono);font-size:13px;color:var(--bone);overflow-wrap:anywhere}
+.memory-row:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+.memory-decision{border-left-color:var(--gold)}
+.memory-gotcha{border-left-color:var(--clay)}
+.memory-summary{border-left-color:var(--leaf)}
+.memory-card{border-left-color:var(--scrum)}
+.memory-meta{display:flex;flex-wrap:wrap;gap:4px 10px;color:var(--dim);font-size:12px}
+.memory-kind{color:var(--gold);letter-spacing:.5px}
+.memory-title{font-size:15px;margin:4px 0}
+.memory-body{white-space:pre-wrap;line-height:1.5;color:var(--bone);max-height:12em;overflow-y:auto}
+.memory-compact{color:var(--dim)}
+.memory-links{display:flex;flex-wrap:wrap;gap:4px 6px;align-items:center;margin-top:6px;font-size:12px}
+.memory-linkhead{color:var(--dim)}
+.memory-link{border:1px solid var(--bevel);padding:1px 5px;color:var(--dim)}
+.memory-cardlink{
+  font-family:var(--mono);font-size:12px;cursor:pointer;background:transparent;color:var(--bone);
+  border:1px solid var(--gold);padding:1px 5px;text-align:left;text-decoration:underline;
+}
+.memory-cardlink:hover{color:var(--gold)}
+.memory-cardlink:focus-visible{outline:2px solid var(--gold);outline-offset:1px}
+.memory-actions{display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:flex-end;margin-top:8px;color:var(--gold)}
 .settings-bgpreview{
   height:84px;margin-top:8px;
   background-size:cover;background-position:center;
