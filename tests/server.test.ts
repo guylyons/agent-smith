@@ -380,12 +380,13 @@ test("card-assign binds a just-spawned session even before it enters the live vi
 const WORKER = "502d0e8c-8790-4804-b767-0549edfc959c";
 const SCRUM = "9a1b2c3d-1111-4222-8333-444455556666";
 
-async function notifyServer(opts: { deliverOk?: boolean; deliverFreshOk?: boolean } = {}) {
+async function notifyServer(opts: { deliverOk?: boolean; deliverFreshOk?: boolean; spawn?: any } = {}) {
   reset();
   process.env.AGENT_STATUS_DIR = dir;
   const sent: { sessionId: string; text: string; fresh: boolean }[] = [];
   const { makeServer } = await import("../src/server");
   const server = makeServer(0, {
+    ...(opts.spawn ? { spawn: opts.spawn } : {}),
     deliver: async (target: any, text: string) => {
       if (opts.deliverOk === false) return { ok: false, error: "no terminal" };
       sent.push({ sessionId: target.sessionId, text, fresh: false }); return { ok: true };
@@ -1487,13 +1488,130 @@ test("send-task bakes the agent's crew id into the footer's signed writes", asyn
   server.stop(true);
 });
 
-test("the footer's fallback still works with the crew id left in: author + crew signs as the author", async () => {
+// The fallback is for a fresh spawn whose card isn't bound to it yet: its
+// author + crew is accepted while that spawn is pending for the card.
+test("the footer's fallback works for a pending spawn: author + crew signs as the author", async () => {
+  let crewId = "";
+  const { server, post } = await notifyServer({
+    spawn: async (cwd: string, _task: string, o?: any) => { crewId = o?.crew?.id ?? ""; return { ok: true, cwd }; },
+  });
+  const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
+  expect((await post("/action/spawn", { cwd: dir, text: "go", cardId })).status).toBe(200);
+  expect(crewId).not.toBe("");
+  expect((await post("/action/card-comment", { cardId, as: "assignee", crew: crewId, text: "hi" })).status).toBe(400);
+  const r = await post("/action/card-comment", { cardId, author: "RIPLEY", crew: crewId, text: "hi" });
+  expect(r.status).toBe(200);
+  expect(readSnapshot(dir, Date.now()).board.cards[0]!.comments!.at(-1)!.author).toBe("RIPLEY");
+  server.stop(true);
+});
+
+// Only a crew that was taken off this card is refused. One that was never on
+// it (a stale footer, a scrum master) still signs by the fallback.
+test("the footer's fallback on an unassigned card works for a crew never taken off it", async () => {
   const { server, post } = await notifyServer();
   const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "T" })).json()) as any;
   expect((await post("/action/card-comment", { cardId, as: "assignee", crew: RIPLEY.id, text: "hi" })).status).toBe(400);
-  const r = await post("/action/card-comment", { cardId, author: "RIPLEY", crew: RIPLEY.id, text: "hi" });
-  expect(r.status).toBe(200);
+  expect((await post("/action/card-comment", { cardId, author: "RIPLEY", crew: RIPLEY.id, text: "hi" })).status).toBe(200);
+  expect((await post("/action/card-move", { cardId, author: "RIPLEY", crew: RIPLEY.id, toColumnId: "review" })).status).toBe(200);
   expect(readSnapshot(dir, Date.now()).board.cards[0]!.comments!.at(-1)!.author).toBe("RIPLEY");
+  server.stop(true);
+});
+
+// Taken off by an unassign, A's next "as" write gets the no-assignee 400 and
+// the footer says to resend with author: that resend still carries its crew.
+test("after an unassign, A's write is refused whatever it signs with", async () => {
+  const { server, post, cardId } = await reassignSetup();
+  await post("/action/card-assign", { cardId, sessionId: null });
+  for (const sig of [{ as: "assignee", crew: RIPLEY.id }, { author: "RIPLEY", crew: RIPLEY.id }, { crew: RIPLEY.id }, { sessionId: WORKER }]) {
+    const m = await post("/action/card-move", { cardId, ...sig, toColumnId: "review" });
+    expect(m.status).toBe(409);
+    expect(((await m.json()) as any).error).toContain("no longer assigned");
+    expect((await post("/action/card-comment", { cardId, ...sig, text: "still on it" })).status).toBe(409);
+  }
+  const card = readSnapshot(dir, Date.now()).board.cards[0]!;
+  expect(card.columnId).toBe("backlog");
+  expect((card.comments ?? []).some((k) => k.text === "still on it")).toBe(false);
+  server.stop(true);
+});
+
+test("after a reassign, A's write signed by author + crew or by session is refused", async () => {
+  const { server, post, cardId } = await reassignSetup();
+  await post("/action/card-assign", { cardId, sessionId: WORKER2 });
+  for (const sig of [{ author: "RIPLEY", crew: RIPLEY.id }, { crew: RIPLEY.id }, { sessionId: WORKER }]) {
+    expect((await post("/action/card-comment", { cardId, ...sig, text: "still on it" })).status).toBe(409);
+    expect((await post("/action/card-move", { cardId, ...sig, toColumnId: "review" })).status).toBe(409);
+  }
+  // B signing any of those ways is fine
+  expect((await post("/action/card-comment", { cardId, sessionId: WORKER2, text: "mine" })).status).toBe(200);
+  expect((await post("/action/card-comment", { cardId, author: "BISHOP", crew: BISHOP.id, text: "mine" })).status).toBe(200);
+  server.stop(true);
+});
+
+test("writes with no crew (the human's) and the scrum master's are not refused", async () => {
+  const { server, post, cardId } = await reassignSetup();
+  await post("/action/card-assign", { cardId, sessionId: null });
+  expect((await post("/action/card-comment", { cardId, author: "You", text: "note" })).status).toBe(200);
+  expect((await post("/action/card-move", { cardId, author: "You", toColumnId: "review" })).status).toBe(200);
+  // The scrum master comments on cards it isn't assigned to, by crew or session.
+  expect((await post("/action/card-comment", { cardId, author: "CADENCE", crew: "cadence-0001", text: "status?" })).status).toBe(200);
+  expect((await post("/action/card-comment", { cardId, sessionId: SCRUM, text: "status?" })).status).toBe(200);
+  // DALLAS signs by name, with or without its crew id, on cards it isn't on.
+  expect((await post("/action/card-comment", { cardId, author: "DALLAS", text: "status?" })).status).toBe(200);
+  expect((await post("/action/card-comment", { cardId, author: "DALLAS", crew: "dallas-0002", text: "status?" })).status).toBe(200);
+  expect((await post("/action/card-move", { cardId, author: "DALLAS", crew: "dallas-0002", toColumnId: "in-progress" })).status).toBe(200);
+  server.stop(true);
+});
+
+test("the same writes from the scrum master are fine while another agent is assigned", async () => {
+  const { server, post, cardId } = await reassignSetup();
+  expect((await post("/action/card-comment", { cardId, author: "DALLAS", crew: "dallas-0002", text: "status?" })).status).toBe(200);
+  expect((await post("/action/card-comment", { cardId, author: "You", text: "note" })).status).toBe(200);
+  // the assignee itself, any convention
+  expect((await post("/action/card-comment", { cardId, author: "RIPLEY", crew: RIPLEY.id, text: "mine" })).status).toBe(200);
+  expect((await post("/action/card-comment", { cardId, sessionId: WORKER, text: "mine" })).status).toBe(200);
+  server.stop(true);
+});
+
+test("an agent put back on a card it was taken off can write again", async () => {
+  const { server, post, cardId } = await reassignSetup();
+  await post("/action/card-assign", { cardId, sessionId: WORKER2 });
+  expect((await post("/action/card-comment", { cardId, author: "RIPLEY", crew: RIPLEY.id, text: "x" })).status).toBe(409);
+  await post("/action/card-assign", { cardId, sessionId: WORKER });
+  expect((await post("/action/card-comment", { cardId, author: "RIPLEY", crew: RIPLEY.id, text: "back" })).status).toBe(200);
+  // and now BISHOP is the one taken off
+  expect((await post("/action/card-comment", { cardId, sessionId: WORKER2, text: "x" })).status).toBe(409);
+  server.stop(true);
+});
+
+test("being taken off one card doesn't block writes to another", async () => {
+  const { server, post, cardId } = await reassignSetup();
+  await post("/action/card-assign", { cardId, sessionId: null });
+  const { cardId: other } = (await (await post("/action/card-add", { columnId: "backlog", title: "Other" })).json()) as any;
+  expect((await post("/action/card-comment", { cardId: other, author: "RIPLEY", crew: RIPLEY.id, text: "hi" })).status).toBe(200);
+  server.stop(true);
+});
+
+// MCP on a card it wasn't spawned for signs by session. The crew id rides
+// along, so a removed agent is refused there too.
+test("after an unassign, A's MCP card_move on a card it wasn't spawned for is refused with 409", async () => {
+  const { server, post, cardId } = await reassignSetup();
+  writeFileSync(join(dir, `${WORKER}.json`), valid({ sessionId: WORKER, state: "idle", crew: RIPLEY, cwd: "/work/ripley" }));
+  await post("/action/card-assign", { cardId, sessionId: null });
+  const { handleMessage } = await import("../src/lib/mcp");
+  const base = `http://localhost:${server.port}`;
+  const posted: { status: number; body: any; sent: any }[] = [];
+  const api = {
+    async get(path: string) { const r = await fetch(`${base}${path}`); return { status: r.status, body: await r.json() }; },
+    async post(path: string, body: unknown) { const r = await post(path, body as object); const out = { status: r.status, body: await r.json(), sent: body }; posted.push(out); return out; },
+  };
+  const res = (await handleMessage(
+    { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "card_move", arguments: { cardId, toColumnId: "review" } } },
+    { api, url: base, card: "card_other", crew: RIPLEY.id, cwd: "/work/ripley" },
+  )) as any;
+  expect(posted[0]!.sent.crew).toBe(RIPLEY.id);
+  expect(posted[0]!.status).toBe(409);
+  expect(res.result.isError).toBe(true);
+  expect(readSnapshot(dir, Date.now()).board.cards[0]!.columnId).toBe("backlog");
   server.stop(true);
 });
 

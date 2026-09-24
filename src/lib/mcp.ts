@@ -40,7 +40,7 @@ export type Ctx = {
  *  assignee and `sessionId` to that session's current desk name — both by
  *  identity, so a rename or a persona can never mis-sign a comment. A bare
  *  `author` is the last resort. */
-export type Signature = { as: "assignee"; crew?: string } | { sessionId: string } | { author: string };
+export type Signature = ({ as: "assignee" } | { sessionId: string } | { author: string }) & { crew?: string };
 
 /** Signed on a comment when we can't tell which agent we are. */
 const UNKNOWN_AUTHOR = "Claude";
@@ -77,11 +77,17 @@ async function request(ctx: Ctx, method: "GET" | "POST", path: string, body?: un
  *  uses its current desk name. Two agents sharing a folder is ambiguous:
  *  sign generically rather than attribute the note to the wrong teammate. */
 export async function signatureFor(ctx: Ctx, cardId: string, author?: string): Promise<Signature> {
+  const sig = await bareSignatureFor(ctx, cardId, author);
+  // Our crew id rides along on every write, whichever convention signs it, so
+  // a write from us after we were taken off the card is refused (409) instead
+  // of landing under our name or the new assignee's.
+  return ctx.crew ? { ...sig, crew: ctx.crew } : sig;
+}
+
+async function bareSignatureFor(ctx: Ctx, cardId: string, author?: string): Promise<Signature> {
   const explicit = (author ?? ctx.author)?.trim();
   if (explicit) return { author: explicit };
-  // Our crew id rides along, so a write from us after we were taken off the
-  // card is refused (409) instead of signed with the new assignee's name.
-  if (ctx.card && ctx.card === cardId) return ctx.crew ? { as: "assignee", crew: ctx.crew } : { as: "assignee" };
+  if (ctx.card && ctx.card === cardId) return { as: "assignee" };
   if (ctx.resolvedSignature) return ctx.resolvedSignature;
   let sig: Signature = { author: UNKNOWN_AUTHOR };
   if (ctx.cwd) {
