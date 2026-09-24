@@ -106,9 +106,9 @@ test("merging a src/ui change rebuilds dist and bumps the UI version open dashbo
   t.server.stop(true);
 });
 
-test("merging with no src/ui change does not build", async () => {
+test("merging a docs-only change does not build", async () => {
   let calls = 0;
-  const t = await start("src/lib/x.ts", async () => { calls++; return { ok: true }; });
+  const t = await start("docs/x.md", async () => { calls++; return { ok: true }; });
   const before = (await snapshotNow(t.base)).ui;
   expect(((await (await t.merge()).json()) as any).ok).toBe(true);
   await Bun.sleep(300);

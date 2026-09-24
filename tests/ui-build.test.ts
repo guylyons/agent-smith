@@ -6,16 +6,22 @@ import { touchesUi, uiVersion, rebuildUi, rebuildAfterMerge, type Builder } from
 
 // --- which merges need a rebuild, without a repo -----------------------------
 
-test("a merge that changes a file under src/ui needs a rebuild", () => {
+test("a merge that changes anything the UI bundle is built from needs a rebuild", () => {
   expect(touchesUi(["README.md", "src/ui/App.tsx"])).toBe(true);
   expect(touchesUi(["src/ui/styles.css"])).toBe(true);
+  // The bundle imports src/lib, and the build reads the deps.
+  expect(touchesUi(["src/lib/board.ts"])).toBe(true);
+  expect(touchesUi(["src/server.ts"])).toBe(true);
+  expect(touchesUi(["package.json"])).toBe(true);
+  expect(touchesUi(["bun.lock"])).toBe(true);
 });
 
-test("a merge that leaves src/ui alone does not", () => {
+test("a merge that leaves src/ and the deps alone does not", () => {
   expect(touchesUi([])).toBe(false);
-  expect(touchesUi(["src/server.ts", "src/lib/merge.ts", "tests/ui-build.test.ts"])).toBe(false);
-  // Only the folder itself, not a name that merely starts the same way.
-  expect(touchesUi(["src/uix/a.ts", "docs/src/ui/a.md"])).toBe(false);
+  expect(touchesUi([""])).toBe(false);
+  expect(touchesUi(["README.md", "docs/a.md", "tests/ui-build.test.ts"])).toBe(false);
+  // Only the folder and files themselves, not names that merely look alike.
+  expect(touchesUi(["srcx/a.ts", "docs/src/ui/a.md", "docs/package.json", "old/bun.lock", "package.json.bak"])).toBe(false);
 });
 
 test("the UI version follows dist/index.html, and is empty when nothing is built", () => {
@@ -138,8 +144,16 @@ test("after a merge that touches src/ui, the served checkout is rebuilt", async 
   expect(readFileSync(join(dist, "index.html"), "utf8")).toBe("new index");
 });
 
-test("a merge that leaves src/ui alone does not build", async () => {
+test("after a merge that only touches src/lib, the served checkout is rebuilt", async () => {
   const { dist, commit } = await mergedRepo("src/lib/thing.ts");
+  const b = counting();
+  expect(await rebuildAfterMerge(dist, commit, b.build)).toEqual({ ran: true, ok: true });
+  expect(b.calls()).toBe(1);
+  expect(readFileSync(join(dist, "index.html"), "utf8")).toBe("new index");
+});
+
+test("a docs-only merge does not build", async () => {
+  const { dist, commit } = await mergedRepo("docs/notes.md");
   const b = counting();
   expect(await rebuildAfterMerge(dist, commit, b.build)).toEqual({ ran: false });
   expect(b.calls()).toBe(0);
@@ -183,6 +197,8 @@ test("bun build: a broken UI keeps the old dist and says what broke", async () =
   const r = await rebuildUi(root, dist);
   expect(r.ok).toBe(false);
   expect(r.error).toContain("missing");
+  // bun prints a "^" under the bad spot; alone it means nothing in a toast.
+  expect(r.error).toStartWith("error:");
   expect(readdirSync(dist).sort()).toEqual(["index-old.js", "index.html"]);
   expect(readFileSync(join(dist, "index.html"), "utf8")).toBe("old index");
 });

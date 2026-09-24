@@ -19,9 +19,11 @@ export type BuildResult = { ok: boolean; error?: string };
 /** Builds the UI of the checkout at `cwd` into the empty folder `outdir`. */
 export type Builder = (cwd: string, outdir: string) => Promise<BuildResult>;
 
-/** Does a merge that changed `files` (repo-relative paths) change the UI? */
+/** Does a merge that changed `files` (repo-relative paths) change the UI?
+ *  The bundle imports src/lib and more besides src/ui, and the build reads
+ *  the deps, so anything under src/ or the package files counts. */
 export function touchesUi(files: string[]): boolean {
-  return files.some((f) => f.startsWith("src/ui/"));
+  return files.some((f) => f.startsWith("src/") || f === "package.json" || f === "bun.lock");
 }
 
 /** A short id for the build in `distDir`: a hash of its index.html, which
@@ -35,10 +37,13 @@ export function uiVersion(distDir: string): string {
   }
 }
 
-/** The last few lines a failed build printed: short enough for a toast. */
+/** The last few lines a failed build printed: short enough for a toast. A
+ *  leading "^" (bun's pointer under the bad spot, whose source line didn't
+ *  make the cut) means nothing on its own, so it goes. */
 function why(out: string): string {
-  const lines = out.split("\n").map((l) => l.trim()).filter(Boolean);
-  const text = lines.slice(-3).join(" ").slice(0, 300);
+  const lines = out.split("\n").map((l) => l.trim()).filter(Boolean).slice(-3);
+  while (lines.length && /^[\^~\s]+$/.test(lines[0]!)) lines.shift();
+  const text = lines.join(" ").slice(0, 300);
   return text || "the build failed with no output";
 }
 
@@ -109,7 +114,7 @@ export type RebuildResult = { ran: false } | { ran: true; ok: boolean; error?: s
  * After MERGE made `commit`: rebuild the UI in `distDir` when that is the
  * checkout the merge landed in (its HEAD has the commit — so not another
  * repo, a worktree on some other branch, or a detached jj checkout whose files
- * haven't moved) and the merge changed something under src/ui. Runs in the
+ * haven't moved) and the merge changed what the UI is built from (touchesUi). Runs in the
  * repo's merge queue, so no merge moves the files mid-build. Never throws.
  */
 export async function rebuildAfterMerge(distDir: string, commit: string, build: Builder = bunBuild): Promise<RebuildResult> {

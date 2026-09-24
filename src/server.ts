@@ -945,13 +945,13 @@ export function makeServer(
       writeBoard(dir, addComment(readBoard(dir), cardId, MERGE_NOTE_AUTHOR, tidy));
       push();
     }
-    // A UI change landed in the checkout we serve: rebuild dist/ in the
+    // A change the UI is built from landed in the checkout we serve: rebuild dist/ in the
     // background, so the merge answers now and the dashboards hear after.
     void rebuildUiAfterMerge(cardId, r.commit ?? "");
     return json({ ...r, cleanup, ...(quitResult ? { quit: quitResult } : {}) });
   }
 
-  // After a MERGE: rebuild the UI when the merge changed src/ui in the
+  // After a MERGE: rebuild the UI when the merge changed src/ (or the deps) in the
   // checkout dist/ is served from (lib/uiBuild decides and builds). A good
   // build bumps `ui.version`, which open dashboards see as "new version,
   // reload"; a failed one keeps the old dist and sets `ui.failed` for a toast.
