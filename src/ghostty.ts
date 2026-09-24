@@ -219,9 +219,10 @@ export function buildLaunchInput(
  *  can drive its own ticket either way without stalling on a permission prompt.
  *  Deliberately NOT the spawn/kill/prompt endpoints, or the MCP tools that reach
  *  other sessions: anything that touches another session or starts a new one
- *  stays behind a human approval. `repoRoot` is the main checkout the worktree
- *  was made from: the one place the worker may merge its branch into. */
-export function workerPermissionSettings(serverUrl: string, repoRoot: string): { permissions: { allow: string[] } } {
+ *  stays behind a human approval. `_repoRoot` (the main checkout the worktree
+ *  was made from) is unused: workers get no merge rule, so merging stays
+ *  human-only, through the merge queue. */
+export function workerPermissionSettings(serverUrl: string, _repoRoot: string): { permissions: { allow: string[] } } {
   return {
     permissions: {
       allow: [
@@ -244,17 +245,13 @@ export function workerPermissionSettings(serverUrl: string, repoRoot: string): {
         // The Done column's usual instruction is "worktree clean and committed",
         // so the local git verbs a worker needs mustn't stall it either. The
         // worktree is isolated, so a commit here can't touch anyone's branch;
-        // push stays behind a human approval.
+        // push stays behind a human approval, and so does merge: merging runs
+        // through the merge queue, which a raw `git merge` would skip.
         "Bash(git status:*)",
         "Bash(git diff:*)",
         "Bash(git log:*)",
         "Bash(git add:*)",
         "Bash(git commit:*)",
-        // After review the worker merges its own branch. Scoped by -C to the
-        // repo this worktree came from, so it can't merge anywhere else; a
-        // rule is a prefix match, so the merge must be run exactly as
-        // `git -C <repoRoot> merge ...`. No push, reset, rebase or checkout.
-        `Bash(git -C ${repoRoot} merge:*)`,
       ],
     },
   };
