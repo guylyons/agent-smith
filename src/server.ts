@@ -1,10 +1,12 @@
 import { existsSync, readdirSync, readFileSync, statSync, watch } from "node:fs";
 import { join } from "node:path";
+import { homedir } from "node:os";
 import { parseStatus, type AgentStatus } from "./schema";
 import { buildSnapshot, snapshotEvent, type Snapshot, type Sent } from "./lib/snapshot";
-import { archivableIds, archiveCards, restoreArchivedCard, visibleArchive, readArchive, loadArchiveForWrite, writeArchive } from "./lib/archive";
+import { archivableIds, archiveCards, restoreArchivedCard, visibleArchive, readArchive, loadArchiveForWrite, writeArchive, numberCards } from "./lib/archive";
 import { remember, forget, compactMemory, memoryView, searchMemory, neighbours, formatResults, readMemory, loadMemoryForWrite, writeMemory, type FactKind } from "./lib/memory";
 import { ensureStatusDir, statusDir } from "./lib/paths";
+import { sandboxLeakWarning } from "./lib/sandbox";
 import { scanLiveSessions, readConversation, readSubagents } from "./scan";
 import { matchChat } from "./lib/chatsearch";
 import type { ChatMessage } from "./lib/conversation";
@@ -179,6 +181,18 @@ export function makeServer(
     heartbeatMs = 5_000, distDir = join(import.meta.dir, "..", "dist"),
   } = opts;
   const dir = ensureStatusDir();
+
+  // Number any card from before card numbers existed, once, so every card has
+  // a "#N" to point at. Skipped if the archive can't be read: numbering
+  // without it could hand out a number an archived card already holds.
+  {
+    const archive = loadArchiveForWrite(dir);
+    const numbered = archive && numberCards(readBoard(dir), archive);
+    if (numbered?.changed) {
+      writeArchive(dir, numbered.archive);
+      writeBoard(dir, numbered.board);
+    }
+  }
 
   // ---- the inbox ----------------------------------------------------------
   // Board events for a session that can't be typed at right now. Only an IDLE
@@ -826,7 +840,9 @@ export function makeServer(
     // `force` is the human's override, as on card-assign and spawn.
     const waiting = body.force ? null : mergeBlockReason(board, cardId);
     if (waiting) return json({ ok: false, error: waiting }, 409);
-    const r = await mergeWork(where.cwd);
+    // `tip` is what the human's preview showed; a branch that moved since
+    // is refused inside the queue, so nothing they didn't see can land.
+    const r = await mergeWork(where.cwd, { tip: body.tip });
     if (!r.ok) return json(r, 409);
     const note = `Merged ${r.branch} into ${r.base}.`;
     // Landed for real, so the card goes to mergedColumn and its claim is
@@ -1279,7 +1295,10 @@ export function makeServer(
       // (the task footer points here), a few KB instead of the whole board.
       if (url.pathname === "/card") {
         const id = url.searchParams.get("id") ?? "";
-        const view = cardView(readBoard(dir), id);
+        const board = readBoard(dir);
+        // A card's number works too ("42" or "#42"), since that's what people quote.
+        const byNum = /^#?\d+$/.test(id) ? board.cards.find((k) => k.num === Number(id.replace("#", ""))) : undefined;
+        const view = cardView(board, byNum?.id ?? id);
         return view ? json(view) : json({ error: `unknown card: ${id}` }, 404);
       }
 
@@ -1390,6 +1409,8 @@ export function makeServer(
 }
 
 if (import.meta.main) {
+  const leak = sandboxLeakWarning(process.env, homedir());
+  if (leak) console.warn(leak);
   const server = makeServer(Number(process.env.PORT ?? 4173), { scan: true });
   console.log(`Agent Workshop → http://localhost:${server.port}  (watching ${statusDir()}, scanning open sessions)`);
 }

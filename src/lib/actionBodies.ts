@@ -187,7 +187,9 @@ export const CardUpdateBody = body({
   error: "title, description, touches or repo is required",
 });
 
-export const CardMergeBody = Signature.extend({ force: flag() });
+// `tip` is the branch tip SHA the human's preview showed; when present, a
+// branch that has moved since is refused rather than landed (see mergeWork).
+export const CardMergeBody = Signature.extend({ force: flag(), tip: maybeTrimmed() });
 
 // worktree-cleanup: without `remove`, a preview; with it, the worktree paths
 // the human confirmed. Anything but a list of strings reads as a preview.

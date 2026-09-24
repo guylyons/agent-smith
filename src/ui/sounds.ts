@@ -141,14 +141,61 @@ export function playKeyClick(down: boolean): void {
 // glitch frames, a rising flyback whine as the phosphor flares, then the
 // "thoop" of the picture collapsing to a dot, and a click as it goes.
 // `short` is the reduced-motion version: the window only fades for 0.3s there,
-// so it gets just the collapse and the click. Several desks dying in one
-// snapshot play it once — a stack of identical deaths is just louder, not more.
-let lastTubeOff = 0;
+// so it gets just the collapse and the click. While one is still playing, a
+// new death doesn't start another — overlapping copies just pile up into
+// noise — it only adds the final click, so a second death is still heard.
+// Each click holds the gate a little longer, so a steady run of deaths (cards
+// dragged to Done in a row) stays one sound plus clicks. Deaths in the same
+// snapshot (under 0.25s apart) get nothing extra.
+export type TubeOffState = { busyUntil: number; lastAt: number };
+export type TubeOffPlay = "full" | "click" | "none";
+
+// Pure timing rule for playTubeOff; `now` is AudioContext time in seconds.
+export function tubeOffGate(
+  now: number,
+  state: TubeOffState,
+  short: boolean,
+): { play: TubeOffPlay; state: TubeOffState } {
+  if (now >= state.busyUntil) {
+    return { play: "full", state: { busyUntil: now + (short ? 0.3 : 1.5), lastAt: now } };
+  }
+  if (now - state.lastAt < 0.25) return { play: "none", state };
+  const tail = short ? 0.3 : 0.5;
+  return { play: "click", state: { busyUntil: Math.max(state.busyUntil, now + tail), lastAt: now } };
+}
+
+// The dot going out: one tiny click at `when` into `out`.
+function tubeClick(c: AudioContext, out: AudioNode, when: number): void {
+  const click = c.createBuffer(1, Math.ceil(c.sampleRate * 0.012), c.sampleRate);
+  const cd = click.getChannelData(0);
+  for (let i = 0; i < cd.length; i++) cd[i] = (Math.random() * 2 - 1) * (1 - i / cd.length) ** 4;
+  const cs = c.createBufferSource();
+  cs.buffer = click;
+  const cg = c.createGain();
+  cg.gain.value = 0.25;
+  cs.connect(cg);
+  cg.connect(out);
+  cs.start(when);
+}
+
+let tubeOff: TubeOffState = { busyUntil: 0, lastAt: -Infinity };
 export function playTubeOff(short = false): void {
   const c = audioCtx();
   if (!c) return;
-  if (c.currentTime - lastTubeOff < 0.25 && lastTubeOff > 0) return;
-  lastTubeOff = c.currentTime;
+  const gate = tubeOffGate(c.currentTime, tubeOff, short);
+  tubeOff = gate.state;
+  if (gate.play === "none") return;
+  if (gate.play === "click") {
+    try {
+      const out = c.createGain();
+      out.gain.value = 0.5;
+      out.connect(c.destination);
+      tubeClick(c, out, c.currentTime);
+    } catch {
+      /* autoplay/AudioContext may be blocked — ignore */
+    }
+    return;
+  }
   try {
     const now = c.currentTime;
     const out = c.createGain();
@@ -201,17 +248,7 @@ export function playTubeOff(short = false): void {
     whine.stop(t0 + (short ? 0.3 : 0.52));
 
     // The dot going out: one tiny click.
-    const tc = t0 + (short ? 0.28 : 0.48);
-    const click = c.createBuffer(1, Math.ceil(c.sampleRate * 0.012), c.sampleRate);
-    const cd = click.getChannelData(0);
-    for (let i = 0; i < cd.length; i++) cd[i] = (Math.random() * 2 - 1) * (1 - i / cd.length) ** 4;
-    const cs = c.createBufferSource();
-    cs.buffer = click;
-    const cg = c.createGain();
-    cg.gain.value = 0.25;
-    cs.connect(cg);
-    cg.connect(out);
-    cs.start(tc);
+    tubeClick(c, out, t0 + (short ? 0.28 : 0.48));
   } catch {
     /* autoplay/AudioContext may be blocked — ignore */
   }

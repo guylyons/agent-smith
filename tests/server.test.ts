@@ -1136,6 +1136,26 @@ test("card-merge leaves sessions alone when the merge is refused", async () => {
   server.stop(true);
 });
 
+// The preview the human read names a tip; if the branch moved since (a new
+// commit, or an amend that keeps the count), the merge is refused, not landed.
+test("card-merge refuses a stale tip and lands nothing", async () => {
+  const { server, base, post } = await cardApiServer();
+  const cardId = await mergeFixture(post);
+  const wt = join(mergeRepo, "wt");
+  const seen = Bun.spawnSync(["git", "-C", wt, "rev-parse", "HEAD"]).stdout.toString().trim();
+  await git(wt, "commit", "-q", "--amend", "-m", "the work, amended");
+  const mainBefore = Bun.spawnSync(["git", "-C", mergeRepo, "rev-parse", "main"]).stdout.toString().trim();
+
+  const res = await mergePost(base, { cardId, author: "You", tip: seen });
+  expect(res.status).toBe(409);
+  expect(((await res.json()) as any).error).toMatch(/moved since you looked/);
+  expect(Bun.spawnSync(["git", "-C", mergeRepo, "rev-parse", "main"]).stdout.toString().trim()).toBe(mainBefore);
+
+  const now = Bun.spawnSync(["git", "-C", wt, "rev-parse", "HEAD"]).stdout.toString().trim();
+  expect(((await (await mergePost(base, { cardId, author: "You", tip: now })).json()) as any).ok).toBe(true);
+  server.stop(true);
+});
+
 // A worktree the dashboard made (<repo>/.claude/worktrees/<name>) is removed
 // with its branch once the work lands; one it can't remove stays, and the card
 // says why. Either way the merge stands.

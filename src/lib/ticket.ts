@@ -37,13 +37,8 @@ export function parseTicket(branch: string | null): string | null {
   return null;
 }
 
-/** The badge for a board card, so a desk working a card shows THAT card's
- *  ticket rather than whatever its branch happens to be named. The title's own
- *  ticket when it has one ("AG-11: Right hand sidebar" → "AG-11"), else a short
- *  form of the card id ("card_1119e443" → "1119e4"). No "#" on the id form, so
- *  it never reads like a branch-parsed ticket number. */
-export function cardTicket(card: { id: string; title: string }): string {
-  const own = card.title.match(/(?:^|[^A-Za-z0-9])([A-Za-z]{2,}-\d{1,6})(?![A-Za-z0-9])/);
-  if (own) return own[1]!.toUpperCase();
-  return card.id.replace(/^card_/, "").slice(0, 6);
+/** A card's id as people see it: its number ("#42", see Card.num), or, for a
+ *  card not numbered yet, its stored id without the "card_" prefix. */
+export function cardRef(card: { id: string; num?: number }): string {
+  return card.num ? `#${card.num}` : card.id.replace(/^card_/, "");
 }
