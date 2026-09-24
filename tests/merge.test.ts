@@ -187,3 +187,25 @@ test("readMergeState reports a merge in progress on the same root and holds the 
   expect(after.merging).toBe(false);
   expect(after.ready).toBe(true);
 });
+
+test("a branch already merged into the trunk reads as landed, not as nothing committed", () => {
+  const v = mergeVerdict(facts({ ahead: 0, landed: true }));
+  expect(v.committed).toBe(false);
+  expect(v.blocked).toBe("ag-6 is already in main");
+});
+
+test("readMergeState sees a branch merged by hand as landed", async () => {
+  const root = await freshRepo();
+  const wt = await workOn(root, "ag-hand", "feature.txt", "hello\n");
+  await git(root, "merge", "-q", "--no-ff", "--no-edit", "ag-hand");
+  const s = await readMergeState(wt);
+  expect(s).toMatchObject({ ahead: 0, committed: false, landed: true, blocked: "ag-hand is already in main" });
+});
+
+test("a fresh branch with no commits of its own is not landed", async () => {
+  const root = await freshRepo();
+  const wt = join(root, ".wt", "ag-new");
+  await git(root, "worktree", "add", "-q", "-b", "ag-new", wt, "HEAD");
+  const s = await readMergeState(wt);
+  expect(s).toMatchObject({ ahead: 0, committed: false, landed: false, blocked: "nothing committed on ag-new yet" });
+});

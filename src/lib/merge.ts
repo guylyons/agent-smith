@@ -28,6 +28,10 @@ export type MergeFacts = {
   rootBranch: string;
   /** uncommitted changes in that main checkout */
   rootDirty: boolean;
+  /** `branch` has nothing ahead because it already arrived in `base` through a
+   *  merge commit — work landed outside the dashboard. Only a real merge is
+   *  seen; a fast-forward looks the same as a branch with no commits. */
+  landed?: boolean;
 };
 
 export type MergeState = MergeFacts & {
@@ -58,7 +62,7 @@ export function mergeVerdict(f: MergeFacts): { committed: boolean; ready: boolea
   if (!f.branch) return no("this work tree is on a detached HEAD");
   if (!f.base) return no("no main branch to merge into");
   if (f.branch === f.base) return no(`already on ${f.base} — nothing to merge`);
-  if (f.ahead <= 0) return no(`nothing committed on ${f.branch} yet`);
+  if (f.ahead <= 0) return no(f.landed ? `${f.branch} is already in ${f.base}` : `nothing committed on ${f.branch} yet`);
 
   // Past here the work exists, so the key shows; what's left is whether it can
   // fire right now.
@@ -120,6 +124,18 @@ async function pickBase(root: string): Promise<string> {
   return "";
 }
 
+/** Did `branch` arrive in `base` through a merge commit? True when some merge
+ *  on `base` since the branch tip names that tip as a non-first parent — the
+ *  shape `git merge --no-ff` (ours, or one run by hand) leaves. A branch that
+ *  was only ever created and never committed to has no such merge. */
+async function mergedInto(cwd: string, branch: string, base: string): Promise<boolean> {
+  const tip = await git(cwd, ["rev-parse", branch]);
+  if (tip.code !== 0 || !tip.stdout) return false;
+  const merges = await git(cwd, ["rev-list", "--merges", "--parents", `${branch}..${base}`]);
+  if (merges.code !== 0) return false;
+  return merges.stdout.split("\n").some((line) => line.split(" ").slice(2).includes(tip.stdout));
+}
+
 const NOT_A_REPO: MergeState = {
   repo: false, branch: "", base: "", ahead: 0, dirty: false, rootBranch: "", rootDirty: false,
   committed: false, ready: false, blocked: "not a git repository", merging: false,
@@ -134,12 +150,14 @@ async function factsFor(cwd: string, root: string): Promise<MergeFacts> {
   ]);
 
   let ahead = 0;
+  let landed = false;
   if (branch && base && branch !== base) {
     const count = await git(cwd, ["rev-list", "--count", `${base}..${branch}`]);
     ahead = count.code === 0 ? Number.parseInt(count.stdout, 10) || 0 : 0;
+    if (ahead === 0) landed = await mergedInto(cwd, branch, base);
   }
 
-  return { repo: true, branch, base, ahead, dirty, rootBranch, rootDirty };
+  return { repo: true, branch, base, ahead, dirty, rootBranch, rootDirty, landed };
 }
 
 /** Everything the card needs to know about landing this work. Best-effort: a

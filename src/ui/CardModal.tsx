@@ -414,8 +414,14 @@ export function CardModal({
 
           {/* Once the card's agent has committed work on its branch, a key
               rises here to land it. It draws itself only when there is
-              something to merge, so an unfinished ticket shows nothing. */}
-          <MergeKey cardId={card.id} hasAssignee={!!assigned} />
+              something to merge, so an unfinished ticket shows nothing — but
+              a card in Review or Done gets a line saying why not. */}
+          <MergeKey
+            board={board}
+            card={card}
+            hasAssignee={!!assigned}
+            onMove={(to) => mutate((b) => moveCard(b, card.id, to), () => moveCardAction(card.id, to))}
+          />
 
           <div className="cardmodal-row">
             <label className="pix cardmodal-label">DESCRIPTION</label>
