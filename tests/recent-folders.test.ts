@@ -54,3 +54,19 @@ test("projectFolder prefers the last launch, then a live agent's repo", () => {
   expect(projectFolder(["/d/.claude/worktrees/y"], [])).toBe("/d");
   expect(projectFolder([], [])).toBe("");
 });
+
+test("mergeRecent shows a repo once, not once per agent worktree", () => {
+  const live = ["/src/shop/.claude/worktrees/fix-cart", "/src/shop/.claude/worktrees/ux-review", "/src/blog"];
+  expect(mergeRecent([], live)).toEqual(["/src/shop", "/src/blog"]);
+  expect(mergeRecent(["/src/shop"], live)).toEqual(["/src/shop", "/src/blog"]);
+});
+
+test("parseRecent drops old saved worktree entries in favour of their repo", () => {
+  expect(parseRecent('["/src/shop/.claude/worktrees/ux-review","/src/shop","/src/blog"]'))
+    .toEqual(["/src/shop", "/src/blog"]);
+  expect(parseRecent('["/src/shop/.claude/worktrees/a","/src/shop/.claude/worktrees/b"]')).toEqual(["/src/shop"]);
+});
+
+test("pushRecent remembers a worktree launch as its repo", () => {
+  expect(pushRecent(["/a", "/src/shop"], "/src/shop/.claude/worktrees/x")).toEqual(["/src/shop", "/a"]);
+});
