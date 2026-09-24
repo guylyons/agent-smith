@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Snapshot } from "../lib/snapshot";
+import type { Snapshot, SnapshotEvent } from "../lib/snapshot";
 
 // The pre-SSE placeholder: no agents, an empty board. The server always sends a
 // real (seeded) board on connect, so this blank board is only ever shown for the
@@ -8,8 +8,14 @@ export function emptySnapshot(): Snapshot {
   return { agents: [], board: { columns: [], cards: [] } };
 }
 
-export function parseEvent(data: string): Snapshot | null {
-  try { return JSON.parse(data) as Snapshot; } catch { return null; }
+export function parseEvent(data: string): SnapshotEvent | null {
+  try { return JSON.parse(data) as SnapshotEvent; } catch { return null; }
+}
+
+/** Fold one /events message into the snapshot held so far. A push leaves out
+ *  a board or mood that hasn't changed (see snapshotEvent), so keep ours. */
+export function applyEvent(prev: Snapshot, ev: SnapshotEvent): Snapshot {
+  return { ...prev, ...ev, board: ev.board ?? prev.board, mood: ev.mood ?? prev.mood };
 }
 
 /** EventSource retries transient drops on its own; only CLOSED means it has
@@ -34,7 +40,7 @@ export function useSnapshot(): { snap: Snapshot; live: boolean } {
     const connect = () => {
       es = new EventSource("/events");
       es.onopen = () => setLive(true);
-      es.onmessage = (e) => { const s = parseEvent(e.data); if (s) { setLive(true); setSnap(s); } };
+      es.onmessage = (e) => { const s = parseEvent(e.data); if (s) { setLive(true); setSnap((prev) => applyEvent(prev, s)); } };
       es.onerror = () => {
         setLive(false);
         if (closed || !es || !isFatalDrop(es.readyState)) return; // transient: it will retry

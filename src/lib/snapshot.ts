@@ -9,7 +9,28 @@ import { displayState } from "./liveness";
 // derived from agent state — so it just rides along here for delivery, and so
 // does the MOOD board (the server adds it; see readSnapshot). An agent that
 // needs either fetches GET /board or GET /mood itself.
-export type Snapshot = { agents: AgentStatus[]; board: Board; mood?: Mood };
+// `archived` counts the cards in the archive (see src/lib/archive.ts); the
+// cards themselves stay out, which is the point of archiving them.
+export type Snapshot = { agents: AgentStatus[]; board: Board; mood?: Mood; archived?: number };
+
+/** What one /events message carries: a snapshot minus any board or mood the
+ *  client already holds. The board is most of the bytes and changes far less
+ *  often than the agents, so each push leaves it out unless it changed. */
+export type SnapshotEvent = Omit<Snapshot, "board"> & { board?: Board };
+/** What a client was last sent, serialized, to compare the next push against. */
+export type Sent = { board?: string; mood?: string };
+
+/** The event to send a client that was last sent `sent`, and what it holds
+ *  after. A fresh client ({}) gets everything. Never mutates. */
+export function snapshotEvent(snap: Snapshot, sent: Sent): { event: SnapshotEvent; sent: Sent } {
+  const board = JSON.stringify(snap.board);
+  const mood = snap.mood === undefined ? undefined : JSON.stringify(snap.mood);
+  const { board: b, mood: m, ...rest } = snap;
+  const event: SnapshotEvent = { ...rest };
+  if (board !== sent.board) event.board = b;
+  if (m !== undefined && mood !== sent.mood) event.mood = m;
+  return { event, sent: { board, mood } };
+}
 
 /** Collapse the /clear ghost: a /clear starts a NEW session id in the SAME
  *  process without firing SessionEnd, so the old session's status file lingers

@@ -1,7 +1,8 @@
 import { existsSync, readdirSync, readFileSync, statSync, watch } from "node:fs";
 import { join } from "node:path";
 import { parseStatus, type AgentStatus } from "./schema";
-import { buildSnapshot, type Snapshot } from "./lib/snapshot";
+import { buildSnapshot, snapshotEvent, type Snapshot, type Sent } from "./lib/snapshot";
+import { archivableIds, archiveCards, restoreArchivedCard, visibleArchive, readArchive, loadArchiveForWrite, writeArchive } from "./lib/archive";
 import { ensureStatusDir, statusDir } from "./lib/paths";
 import { scanLiveSessions, readConversation, readSubagents } from "./scan";
 import { matchChat } from "./lib/chatsearch";
@@ -25,7 +26,7 @@ import type { z } from "zod";
 import {
   parseBody, SESSION_ID_RE, ColumnRef, CardRef, SessionRef, NoFields, type Signature,
   PickFolderBody, SpawnBody, ColumnAddBody, ColumnUpdateBody, ColumnReorderBody, ColumnRestoreBody,
-  CardRestoreBody, CardAddBody, CommentDeleteBody, CardMoveBody, CardUpdateBody, CardMergeBody,
+  CardRestoreBody, ColumnArchiveBody, CardAddBody, CommentDeleteBody, CardMoveBody, CardUpdateBody, CardMergeBody,
   CardCommentBody, SendTaskBody, CardAssignBody, UploadBody, CrewNoteBody, RenameBody, SpriteBody, PromptBody,
   MoodNoteAddBody, MoodNoteRestoreBody, MoodNoteRef, MoodNoteUpdateBody, MoodLinkAddBody, MoodLinkRef, MoodLinkUpdateBody,
 } from "./lib/actionBodies";
@@ -82,7 +83,7 @@ export function readSnapshot(dir: string, now: number): Snapshot {
   const snap = buildSnapshot(resolveNames(dir, agents), now, {
     board: readBoard(dir),
   });
-  return { ...snap, mood: readMood(dir) };
+  return { ...snap, mood: readMood(dir), archived: visibleArchive(snap.board, readArchive(dir)).length };
 }
 
 export type ChatHitResult = { sessionId: string; name: string; role: string; snippet: string; hitRole: ChatMessage["role"] };
@@ -683,6 +684,35 @@ export function makeServer(
     return json({ ok: true });
   }
 
+  // column-archive / card-unarchive: take a merged column's cards off the
+  // board into .line-archive.json, and put one back (see src/lib/archive.ts).
+  // The file gaining the card is written first, so a crash between the two
+  // writes leaves a duplicate, never a lost card.
+  function columnArchive(_ctx: Ctx, { olderThanDays }: z.output<typeof ColumnArchiveBody>, board: Board, columnId: string): Response {
+    if (!isLandedColumn(board, columnId)) return json({ ok: false, error: "only a merged column's cards can be archived" }, 400);
+    const archive = loadArchiveForWrite(dir);
+    if (!archive) return json({ ok: false, error: "the archive file can't be read, so archiving would overwrite it; fix or move .line-archive.json" }, 500);
+    const now = Date.now();
+    const ids = archivableIds(board, columnId, now, olderThanDays === undefined ? undefined : olderThanDays * 86_400_000);
+    if (!ids.length) return json({ ok: true, archived: 0 });
+    const next = archiveCards(board, archive, ids, now);
+    writeArchive(dir, next.archive);
+    writeBoard(dir, next.board);
+    push();
+    return json({ ok: true, archived: ids.length });
+  }
+
+  function cardUnarchive(_ctx: Ctx, { cardId }: z.output<typeof CardRef>): Response {
+    const archive = loadArchiveForWrite(dir);
+    if (!archive) return json({ ok: false, error: "the archive file can't be read; fix or move .line-archive.json" }, 500);
+    const next = restoreArchivedCard(readBoard(dir), archive, cardId);
+    if (!next) return json({ ok: false, error: `no archived card: ${cardId}` }, 404);
+    writeBoard(dir, next.board);
+    writeArchive(dir, next.archive);
+    push();
+    return json({ ok: true });
+  }
+
   function cardAdd(_ctx: Ctx, { columnId, title, description, kind, repo, repoPath }: z.output<typeof CardAddBody>): Response {
     const board = readBoard(dir);
     if (!board.columns.some((c) => c.id === columnId)) return json({ ok: false, error: `unknown column: ${columnId}` }, 400);
@@ -1060,6 +1090,8 @@ export function makeServer(
     "column-reorder": withColumn(ColumnReorderBody, columnReorder),
     "column-restore": withBody(ColumnRestoreBody, columnRestore),
     "card-restore": withBody(CardRestoreBody, cardRestore),
+    "column-archive": withColumn(ColumnArchiveBody, columnArchive),
+    "card-unarchive": withBody(CardRef, cardUnarchive),
     "card-add": withBody(CardAddBody, cardAdd),
     "card-delete": withCard(NoFields, cardDelete),
     "comment-delete": withCard(CommentDeleteBody, commentDelete),
@@ -1103,7 +1135,15 @@ export function makeServer(
         const stream = new ReadableStream({
           start(ctrl) {
             const enc = new TextEncoder();
-            send = (s) => ctrl.enqueue(enc.encode(`data: ${JSON.stringify(s)}\n\n`));
+            // Each window is sent the board only when it differs from the
+            // last one it got (see snapshotEvent): a busy agent pushes often,
+            // and resending a large board every time cost ~1 MB per 15s.
+            let sent: Sent = {};
+            send = (s) => {
+              const out = snapshotEvent(s, sent);
+              ctrl.enqueue(enc.encode(`data: ${JSON.stringify(out.event)}\n\n`));
+              sent = out.sent;
+            };
             addClient(send);
             send(snapshot()); // initial
             // Bun closes a connection after 10s with nothing sent, and this
@@ -1147,6 +1187,12 @@ export function makeServer(
       // API. Always a fresh read, so an agent that just wrote sees its write.
       if (url.pathname === "/board") {
         return json({ board: readBoard(dir), boardPath: boardFile(dir) });
+      }
+
+      // the archived cards, newest first: what the board's ARCHIVED (n) link opens.
+      if (url.pathname === "/archive") {
+        const board = readBoard(dir);
+        return json({ cards: visibleArchive(board, readArchive(dir)) });
       }
 
       // one card + the column list — what a worker re-reads its ticket with

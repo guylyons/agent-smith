@@ -169,7 +169,7 @@ export function App() {
       ) : (
         <>
           <Crew agents={snap.agents} board={snap.board} unread={unread} onOpen={openAgent} />
-          <TheLine board={snap.board} agents={snap.agents} lineRows={display.lineRows} onSpawnForCard={(task, cardId, seed) => setSpawnSeed({ task, cardId, ...seed })} />
+          <TheLine board={snap.board} agents={snap.agents} archived={snap.archived} lineRows={display.lineRows} onSpawnForCard={(task, cardId, seed) => setSpawnSeed({ task, cardId, ...seed })} />
         </>
       )}
       {selected && selected.sessionId === selectedId && (
