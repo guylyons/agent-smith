@@ -1028,6 +1028,16 @@ test("GET /merge-state reports the assignee's committed work", async () => {
   server.stop(true);
 });
 
+test("GET /merge-preview lists the commits and files a merge would land", async () => {
+  const { server, base, post } = await cardApiServer();
+  const cardId = await mergeFixture(post);
+  const p = (await (await fetch(`${base}/merge-preview?cardId=${cardId}`)).json()) as any;
+  expect(p).toMatchObject({ branch: "feature", base: "main", totalCommits: 1, totalFiles: 1 });
+  expect(p.files[0].path).toBe("feature.txt");
+  expect((await fetch(`${base}/merge-preview?cardId=card_nope`)).status).toBe(404);
+  server.stop(true);
+});
+
 test("GET /merge-state explains a card with nowhere to merge from", async () => {
   const { server, base, post } = await cardApiServer();
   const { cardId } = (await (await post("/action/card-add", { columnId: "backlog", title: "Unassigned" })).json()) as any;

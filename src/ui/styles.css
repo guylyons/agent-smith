@@ -1394,6 +1394,34 @@ body{background:transparent}
 }
 .mergehint-move:hover{color:var(--gold);border-color:var(--gold)}
 .mergehint-move:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+
+/* WHAT WILL LAND: the commits and files above the MERGE key. A plain
+   disclosure in the ticket's own inset style, not more hardware -- the key is
+   the thing you press, this is the thing you read first. */
+.mergepreview{border:2px solid var(--bevel);background:var(--box-lo);min-width:0}
+.mergepreview-head{
+  display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;
+  padding:9px 12px;cursor:pointer;list-style:none;
+}
+.mergepreview-head::-webkit-details-marker{display:none}
+.mergepreview-head::before{content:"▸";color:var(--dim);font-size:12px;width:10px}
+.mergepreview[open] > .mergepreview-head::before{content:"▾"}
+.mergepreview-head:hover .mergepreview-label{color:var(--gold)}
+.mergepreview-head:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+.mergepreview-label{font-size:13px;letter-spacing:.5px;color:var(--dim)}
+.mergepreview-sum{font-size:13px;color:var(--bone);overflow-wrap:anywhere}
+.mergepreview-body{padding:2px 12px 12px;display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--bevel)}
+.mergepreview-range{margin:8px 0 0;font-size:13px;color:var(--dim);overflow-wrap:anywhere}
+.mergepreview-commits,.mergepreview-files{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:3px}
+.mergepreview-commits li{display:flex;gap:10px;min-width:0;font-size:14px;line-height:1.4}
+.mergepreview-sha{flex:0 0 auto;font-family:var(--code);font-size:13px;color:var(--gold)}
+.mergepreview-subject{min-width:0;color:var(--bone);overflow-wrap:anywhere}
+.mergepreview-files{padding-top:6px;border-top:1px dashed var(--bevel)}
+.mergepreview-files li{display:flex;justify-content:space-between;gap:12px;min-width:0;font-family:var(--code);font-size:13px;line-height:1.4}
+.mergepreview-path{min-width:0;color:var(--bone);overflow-wrap:anywhere}
+.mergepreview-change{flex:0 0 auto;color:var(--dim);white-space:nowrap}
+.mergepreview-more{margin:0;font-size:13px;color:var(--dim);font-style:italic}
+.mergepreview-error{margin:0;font-size:13px;line-height:1.4;color:var(--clay);overflow-wrap:anywhere}
 .cardmodal-desc{
   width:100%;box-sizing:border-box;resize:vertical;min-height:94px;
   font-family:var(--mono);font-size:15px;line-height:1.6;

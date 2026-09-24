@@ -4,6 +4,7 @@ import { mergeGate, mergeRefusal } from "../lib/mergeRace";
 import { mergeHint, type MergeRead } from "../lib/mergeHint";
 import type { Board, Card } from "../lib/board";
 import { playKeyClick } from "./sounds";
+import { MergePreview } from "./MergePreview";
 import { toast, toastError } from "./toast";
 
 // A real key on the ticket: once the card's agent has COMMITTED work on its
@@ -152,6 +153,9 @@ export function MergeKey({ board, card, hasAssignee, onMove }: {
   // so arming it can slide the cap out from under a stationary pointer, and
   // disarming on that would break the two-press gesture it exists to enforce.
   return (
+    <>
+    {/* What pressing the key would land, while there's still something to. */}
+    {!landed && state && <MergePreview cardId={cardId} refresh={`${state.branch}:${state.ahead}`} />}
     <div className={`mergekey phase-${phase}${ready ? "" : " is-held"}`}>
       <div className="mergekey-deck">
         <span className={`mergekey-led${ready || phase !== "idle" ? " on" : ""}`} aria-hidden="true" />
@@ -191,6 +195,7 @@ export function MergeKey({ board, card, hasAssignee, onMove }: {
         </div>
       </div>
     </div>
+    </>
   );
 }
 
