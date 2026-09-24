@@ -70,7 +70,13 @@ export function AskBanner({ card, onClear }: { card: Card; onClear: () => void }
       <div className="comment-meta">
         <span id="cardmodal-ask-label" className="pix ask-tag"><span aria-hidden="true">✋ </span>WAITING ON YOU</span>
         <span className="comment-author">{card.ask.by}</span>
-        <button type="button" className="pix comment-pin" onClick={onClear}
+        {/* The banner goes with the flag, so focus moves on to the question's
+            own PIN in the thread first, rather than falling back to the page. */}
+        <button type="button" className="pix comment-pin" onClick={() => {
+          document.querySelector<HTMLElement>(`.cardmodal-comments [data-pin-for="${m.id}"]`)?.focus();
+          onClear();
+        }}
+          aria-label={`Clear waiting on you, ${card.ask.by}'s question`}
           title="Take the flag off without replying (replying here clears it too)">CLEAR</button>
       </div>
       <div className="comment-text ask-text">{m.text}</div>
