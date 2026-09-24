@@ -227,6 +227,7 @@ export function workerPermissionSettings(serverUrl: string, _repoRoot: string): 
     permissions: {
       allow: [
         `Bash(curl -s ${serverUrl}/board)`,
+        `Bash(curl -s '${serverUrl}/card?id=:*)`,
         `Bash(curl -s ${serverUrl}/agents)`,
         `Bash(curl -s -X POST ${serverUrl}/action/card-move:*)`,
         `Bash(curl -s -X POST ${serverUrl}/action/card-comment:*)`,

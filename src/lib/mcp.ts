@@ -7,7 +7,7 @@
 // for the same reason the agent protocol footer does: the server applies each
 // card-scoped mutation against the latest board, so two writers can never
 // clobber each other, and the open UI updates live.
-import type { Board } from "./board";
+import { cardView, type Board } from "./board";
 import { MOOD_KINDS, formatMood, moodBounds, type Mood } from "./mood";
 
 export type ApiResult = { status: number; body: any };
@@ -158,9 +158,10 @@ export function formatBoard(board: Board): string {
 
 /** One card in full — the detail view an agent reads before acting on it. */
 export function formatCard(board: Board, cardId: string): string {
-  const card = board.cards.find((c) => c.id === cardId);
-  if (!card) throw new Error(`unknown card: ${cardId}`);
-  const col = board.columns.find((c) => c.id === card.columnId);
+  const view = cardView(board, cardId);
+  if (!view) throw new Error(`unknown card: ${cardId}`);
+  const { card, columns } = view;
+  const col = columns.find((c) => c.id === card.columnId);
   const out = [
     `[${card.id}] ${card.title}`,
     `column: ${card.columnId}${col ? ` (${col.name})` : ""}`,
