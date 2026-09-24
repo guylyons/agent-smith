@@ -27,6 +27,15 @@ test("cardKeyMove: Enter, Space, plain arrows and Cmd/Ctrl+Alt do nothing", () =
   expect(cardKeyMove(key("a", { altKey: true }), true)).toBeNull();
 });
 
+test("cardKeyMove: a held key's auto-repeats are swallowed, not moved: one column per press", () => {
+  expect(cardKeyMove({ ...key("ArrowRight", { altKey: true }), repeat: false }, true)).toBe("right");
+  expect(cardKeyMove({ ...key("ArrowRight", { altKey: true }), repeat: true }, true)).toBe("held");
+  expect(cardKeyMove({ ...key("ArrowUp", { altKey: true }), repeat: true }, true)).toBe("held");
+  // A repeat that isn't a move stays none of the card's business.
+  expect(cardKeyMove({ ...key("ArrowRight"), repeat: true }, true)).toBeNull();
+  expect(cardKeyMove({ ...key("ArrowRight", { altKey: true }), repeat: true }, false)).toBeNull();
+});
+
 test("cardName: title and staffing, never the delete button", () => {
   const card = { title: "budget.el hardening", kind: undefined, assignee: { id: "s", name: "RIPLEY-2" } } as any;
   expect(cardName(card, "live", 0, 0)).toBe("budget.el hardening, RIPLEY-2");

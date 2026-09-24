@@ -21,6 +21,7 @@ import { ArchiveBar } from "./ArchiveBar";
 import { stackMaxHeight } from "./stackCap";
 import { loadRecentFolders, projectFolder } from "./recentFolders";
 import { findLiveAssignee } from "../lib/sendTaskReady";
+import { guardSessionEnd } from "./sessionEnd";
 import { displayState } from "../lib/liveness";
 import { cardRef } from "../lib/ticket";
 import {
@@ -313,7 +314,8 @@ function ColumnView({
       // A drop straight onto the column (not onto a card) appends, as before.
       // Filtered, the slot is among the visible cards; place it by those.
       const to = at === null ? undefined : filtered ? dropIndex(all, cards, at, cardId) : at;
-      mutate((b) => moveCard(b, cardId, column.id, to), () => moveCardAction(cardId, column.id, to));
+      guardSessionEnd(board, agents, cardId, column.id,
+        () => mutate((b) => moveCard(b, cardId, column.id, to), () => moveCardAction(cardId, column.id, to)));
       return;
     }
     const colId = e.dataTransfer.getData(COL_MIME);
@@ -327,11 +329,13 @@ function ColumnView({
   function moveByKey(cardId: string, dir: "left" | "right" | "up" | "down") {
     const t = filtered ? visibleMoveTarget(board, cardId, dir, filter) : cardMoveTarget(board, cardId, dir);
     if (!t) return;
-    if (t.toColumnId !== column.id) onKeyMovedAcross(cardId, t.toColumnId);
-    mutate(
-      (b) => moveCard(b, cardId, t.toColumnId, t.toIndex),
-      () => moveCardAction(cardId, t.toColumnId, t.toIndex),
-    );
+    guardSessionEnd(board, agents, cardId, t.toColumnId, () => {
+      if (t.toColumnId !== column.id) onKeyMovedAcross(cardId, t.toColumnId);
+      mutate(
+        (b) => moveCard(b, cardId, t.toColumnId, t.toIndex),
+        () => moveCardAction(cardId, t.toColumnId, t.toIndex),
+      );
+    });
   }
 
   function onDelete() {
@@ -616,14 +620,19 @@ function CardView({
           const dir = cardKeyMove(e, e.target === e.currentTarget);
           if (!dir) return;
           e.preventDefault();
+          if (dir === "held") return;
           onMoveByKey(dir);
           // The board re-renders around the move, so hold focus on this card to
           // keep a run of moves going instead of dumping focus back to the body.
           // In a capped column the card can land past the fold, and refocusing an
           // element that never lost focus scrolls nothing — so bring it back into
           // view by hand, or the card you're moving disappears under you.
+          // Unless the move stopped to ask (EndConfirm): that dialog has focus now.
           const el = e.currentTarget;
-          requestAnimationFrame(() => { el.focus(); el.scrollIntoView({ block: "nearest" }); });
+          requestAnimationFrame(() => {
+            if (document.activeElement?.closest("[role=dialog]")) return;
+            el.focus(); el.scrollIntoView({ block: "nearest" });
+          });
         }}
       >
         {card.kind === "scrum" && <span className="card-kind">★ SCRUM MASTER</span>}
@@ -695,13 +704,17 @@ export function cardName(
 /** Which way a keypress moves a card, or null to leave it alone. Alt+arrows
  *  only (Alt keeps them clear of the browser's own arrow scrolling), and only
  *  when the key was pressed on the card's own open control — a key bubbling up
- *  from anything inside it is that control's business. */
+ *  from anything inside it is that control's business. One column per press:
+ *  a held key's auto-repeats are "held" — swallowed (Alt+Right is the
+ *  browser's Forward) but not moved, so holding it can't slide a card through
+ *  Review into Done. */
 export function cardKeyMove(
-  e: { key: string; altKey: boolean; metaKey: boolean; ctrlKey: boolean },
+  e: { key: string; altKey: boolean; metaKey: boolean; ctrlKey: boolean; repeat?: boolean },
   onCard: boolean,
-): "left" | "right" | "up" | "down" | null {
+): "left" | "right" | "up" | "down" | "held" | null {
   if (!onCard || !e.altKey || e.metaKey || e.ctrlKey) return null;
-  return KEY_DIR[e.key] ?? null;
+  const dir = KEY_DIR[e.key] ?? null;
+  return dir && e.repeat ? "held" : dir;
 }
 
 const KEY_DIR: Record<string, "left" | "right" | "up" | "down" | undefined> = {
