@@ -27,6 +27,9 @@ export type PendingSpawn = {
   uniqueCwd: boolean;
   /** The crew id minted for the launch; a hooked session reports it. */
   crewId?: string;
+  /** The crew name minted with it: taken until the spawn settles, and what a
+   *  hookless session is bound to (see recordBoundCrew). */
+  crewName?: string;
   /** The opening prompt the launch typed. */
   task: string;
   /** Session ids already live at spawn time: never ours. */

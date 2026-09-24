@@ -99,11 +99,13 @@ async function server() {
   const { makeServer } = await import("../src/server");
   const spawned: { cwd: string; cardId?: string }[] = [];
   const modes: (string | undefined)[] = [];
+  const crews: { id: string; name: string }[] = [];
   const srv = makeServer(0, {
     // Stands in for Ghostty: "launches" into a fresh worktree at `wt`.
     spawn: async (_cwd, _task, opts) => {
       spawned.push({ cwd: wt, cardId: opts?.cardId });
       modes.push(opts?.permissionMode);
+      if (opts?.crew) crews.push(opts.crew);
       return { ok: true, cwd: wt, worktreeCreated: true };
     },
   });
@@ -113,7 +115,7 @@ async function server() {
   const add = async (title: string) =>
     ((await (await post("/action/card-add", { columnId: "backlog", title })).json()) as any).cardId as string;
   const card = (id: string) => readSnapshot(dir, Date.now()).board.cards.find((k) => k.id === id)!;
-  return { srv, base, post, add, card, spawned, modes };
+  return { srv, base, post, add, card, spawned, modes, crews };
 }
 
 /** Wait for the status-dir watcher (150ms debounce) to push, and for the
@@ -210,5 +212,68 @@ test("a spawn from the dashboard with no mode stays on Claude's default", async 
     body: JSON.stringify({ cwd: dir, text: "t" }),
   });
   expect(modes).toEqual([undefined]);
+  srv.stop(true);
+});
+
+// ---- the name a hookless spawn signs with ----------------------------------
+// The spawn tells the new agent its crew name in the prompt ("You are
+// RIPLEY-3"), but only a hook writes that crew into the status file. Without
+// hooks the desk used to show a hashed roster name while the agent signed its
+// comments with the crew name, so its card read as someone else's.
+
+test("no hooks: once bound, the desk and the card's assignee carry the spawn's crew name", async () => {
+  const { srv, post, add, card, crews } = await server();
+  const id = await add("Fix the thing");
+  await post("/action/spawn", { cwd: dir, text: "do the card", cardId: id, persona: "frontend-ux" });
+  const minted = crews[0]!;
+  writeFileSync(join(dir, `${NEW}.json`), status({ name: "BJORN" }));
+  await until(() => !!card(id).assignee);
+  expect(card(id).assignee).toMatchObject({ id: NEW, name: minted.name, crew: minted.id });
+  expect(readSnapshot(dir, Date.now()).agents.find((a) => a.sessionId === NEW)?.name).toBe(minted.name);
+  // And a comment signed as the assignee reads as the name the agent was told.
+  await post("/action/card-comment", { cardId: id, as: "assignee", text: "picked up" });
+  expect(card(id).comments?.at(-1)?.author).toBe(minted.name);
+  srv.stop(true);
+});
+
+test("two spawns into one persona get different names, even before either shows up", async () => {
+  const { srv, post, add, crews } = await server();
+  await post("/action/spawn", { cwd: dir, text: "a", cardId: await add("A"), persona: "frontend-ux" });
+  await post("/action/spawn", { cwd: dir, text: "b", cardId: await add("B"), persona: "frontend-ux" });
+  expect(crews.map((c) => c.name)).toEqual(["RIPLEY", "RIPLEY-2"]);
+  srv.stop(true);
+});
+
+test("a bound hookless spawn keeps its name taken for the next spawn", async () => {
+  const { srv, post, add, card, crews } = await server();
+  const first = await add("A");
+  await post("/action/spawn", { cwd: dir, text: "a", cardId: first, persona: "frontend-ux" });
+  writeFileSync(join(dir, `${NEW}.json`), status({ name: "BJORN" }));
+  await until(() => !!card(first).assignee);
+  await post("/action/spawn", { cwd: dir, text: "b", cardId: await add("B"), persona: "frontend-ux" });
+  expect(crews.map((c) => c.name)).toEqual(["RIPLEY", "RIPLEY-2"]);
+  srv.stop(true);
+});
+
+test("while a respawn waits to bind, \"as\":\"assignee\" signs with the new agent's name, not the ended assignee's", async () => {
+  const { srv, post, add, card, crews } = await server();
+  const id = await add("Reduced motion");
+  writeFileSync(join(dir, `${OLD}.json`), status({ sessionId: OLD, name: "KIRSH", cwd: "/somewhere/else" }));
+  await post("/action/card-assign", { cardId: id, sessionId: OLD });
+  rmSync(join(dir, `${OLD}.json`)); // KIRSH's session ended
+  await post("/action/spawn", { cwd: dir, text: "do the card", cardId: id, persona: "frontend-ux" });
+  await post("/action/card-comment", { cardId: id, as: "assignee", text: "picked up" });
+  expect(card(id).comments?.at(-1)?.author).toBe(crews[0]!.name);
+  srv.stop(true);
+});
+
+test("a LIVE assignee still signs as itself while a spawn for its card is pending", async () => {
+  const { srv, post, add, card } = await server();
+  const id = await add("Shared");
+  writeFileSync(join(dir, `${OLD}.json`), status({ sessionId: OLD, name: "KIRSH", cwd: "/somewhere/else" }));
+  await post("/action/card-assign", { cardId: id, sessionId: OLD });
+  await post("/action/spawn", { cwd: dir, text: "do the card", cardId: id, persona: "frontend-ux" });
+  await post("/action/card-comment", { cardId: id, as: "assignee", text: "still here" });
+  expect(card(id).comments?.at(-1)?.author).toBe("KIRSH");
   srv.stop(true);
 });

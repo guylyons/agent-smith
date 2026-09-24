@@ -11,7 +11,7 @@
 // Names come from the Alien films: a random unused one per spawn, so the crew
 // reads as people rather than as a persona repeated four times.
 import { join } from "node:path";
-import { mkdirSync, readFileSync, writeFileSync, renameSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import type { AgentStatus } from "../schema";
 import type { Assignee, Board, Card } from "./board";
 
@@ -40,6 +40,7 @@ export const ROSTER: readonly string[] = [
 
 /** Mirrored as CREW_ID in src/lib/board.ts, which the browser bundle imports. */
 export const CREW_ID_RE = /^[a-z0-9-]{1,64}$/;
+const CREW_NAME_RE = /^[A-Za-z0-9 ._-]{1,32}$/;
 
 export type Crew = { id: string; name: string };
 
@@ -49,10 +50,19 @@ function hash(s: string): number {
   return Math.abs(h);
 }
 
+/** The names the shipped personas (personas/*.md) go by. Kept here rather
+ *  than read from the persona files because the hook computes rosterName and
+ *  must not load that registry; tests/crew.test.ts fails if the two drift. */
+export const CAST: readonly string[] = ["RIPLEY", "DALLAS", "VASQUEZ", "APONE", "BISHOP"];
+
+const UNCAST = ROSTER.filter((n) => !CAST.includes(n));
+
 /** A deterministic roster name for an anchor with no minted name (a session
- *  started by hand, keyed by its pid; a hookless session, keyed by its id). */
+ *  started by hand, keyed by its pid; a hookless session, keyed by its id).
+ *  Never a persona's name: a hashed DALLAS beside the scrum master DALLAS
+ *  reads as the scrum master. */
 export function rosterName(anchor: string): string {
-  return ROSTER[hash(anchor) % ROSTER.length]!;
+  return UNCAST[hash(anchor) % UNCAST.length]!;
 }
 
 /** A random roster name not in `taken`. When every name is live, any name —
@@ -89,7 +99,7 @@ export function mintCrewId(name: string, rand: () => number = Math.random): stri
 export function crewFrom(env: { AGENT_CREW?: string; AGENT_NAME?: string }, pid?: number): Crew | undefined {
   const id = env.AGENT_CREW?.trim() ?? "";
   const name = env.AGENT_NAME?.trim() ?? "";
-  if (id && name && CREW_ID_RE.test(id) && /^[A-Za-z0-9 ._-]{1,32}$/.test(name)) return { id, name };
+  if (id && name && CREW_ID_RE.test(id) && CREW_NAME_RE.test(name)) return { id, name };
   if (pid && pid > 0) return { id: `pid-${pid}`, name: rosterName(`pid:${pid}`) };
   return undefined;
 }
@@ -98,6 +108,52 @@ export function crewFrom(env: { AGENT_CREW?: string; AGENT_NAME?: string }, pid?
  *  overrides in the snapshot: override > crew > persona name > hashed. */
 export function applyCrew(agents: AgentStatus[]): AgentStatus[] {
   return agents.map((a) => (a.crew ? { ...a, name: a.crew.name } : a));
+}
+
+// ---- crews the server bound ------------------------------------------------
+// A session without hooks never reports the crew its spawn minted: only the
+// hook writes it into the status file. Its desk then showed a hashed name
+// while the agent, told its crew name in the launch prompt, signed with that,
+// so its card read as someone else's. When the server binds such a session to
+// its spawn (src/lib/spawnAssign.ts) it records the crew here instead, next to
+// the status files, and the snapshot applies it.
+
+function boundFile(dir: string): string {
+  return join(dir, ".spawn-crews.json");
+}
+
+/** sessionId -> crew for every hookless session the server bound. Missing,
+ *  corrupt, or malformed entries read as absent. */
+export function readBoundCrews(dir: string): Record<string, Crew> {
+  let raw: unknown;
+  try { raw = JSON.parse(readFileSync(boundFile(dir), "utf8")); } catch { return {}; }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, Crew> = {};
+  for (const [sid, c] of Object.entries(raw as Record<string, any>)) {
+    if (c && typeof c.id === "string" && CREW_ID_RE.test(c.id) && typeof c.name === "string" && CREW_NAME_RE.test(c.name)) {
+      out[sid] = { id: c.id, name: c.name };
+    }
+  }
+  return out;
+}
+
+/** Record the crew a hookless session was spawned as. Drops entries whose
+ *  status file is gone (the session ended), so the file stays small. */
+export function recordBoundCrew(dir: string, sessionId: string, crew: Crew): void {
+  const all = readBoundCrews(dir);
+  all[sessionId] = crew;
+  for (const sid of Object.keys(all)) if (!existsSync(join(dir, `${sid}.json`))) delete all[sid];
+  const file = boundFile(dir);
+  const tmp = `${file}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(all));
+  renameSync(tmp, file);
+}
+
+/** Give each crewless agent the crew the server bound it to. Pure. Runs
+ *  before applyCrew, so the desk shows the name the agent was told. A crew
+ *  the session reports itself (hooks) always wins. */
+export function applyBoundCrews(agents: AgentStatus[], bound: Record<string, Crew>): AgentStatus[] {
+  return agents.map((a) => (!a.crew && bound[a.sessionId] ? { ...a, crew: bound[a.sessionId] } : a));
 }
 
 /** Is this live session the card's assignee? By crew when the card knows one
