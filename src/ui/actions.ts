@@ -6,6 +6,7 @@ import { signalDying } from "./dying";
 import { playSubmit } from "./sounds";
 import type { Board, Card, Column, Stage } from "../lib/board";
 import type { ArchivedCard } from "../lib/archive";
+import type { MemoryNode } from "../lib/memory";
 import type { MoodKind, MoodLink, MoodNote, NotePatch } from "../lib/mood";
 // Shared with the UI as types only — nothing server-side is bundled into the browser.
 import type { ChatMessage, QuestionOption, Question, PendingQuestion, BlockingTool } from "../lib/conversation";
@@ -101,6 +102,18 @@ export async function fetchArchive(): Promise<ArchivedCard[] | null> {
     return null;
   }
 }
+/** GET /memory: facts and cards matching `q` (see searchMemory), or null when
+ *  the request failed. */
+export async function fetchMemory(q: string, limit: number): Promise<MemoryNode[] | null> {
+  try {
+    const res = await fetch(`/memory?${new URLSearchParams({ q, limit: String(limit) })}`);
+    if (!res.ok) return null;
+    return ((await res.json()) as { results?: MemoryNode[] }).results ?? null;
+  } catch {
+    return null;
+  }
+}
+export function forgetMemoryAction(id: string): Promise<boolean> { return act("memory-forget", { id }); }
 export function reorderColumnAction(columnId: string, toIndex: number): Promise<boolean> { return act("column-reorder", { columnId, toIndex }); }
 export function restoreColumnAction(column: Column, index: number, cards: Card[]): Promise<boolean> {
   return act("column-restore", { column, index, cards });

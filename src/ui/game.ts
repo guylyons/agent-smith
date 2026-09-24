@@ -140,17 +140,27 @@ function stageOf(board: Board, columnId: string) {
   return col ? columnStage(col) : undefined;
 }
 
+/** Where each persona works while it is busy. Every persona in personas/*.md
+ *  needs an entry here (a test checks), except the scrum master, who is always
+ *  on the bridge. A persona missing from this table works in the workshop. */
+export const PERSONA_ROOM: Record<string, RoomId> = {
+  "frontend-ux": "computer",
+  editor: "comms",
+  "release-manager": "comms",
+  "backend-dev": "workshop",
+};
+
 /** The room an agent belongs in right now. Order matters: someone waiting on
- *  you is on the bridge whatever their job; finished work sits in the medbay
- *  even once its agent has gone idle; only then does idle mean the mess. */
+ *  you is on the bridge whatever their job, and so is the scrum master; a
+ *  working agent is in its persona's room, even if an older card of theirs is
+ *  still in review; an idle agent with a card in review sits in the medbay;
+ *  any other idle agent is in the mess. */
 export function roomFor(a: Pick<AgentStatus, "sessionId" | "state" | "persona" | "role" | "crew">, board: Board): RoomId {
   const persona = personaOf(a);
   if (a.state === "waiting" || persona === "scrum-master") return "bridge";
+  if (a.state === "working") return Object.hasOwn(PERSONA_ROOM, persona) ? PERSONA_ROOM[persona]! : "workshop";
   if (cardsOf(board, a).some((c) => stageOf(board, c.columnId) === "review")) return "medbay";
-  if (a.state === "idle") return "mess";
-  if (persona === "frontend-ux") return "computer";
-  if (persona === "editor" || persona === "release-manager") return "comms";
-  return "workshop";
+  return "mess";
 }
 
 /** Where the i-th agent in a room stands. Past the last marked spot, agents

@@ -2,7 +2,9 @@
 // where, and the corridor path between rooms. Drawing it was checked in the
 // browser.
 import { test, expect } from "bun:test";
-import { roomFor, spotFor, placeAll, pathBetween, pathLength, pointAlong, sleepers, cargoCount, viaFor, roomsOverlay, ROOMS, ROOM_IDS, MAP_W, MAP_H } from "../src/ui/game";
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
+import { roomFor, PERSONA_ROOM, spotFor, placeAll, pathBetween, pathLength, pointAlong, sleepers, cargoCount, viaFor, roomsOverlay, ROOMS, ROOM_IDS, MAP_W, MAP_H } from "../src/ui/game";
 import { viewFromHash, hashForView, hashFlag } from "../src/ui/view";
 import type { AgentStatus } from "../src/schema";
 import type { Board } from "../src/lib/board";
@@ -50,21 +52,37 @@ test("roomFor: the scrum master is always on the bridge", () => {
   expect(roomFor(agent({ persona: "scrum-master" }), board)).toBe("bridge");
 });
 
-test("roomFor: a card in review puts its agent in the medbay, idle or not", () => {
+test("roomFor: an idle agent with a card in review is in the medbay", () => {
+  expect(roomFor(agent({ state: "idle", persona: "frontend-ux" }), withCard("review", { id: "s1", name: "A" }))).toBe("medbay");
+});
+
+test("roomFor: working beats a card in review; a busy agent stands in its persona's room", () => {
   const b = withCard("review", { id: "s1", name: "A" });
-  expect(roomFor(agent({ persona: "frontend-ux" }), b)).toBe("medbay");
-  expect(roomFor(agent({ state: "idle" }), b)).toBe("medbay");
+  expect(roomFor(agent({ persona: "frontend-ux" }), b)).toBe("computer");
+  expect(roomFor(agent({ persona: "editor" }), b)).toBe("comms");
+  expect(roomFor(agent({}), b)).toBe("workshop");
 });
 
 test("roomFor: a review card found by crew id follows the agent across /clear", () => {
   const b = withCard("review", { id: "old-session", name: "A", crew: "a-1" });
-  expect(roomFor(agent({ crew: { id: "a-1", name: "A" } }), b)).toBe("medbay");
-  expect(roomFor(agent({}), b)).toBe("workshop");
+  expect(roomFor(agent({ state: "idle", crew: { id: "a-1", name: "A" } }), b)).toBe("medbay");
+  expect(roomFor(agent({ state: "idle" }), b)).toBe("mess");
 });
 
 test("roomFor: the review stage is read from the column, not its id", () => {
   const b: Board = { columns: [{ id: "col_x", name: "Check", instruction: "", stage: "review" }], cards: [{ id: "c", title: "", columnId: "col_x", assignee: { id: "s1", name: "A" } }] };
-  expect(roomFor(agent({}), b)).toBe("medbay");
+  expect(roomFor(agent({ state: "idle" }), b)).toBe("medbay");
+});
+
+test("PERSONA_ROOM has a room for every persona in personas/ (the scrum master lives on the bridge)", () => {
+  // A new persona file fails this until someone decides where it works.
+  const ids = readdirSync(join(import.meta.dir, "..", "personas"))
+    .filter((f) => f.endsWith(".md"))
+    .map((f) => f.slice(0, -3))
+    .filter((id) => id !== "scrum-master");
+  expect(ids.length).toBeGreaterThan(0);
+  for (const id of ids) expect(PERSONA_ROOM[id], `personas/${id}.md has no PERSONA_ROOM entry`).toBeDefined();
+  for (const room of Object.values(PERSONA_ROOM)) expect(ROOM_IDS).toContain(room);
 });
 
 test("roomFor: idle agents go to the mess; a card in progress doesn't change that", () => {

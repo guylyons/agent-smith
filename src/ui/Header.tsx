@@ -26,7 +26,7 @@ export function headerSummary(agents: AgentStatus[]): { working: number; waiting
   return { working, waiting, repos };
 }
 
-export function Header({ snap, live, view, onView, onNewAgent, onFind, onSettings }: { snap: Snapshot; live: boolean; view: AppView; onView: (v: AppView) => void; onNewAgent: () => void; onFind: () => void; onSettings: () => void }) {
+export function Header({ snap, live, view, onView, onNewAgent, onFind, onMemory, onSettings }: { snap: Snapshot; live: boolean; view: AppView; onView: (v: AppView) => void; onNewAgent: () => void; onFind: () => void; onMemory: () => void; onSettings: () => void }) {
   const { agents, board } = snap;
   const idle = agents.filter((a) => a.state === "idle").length;
   // Archived cards are finished tasks, not lost ones: count them, and say so.
@@ -70,6 +70,7 @@ export function Header({ snap, live, view, onView, onNewAgent, onFind, onSetting
               can do to the workshop, in the row the eye already scans. */}
           <button className="newagent-btn quiet-btn" onClick={onSettings} title="Theme, display, background, alerts">CONFIG</button>
           <button className="newagent-btn quiet-btn" onClick={onFind} title="Find a ticket, desk, or chat (Alt+P)">FIND</button>
+          <button className="newagent-btn quiet-btn" onClick={onMemory} title="What agents have recorded in the team memory">MEMORY</button>
           <button className="newagent-btn" onClick={onNewAgent}>+ NEW AGENT</button>
         </div>
       </div>
