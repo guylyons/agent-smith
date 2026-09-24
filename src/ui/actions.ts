@@ -18,7 +18,7 @@ import type { MergePreview } from "../lib/mergePreview";
  *  for a busy one's Stop hook to collect when its turn ends. */
 export type Delivery = { sessionId: string; name: string; via: "typed" | "queued" };
 
-type Result = { ok: boolean; error?: string; archived?: number; ids?: string[]; cardId?: string; existing?: boolean; noteId?: string; linkId?: string; path?: string; url?: string; cancelled?: boolean; branch?: string; base?: string; delivery?: Delivery[] };
+type Result = { ok: boolean; error?: string; archived?: number; ids?: string[]; cardId?: string; existing?: boolean; noteId?: string; linkId?: string; path?: string; url?: string; cancelled?: boolean; branch?: string; base?: string; delivery?: Delivery[]; mentions?: { mention: string; sessionId: string; name: string; via: string }[]; unmatched?: string[] };
 
 async function post(action: string, body: object): Promise<Result> {
   try {
@@ -141,12 +141,17 @@ export function deleteCardAction(cardId: string): Promise<boolean> { return act(
 export function restoreCardAction(card: Card, index: number): Promise<boolean> { return act("card-restore", { card, index }); }
 export function assignCardAction(cardId: string, sessionId: string | null): Promise<boolean> { return act("card-assign", { cardId, sessionId }); }
 /** Post a comment as the human. The server delivers it to the card's assignee
- *  (and any scrum master) itself; the returned delivery says how each got it,
- *  so the modal can toast "Notified" vs "Queued" truthfully. */
-export async function addCommentAction(cardId: string, text: string): Promise<Delivery[]> {
+ *  (and any scrum master) itself, and to each live agent it @mentions; the
+ *  returned delivery says how each got it, so the modal can toast "Notified"
+ *  vs "Queued" truthfully, and `unmatched` the mentions that named nobody. */
+export async function addCommentAction(cardId: string, text: string): Promise<{ delivery: Delivery[]; unmatched: string[] }> {
   const r = await post("card-comment", { cardId, author: ME, text });
-  if (!r.ok) { toastError(r.error ?? "card-comment failed"); return []; }
-  return r.delivery ?? [];
+  if (!r.ok) { toastError(r.error ?? "card-comment failed"); return { delivery: [], unmatched: [] }; }
+  // A mention's own delivery counts like any other; "already", "self" and
+  // "removed" sent nothing new.
+  const mentioned = (r.mentions ?? []).flatMap(({ sessionId, name, via }): Delivery[] =>
+    via === "typed" || via === "queued" ? [{ sessionId, name, via }] : []);
+  return { delivery: [...(r.delivery ?? []), ...mentioned], unmatched: r.unmatched ?? [] };
 }
 export function deleteCommentAction(cardId: string, commentId: string): Promise<boolean> { return act("comment-delete", { cardId, commentId }); }
 /** Pin a comment as the card's handoff note (replacing any earlier pin), or
