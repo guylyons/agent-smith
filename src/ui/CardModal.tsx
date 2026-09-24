@@ -25,7 +25,7 @@ export type SpawnSeed = { persona?: string; folder?: string };
 
 // Matches TheLine's: the pure op to paint immediately, plus the one scoped
 // server call that makes it real. See actions.ts for why nothing sends a board.
-type Mutate = (fn: ((b: Board) => Board) | null, send: () => void) => void;
+type Mutate = (fn: ((b: Board) => Board) | null, send: () => Promise<boolean> | void) => void;
 
 // Which field a dropped/pasted image lands in. Drops anywhere on the modal go to
 // whichever field the user last touched, defaulting to the comment box — the
