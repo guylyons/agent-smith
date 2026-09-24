@@ -23,15 +23,18 @@ export function repoKey(repo: string | undefined): string {
 }
 
 /** What to save for a typed repo: the folder name, and a real path when there
- *  is one. A "~" path is not expanded here (the browser has no home dir), so it
- *  takes the path of the known repo with that name, or none. Blank clears. */
-export function normaliseRepo(input: string, known: KnownRepo[]): { repo: string; repoPath?: string } {
+ *  is one. An absolute path is kept as typed (tidied to its repo root): a
+ *  known repo with the same folder name may be a different checkout. A "~"
+ *  path is not expanded here (the browser has no home dir), so it takes the
+ *  path of the known repo with that name, or none. Blank clears. Null means
+ *  the path names no folder ("~", "/"), so there is nothing to save. */
+export function normaliseRepo(input: string, known: KnownRepo[]): { repo: string; repoPath?: string } | null {
   const raw = input.trim();
   if (!looksLikePath(raw)) return { repo: raw };
-  const root = worktreeRoot(raw).replace(/[\\/]+$/, "");
+  const root = worktreeRoot(raw);
   const repo = repoName(root);
-  if (!repo) return { repo: "" };
-  const path = known.find((k) => k.name === repo)?.path ?? (isAbsolute(root) ? root : undefined);
+  if (!repo || repo === "~") return null;
+  const path = isAbsolute(root) ? root : known.find((k) => k.name === repo)?.path;
   return path ? { repo, repoPath: path } : { repo };
 }
 
@@ -50,10 +53,10 @@ export function knownRepos(board: Board, agents: Pick<AgentStatus, "cwd">[]): Kn
   const scrum = board.cards.filter((c) => c.kind === "scrum");
   for (const c of [...scrum, ...board.cards.filter((c) => c.kind !== "scrum")]) {
     const raw = (c.repo ?? "").trim();
-    add(repoKey(raw), c.repoPath?.trim() || (isAbsolute(raw) ? worktreeRoot(raw).replace(/[\\/]+$/, "") : undefined));
+    add(repoKey(raw), c.repoPath?.trim() || (isAbsolute(raw) ? worktreeRoot(raw) : undefined));
   }
   for (const a of agents) {
-    const root = worktreeRoot(a.cwd.trim()).replace(/[\\/]+$/, "");
+    const root = worktreeRoot(a.cwd.trim());
     if (root) add(repoName(root), root);
   }
   return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
@@ -74,6 +77,28 @@ export function filterRepo(filter: RepoFilter, known: KnownRepo[]): { repo: stri
   if (filter.kind !== "repo") return null;
   const path = known.find((k) => k.name === filter.repo)?.path;
   return path ? { repo: filter.repo, repoPath: path } : { repo: filter.repo };
+}
+
+/** The project + SCRUM MASTER makes a card for: the filtered repo when the
+ *  view is on one (so the card lands in view), else the fallback folder (the
+ *  last launch, or a live agent's). */
+export function scrumTarget(filter: RepoFilter, known: KnownRepo[], fallback: string): { repo: string; folder: string } {
+  if (filter.kind === "repo") return { repo: filter.repo, folder: known.find((k) => k.name === filter.repo)?.path ?? "" };
+  return { repo: fallback ? repoName(fallback) : "", folder: fallback };
+}
+
+/** Watched cards (ones you just made, opened or launched an agent for) that the
+ *  filter hid between two boards: visible before, or new, and hidden now. The
+ *  same filter judges both boards, so changing the filter yourself never counts. */
+export function newlyHidden(before: Card[], after: Card[], watched: Iterable<string>, filter: RepoFilter): Card[] {
+  if (filter.kind === "all") return [];
+  const ids = new Set(watched);
+  const was = new Map(before.map((c) => [c.id, c]));
+  return after.filter((c) => {
+    if (!ids.has(c.id) || cardInFilter(c, filter)) return false;
+    const prev = was.get(c.id);
+    return !prev || cardInFilter(prev, filter);
+  });
 }
 
 export function serialiseRepoFilter(f: RepoFilter): string {

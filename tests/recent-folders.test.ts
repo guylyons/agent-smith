@@ -70,3 +70,21 @@ test("parseRecent drops old saved worktree entries in favour of their repo", () 
 test("pushRecent remembers a worktree launch as its repo", () => {
   expect(pushRecent(["/a", "/src/shop"], "/src/shop/.claude/worktrees/x")).toEqual(["/src/shop", "/a"]);
 });
+
+test("worktreeRoot maps a folder inside a worktree to its repo", () => {
+  expect(worktreeRoot("/x/api/.claude/worktrees/foo/src")).toBe("/x/api");
+  expect(worktreeRoot("/x/api/.claude/worktrees/foo/src/lib/")).toBe("/x/api");
+});
+
+test("worktreeRoot drops trailing slashes but keeps a bare root", () => {
+  expect(worktreeRoot("/a/b/")).toBe("/a/b");
+  expect(worktreeRoot("/a/b//")).toBe("/a/b");
+  expect(worktreeRoot("~/")).toBe("~");
+  expect(worktreeRoot("/")).toBe("/");
+});
+
+test("a folder with and without a trailing slash is one chip", () => {
+  expect(mergeRecent(["/a/b"], ["/a/b/"])).toEqual(["/a/b"]);
+  expect(pushRecent(["/a/b/", "/c"], "/a/b")).toEqual(["/a/b", "/c"]);
+  expect(parseRecent('["/a/b/","/a/b"]')).toEqual(["/a/b"]);
+});
