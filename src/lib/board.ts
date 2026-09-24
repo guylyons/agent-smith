@@ -572,28 +572,49 @@ export function globsOverlap(a: string, b: string): boolean {
   return globToRegExp(x).test(y) || globToRegExp(y).test(x);
 }
 
-/** Has a card in this column landed? A `done` column, or a stageless one placed
- *  after a `done` column — the user's own "Merged" or "Archived" past Done is
- *  where finished work goes next, so nobody should have to stage it by hand. A
- *  stageless column before Done (or on a board with no Done) has not landed. */
-function isLandedColumn(board: Board, columnId: string): boolean {
-  const at = board.columns.findIndex((c) => c.id === columnId);
-  if (at < 0) return LEGACY_STAGE[columnId] === "done";
+/** Is this column past Done by position alone? A `done` column, or a stageless
+ *  one placed after a `done` column — the user's own "Merged" or "Archived" past
+ *  Done is where finished work goes next, so nobody should have to stage it by
+ *  hand. A stageless column before Done (or on a board with no Done) is not. */
+function isPastDone(board: Board, at: number): boolean {
   const stage = columnStage(board.columns[at]!);
   if (stage) return stage === "done";
   return board.columns.slice(0, at).some((c) => columnStage(c) === "done");
 }
 
+/** Does the done-stage column hold work that is accepted but not merged yet?
+ *  True when a landed column (a "Merged") comes after it: merged cards go
+ *  there, so Done is a waiting room and its cards keep their claims and their
+ *  place in the merge line. False on a board with nothing landed past Done,
+ *  where Done is the end of the line. The one place this rule lives. */
+function doneAwaitsMerge(board: Board): boolean {
+  const done = stageColumn(board, "done");
+  if (!done) return false;
+  const at = board.columns.indexOf(done);
+  return board.columns.some((_, i) => i > at && isPastDone(board, i));
+}
+
+/** Has a card in this column landed? Past Done (see isPastDone), except the
+ *  done-stage column itself when it awaits merge (see doneAwaitsMerge). */
+function isLandedColumn(board: Board, columnId: string): boolean {
+  const at = board.columns.findIndex((c) => c.id === columnId);
+  if (at < 0) return LEGACY_STAGE[columnId] === "done";
+  if (!isPastDone(board, at)) return false;
+  return !(board.columns[at] === stageColumn(board, "done") && doneAwaitsMerge(board));
+}
+
 /** Is this card holding its claim right now? Two things have to be true: it has
- *  been STAFFED (an agent is bound to it, or it sits where work happens or waits
- *  for review), and it has not landed yet (see isLandedColumn).
+ *  been STAFFED (an agent is bound to it, or it sits where work happens, waits
+ *  for review, or waits in Done to merge), and it has not landed yet (see isLandedColumn).
  *  A card merely planned in the backlog claims nothing — otherwise a groomed
  *  backlog would block its own cards from ever being picked up. */
 function isClaiming(board: Board, card: Card): boolean {
   if (!card.touches?.length) return false;
   if (isLandedColumn(board, card.columnId)) return false;
   const stage = columnStage(board.columns.find((c) => c.id === card.columnId) ?? { id: card.columnId, name: "", instruction: "" });
-  return !!card.assignee || stage === "doing" || stage === "review";
+  // Not landed and in a done-stage column means Done awaits merge: the work
+  // was staffed to get there, so it holds its claim with or without an agent.
+  return !!card.assignee || stage === "doing" || stage === "review" || stage === "done";
 }
 
 /** Every other card actively claiming a file this card also touches. Empty when

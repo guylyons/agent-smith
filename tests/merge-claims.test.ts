@@ -11,6 +11,7 @@ import { fixtureDir } from "./fixtures";
 import {
   defaultBoard,
   mergeBlockers,
+  overlappingClaims,
   mergeBlockReason,
   landMergedCard,
   mergedColumn,
@@ -157,6 +158,75 @@ test("landMergedCard is a no-op on a board with no done column", () => {
     cards: [{ id: "card_a", title: "A", columnId: "c1" }],
   };
   expect(landMergedCard(b, "card_a")).toBe(b);
+});
+
+// ---- Done before Merged ------------------------------------------------------
+// When a landed column (a "Merged") follows Done, Done holds accepted but
+// unmerged work: its cards keep their claims and their place in the line.
+
+test("with Merged after Done, a card in Done still holds its claim", () => {
+  const b = withColumnsAfterDone(boardWith(
+    { id: "card_a", columnId: "done", assignee, touches: ["x.ts"] },
+    { id: "card_b", columnId: "backlog", touches: ["x.ts"] },
+  ), "Merged");
+  expect(overlappingClaims(b, "card_b").map((c) => c.cardId)).toEqual(["card_a"]);
+});
+
+test("with Merged after Done, a card in Done claims even once nobody is assigned", () => {
+  const b = withColumnsAfterDone(boardWith(
+    { id: "card_a", columnId: "done", touches: ["x.ts"] },
+    { id: "card_b", columnId: "backlog", touches: ["x.ts"] },
+  ), "Merged");
+  expect(overlappingClaims(b, "card_b").map((c) => c.cardId)).toEqual(["card_a"]);
+});
+
+test("with Merged after Done, two overlapping cards in Done merge one at a time", () => {
+  const b = withColumnsAfterDone(boardWith(
+    { id: "card_a", columnId: "done", assignee, touches: ["x.ts"] },
+    { id: "card_b", columnId: "done", assignee: other, touches: ["x.ts"] },
+  ), "Merged");
+  expect(mergeBlockers(b, "card_a")).toEqual([]);
+  expect(mergeBlockers(b, "card_b").map((c) => c.cardId)).toEqual(["card_a"]);
+});
+
+test("with Merged after Done, a card in Review waits on one in Done", () => {
+  const b = withColumnsAfterDone(boardWith(
+    { id: "card_a", columnId: "done", assignee, touches: ["x.ts"] },
+    { id: "card_b", columnId: "review", assignee: other, touches: ["x.ts"] },
+  ), "Merged");
+  expect(mergeBlockers(b, "card_b").map((c) => c.cardId)).toEqual(["card_a"]);
+});
+
+test("with Merged after Done, a card in Merged has landed and holds nobody up", () => {
+  const b = withColumnsAfterDone(boardWith(
+    { id: "card_a", columnId: "col_merged", assignee, touches: ["x.ts"] },
+    { id: "card_b", columnId: "done", assignee: other, touches: ["x.ts"] },
+  ), "Merged");
+  expect(mergeBlockers(b, "card_b")).toEqual([]);
+});
+
+test("with Merged after Done, landMergedCard moves a card from Done to Merged", () => {
+  const b = withColumnsAfterDone(boardWith({ id: "card_a", columnId: "done", assignee, touches: ["x.ts"] }), "Merged");
+  expect(landMergedCard(b, "card_a").cards[0]!.columnId).toBe("col_merged");
+});
+
+test("with no column after Done, Done has landed: two cards there wait on nothing", () => {
+  const b = boardWith(
+    { id: "card_a", columnId: "done", assignee, touches: ["x.ts"] },
+    { id: "card_b", columnId: "done", assignee: other, touches: ["x.ts"] },
+  );
+  expect(mergeBlockers(b, "card_a")).toEqual([]);
+  expect(mergeBlockers(b, "card_b")).toEqual([]);
+  expect(landMergedCard(b, "card_a")).toBe(b);
+});
+
+test("a staged, non-landed column after Done does not make Done wait", () => {
+  const base = boardWith(
+    { id: "card_a", columnId: "done", assignee, touches: ["x.ts"] },
+    { id: "card_b", columnId: "in-progress", assignee: other, touches: ["x.ts"] },
+  );
+  const b = { ...base, columns: [...base.columns, { id: "col_redo", name: "Redo", instruction: "", stage: "todo" as const }] };
+  expect(mergeBlockers(b, "card_b")).toEqual([]);
 });
 
 // ---- telling the waiting cards ---------------------------------------------
