@@ -266,7 +266,7 @@ test("mergeReleaseNotes is empty when nothing was waiting", () => {
 // ---- the MERGE key's state -------------------------------------------------
 
 const readyState: MergeState = {
-  repo: true, branch: "ag-b", base: "main", ahead: 1, dirty: false, rootBranch: "main", rootDirty: false,
+  repo: true, branch: "ag-b", base: "main", ahead: 1, dirty: false, rootBranch: "main", rootDirty: false, baseCheckedOut: true,
   committed: true, ready: true, blocked: "", merging: false,
 };
 

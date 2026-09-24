@@ -28,6 +28,10 @@ export type MergeFacts = {
   rootBranch: string;
   /** uncommitted changes in that main checkout */
   rootDirty: boolean;
+  /** `base` is checked out in some worktree. When it isn't and the main
+   *  checkout is detached (jj keeps git's HEAD that way), the merge is made
+   *  without a checkout at all — see mergeDetached. */
+  baseCheckedOut: boolean;
   /** `branch` has nothing ahead because it already arrived in `base` through a
    *  merge commit — work landed outside the dashboard. Only a real merge is
    *  seen; a fast-forward looks the same as a branch with no commits. */
@@ -68,6 +72,9 @@ export function mergeVerdict(f: MergeFacts): { committed: boolean; ready: boolea
   // fire right now.
   const not = (blocked: string) => ({ committed: true, ready: false, blocked });
   if (f.dirty) return not(`${f.branch} has uncommitted changes — commit them first`);
+  // Nothing has the trunk checked out and the main checkout is detached: the
+  // merge never touches a working tree, so neither can be in its way.
+  if (!f.rootBranch && !f.baseCheckedOut) return { committed: true, ready: true, blocked: "" };
   if (f.rootBranch !== f.base) return not(`your main checkout is on ${f.rootBranch || "a detached HEAD"}, not ${f.base}`);
   if (f.rootDirty) return not(`your ${f.base} checkout has uncommitted changes`);
   return { committed: true, ready: true, blocked: "" };
@@ -136,8 +143,15 @@ async function mergedInto(cwd: string, branch: string, base: string): Promise<bo
   return merges.stdout.split("\n").some((line) => line.split(" ").slice(2).includes(tip.stdout));
 }
 
+/** Is `refs/heads/<base>` the checked-out branch of any worktree? */
+async function checkedOutAnywhere(root: string, base: string): Promise<boolean> {
+  if (!base) return false;
+  const list = await git(root, ["worktree", "list", "--porcelain"]);
+  return list.stdout.split("\n").includes(`branch refs/heads/${base}`);
+}
+
 const NOT_A_REPO: MergeState = {
-  repo: false, branch: "", base: "", ahead: 0, dirty: false, rootBranch: "", rootDirty: false,
+  repo: false, branch: "", base: "", ahead: 0, dirty: false, rootBranch: "", rootDirty: false, baseCheckedOut: false,
   committed: false, ready: false, blocked: "not a git repository", merging: false,
 };
 
@@ -149,6 +163,7 @@ async function factsFor(cwd: string, root: string): Promise<MergeFacts> {
     currentBranch(cwd), pickBase(root), isDirty(cwd, true), currentBranch(root), isDirty(root, false),
   ]);
 
+  const baseCheckedOut = await checkedOutAnywhere(root, base);
   let ahead = 0;
   let landed = false;
   if (branch && base && branch !== base) {
@@ -157,7 +172,7 @@ async function factsFor(cwd: string, root: string): Promise<MergeFacts> {
     if (ahead === 0) landed = await mergedInto(cwd, branch, base);
   }
 
-  return { repo: true, branch, base, ahead, dirty, rootBranch, rootDirty, landed };
+  return { repo: true, branch, base, ahead, dirty, rootBranch, rootDirty, baseCheckedOut, landed };
 }
 
 /** Everything the card needs to know about landing this work. Best-effort: a
@@ -203,6 +218,8 @@ export async function mergeWork(cwd: string): Promise<MergeResult> {
     const verdict = mergeVerdict(facts);
     if (!verdict.ready) return { ok: false, error: verdict.blocked || "nothing to merge" };
 
+    if (!facts.rootBranch && !facts.baseCheckedOut) return mergeDetached(root, facts.branch, facts.base);
+
     const merge = await git(root, ["merge", "--no-ff", "--no-edit", facts.branch]);
     if (merge.code !== 0) {
       await git(root, ["merge", "--abort"]);
@@ -211,4 +228,28 @@ export async function mergeWork(cwd: string): Promise<MergeResult> {
     }
     return { ok: true, branch: facts.branch, base: facts.base };
   });
+}
+
+/** The same --no-ff merge commit, made with plumbing and no working tree:
+ *  for a repo whose main checkout is detached and has no worktree on the
+ *  trunk. jj keeps a colocated repo like that, and picks up the moved trunk
+ *  on its next command. The ref only moves if it is still where we read it. */
+async function mergeDetached(root: string, branch: string, base: string): Promise<MergeResult> {
+  const refused = (why: string): MergeResult => ({ ok: false, error: `could not merge ${branch} into ${base} — ${why || "merge it by hand"}` });
+  const [baseTip, branchTip] = await Promise.all([git(root, ["rev-parse", base]), git(root, ["rev-parse", branch])]);
+  if (baseTip.code !== 0 || branchTip.code !== 0) return refused(baseTip.stderr || branchTip.stderr);
+
+  // Exit 1 is a conflict; the output then names the conflicted paths.
+  const tree = await git(root, ["merge-tree", "--write-tree", "--name-only", baseTip.stdout, branchTip.stdout]);
+  if (tree.code !== 0) {
+    const lines = tree.stdout.split("\n").slice(1).filter((l) => l.trim());
+    return refused(lines.length ? `conflict in ${lines[0]}` : tree.stderr);
+  }
+  const commit = await git(root, [
+    "commit-tree", tree.stdout.split("\n")[0]!, "-p", baseTip.stdout, "-p", branchTip.stdout, "-m", `Merge branch '${branch}'`,
+  ]);
+  if (commit.code !== 0) return refused(commit.stderr);
+  const moved = await git(root, ["update-ref", "-m", `merge ${branch}`, `refs/heads/${base}`, commit.stdout, baseTip.stdout]);
+  if (moved.code !== 0) return refused(moved.stderr);
+  return { ok: true, branch, base };
 }
