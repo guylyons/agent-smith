@@ -107,6 +107,8 @@ export const KEYS = {
   drawerFont: "aw-drawer-font",
   // JSON array of repo folders, most recent first — see recentFolders.ts.
   recentFolders: "aw-recent-folders",
+  // THE LINE's repo filter: "all", "none" or "repo:<name>" — see repoFilter.ts.
+  lineRepo: "aw-line-repo",
 } as const;
 
 export function loadSetting(key: string, fallback: string): string {

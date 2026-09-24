@@ -13,7 +13,7 @@
 import { join } from "node:path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import type { AgentStatus } from "../schema";
-import type { Assignee, Board, Card } from "./board";
+import { repoName, type Assignee, type Board, type Card } from "./board";
 
 /** Crew of the Nostromo, Sulaco, Auriga, Prometheus, Covenant, Corbelan and
  *  Maginot, with the odd ship and synthetic. Uppercase ASCII: the name rides
@@ -184,12 +184,13 @@ export function isActorSession(
 
 /** Should this scrum master hear about an event on this card? Only when the
  *  card is in its project: the repo of the scrum card it is assigned to. A card
- *  with no repo, or a scrum master with no project on record, hears all. */
+ *  with no repo, or a scrum master with no project on record, hears all. A repo
+ *  typed as a path ("~/github/tubetable") counts as its folder name. */
 export function scrumHears(board: Board, agent: Pick<AgentStatus, "sessionId" | "crew">, card: Card): boolean {
-  const cardRepo = (card.repo ?? "").trim();
+  const cardRepo = repoName((card.repo ?? "").trim());
   if (!cardRepo) return true;
   const own = board.cards.find((k) => k.kind === "scrum" && isAssigneeSession(k.assignee, agent));
-  const ownRepo = (own?.repo ?? "").trim();
+  const ownRepo = repoName((own?.repo ?? "").trim());
   return !ownRepo || ownRepo === cardRepo;
 }
 
