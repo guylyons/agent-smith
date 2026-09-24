@@ -28,6 +28,7 @@ import {
   knownRepos, filterCards, filterRepo, dropIndex, visibleMoveTarget, loadRepoFilter, saveRepoFilter,
   parseRepoFilter, serialiseRepoFilter, type RepoFilter,
 } from "./repoFilter";
+import { refocusAfterMove, moveSettled, type PendingFocus } from "./moveFocus";
 
 const CARD_MIME = "application/x-line-card";
 const COL_MIME = "application/x-line-column";
@@ -80,6 +81,22 @@ export function TheLine({
     if (fn) setBoard((prev) => fn(prev));
     send();
   };
+
+  // A keyboard move to another column remounts the card there and drops focus
+  // to the page; put it back on the card once the board has re-rendered, until
+  // the server confirms the move (see moveFocus.ts). Only a keyboard move here
+  // sets it, so an agent's move never pulls focus.
+  const pendingFocus = useRef<PendingFocus>(null);
+  useLayoutEffect(() => {
+    const pending = pendingFocus.current;
+    if (!pending) return;
+    const now = Date.now();
+    const dropped = !document.activeElement || document.activeElement === document.body;
+    const id = refocusAfterMove(pending, board, dropped, now);
+    const el = id && document.querySelector<HTMLElement>(`.card[data-card-id="${CSS.escape(id)}"] .card-open`);
+    if (el) { el.focus(); el.scrollIntoView({ block: "nearest" }); }
+    if (moveSettled(pending, incoming, now)) pendingFocus.current = null;
+  }, [board, incoming]);
 
   function onAddColumn() {
     setAddingCol(true);
@@ -183,6 +200,7 @@ export function TheLine({
             autoFocusName={addingCol && i === board.columns.length - 1}
             onNamed={() => setAddingCol(false)}
             onOpenCard={showCard}
+            onKeyMovedAcross={(cardId, toColumnId) => { pendingFocus.current = { cardId, toColumnId, at: Date.now() }; }}
             unreadOn={unreadOn}
             filter={repoFilter}
             newCardRepo={filterRepo(repoFilter, known)}
@@ -209,11 +227,13 @@ export function TheLine({
 }
 
 function ColumnView({
-  board, agents, mutate, column, index, rows, autoFocusName, onNamed, onOpenCard, unreadOn, filter, newCardRepo,
+  board, agents, mutate, column, index, rows, autoFocusName, onNamed, onOpenCard, onKeyMovedAcross, unreadOn, filter, newCardRepo,
 }: {
   board: Board; agents: AgentStatus[]; mutate: Mutate; column: Column; index: number;
   rows: number; autoFocusName: boolean;
   onNamed: () => void; onOpenCard: (id: string, focus?: CardFocus) => void;
+  /** a keyboard move just sent this card to another column: refocus it there */
+  onKeyMovedAcross: (cardId: string, toColumnId: string) => void;
   /** unread comments on a card — computed by TheLine, which owns the read marks */
   unreadOn: (card: Card) => number;
   /** THE LINE's repo filter: which cards to show, and the repo a card added here carries */
@@ -255,6 +275,7 @@ function ColumnView({
   function moveByKey(cardId: string, dir: "left" | "right" | "up" | "down") {
     const t = filtered ? visibleMoveTarget(board, cardId, dir, filter) : cardMoveTarget(board, cardId, dir);
     if (!t) return;
+    if (t.toColumnId !== column.id) onKeyMovedAcross(cardId, t.toColumnId);
     mutate(
       (b) => moveCard(b, cardId, t.toColumnId, t.toIndex),
       () => moveCardAction(cardId, t.toColumnId, t.toIndex),
@@ -516,6 +537,7 @@ function CardView({
   return (
     <div
       className={`card${card.kind === "scrum" ? " card-scrum" : ""}${dropBefore ? " drop-before" : ""}${dropAfterLast ? " drop-after" : ""}${unread ? " has-unread" : ""}`}
+      data-card-id={card.id}
       draggable
       title={unread
         ? `${unread} unread comment${unread > 1 ? "s" : ""} · Enter opens · Alt+arrows move it`
