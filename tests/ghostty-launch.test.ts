@@ -154,6 +154,7 @@ test("workerPermissionSettings allows the board read, card writes, and local git
   const s = workerPermissionSettings("http://localhost:4173", "/Users/guy/github/agent-smith");
   expect(s.permissions.allow).toEqual([
     "Bash(curl -s http://localhost:4173/board)",
+    "Bash(curl -s 'http://localhost:4173/card?id=:*)",
     "Bash(curl -s http://localhost:4173/agents)",
     "Bash(curl -s -X POST http://localhost:4173/action/card-move:*)",
     "Bash(curl -s -X POST http://localhost:4173/action/card-comment:*)",

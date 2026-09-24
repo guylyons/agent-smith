@@ -453,9 +453,18 @@ test("cardTaskPrompt names the card, the server, and the column flow", () => {
   const id = b.cards[0]!.id;
   const p = cardTaskPrompt(b, id, SRV);
   expect(p).toContain(id);
-  expect(p).toContain(`${SRV}/board`);
   expect(p).toContain("backlog -> in-progress -> review -> done");
   expect(p).toContain('you are in: "backlog"');
+});
+
+test("cardTaskPrompt points the re-read at the one-card endpoint, not the whole board", () => {
+  let b = defaultBoard();
+  b = addCard(b, "backlog", "Fix login bug");
+  const id = b.cards[0]!.id;
+  const p = cardTaskPrompt(b, id, SRV);
+  expect(p).toContain(`curl -s '${SRV}/card?id=${id}'`);
+  expect(p).not.toContain(`${SRV}/board`);
+  expect(p).not.toContain("/board as canonical");
 });
 
 test("cardTaskPrompt is pure ASCII outside the card's own text", () => {

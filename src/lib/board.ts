@@ -319,6 +319,14 @@ export function cardTaskText(board: Board, id: string): string {
     .join("\n\n");
 }
 
+/** One card and the board's columns, with no other cards: what an agent needs
+ *  to re-read its own ticket (GET /card, and the MCP card_read) without pulling
+ *  the whole board. Undefined for an unknown card. */
+export function cardView(board: Board, id: string): { card: Card; columns: Column[] } | undefined {
+  const card = board.cards.find((c) => c.id === id);
+  return card ? { card, columns: board.columns } : undefined;
+}
+
 /** The full prompt handed to an assigned agent: the card's task text, then a
  *  protocol footer telling it which card it is on and how to drive its own
  *  ticket over the dashboard's HTTP API — move to the next column, comment as
@@ -415,9 +423,11 @@ export function cardTaskFooter(board: Board, id: string, server: string, agentNa
     "Scope: work ONLY this card. Never touch other cards or columns, and follow",
     "this card's constraints exactly (if it says do not commit, do not commit).",
     `To re-read your card, its comments, and every column's instruction:`,
-    `  curl -s ${server}/board`,
+    // Quoted: `?` is a glob character in zsh. One card, not /board: the whole
+    // board runs to hundreds of KB and would eat the agent's context.
+    `  curl -s '${server}/card?id=${card.id}'`,
     "If any text above looks garbled (encoding damage in transit), treat the",
-    "server's copy from /board as canonical.",
+    "server's copy from /card as canonical.",
   ].join("\n");
 }
 
