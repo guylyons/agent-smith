@@ -257,16 +257,6 @@ export function makeServer(
   type Unsignable = { error: string; status: number };
   const NO_LONGER_ASSIGNED = "you are no longer assigned to this card; stop work on it";
 
-  /** The crews each card was taken off (by card-assign, or a spawn binding
-   *  someone else), so their later writes can be refused however they sign.
-   *  In memory, like the inbox: a restart forgets it, and a taken-off agent
-   *  still has the stop notice and the "as" check against the assignee. */
-  const takenOff = new Map<string, Set<string>>();
-  const noteTakenOff = (cardId: string, was: Card["assignee"], to: Card["assignee"]) => {
-    if (!was?.crew || was.crew === to?.crew) return;
-    takenOff.set(cardId, (takenOff.get(cardId) ?? new Set()).add(was.crew));
-  };
-
   /** A signature read off a card write, before anyone asks it for anything in
    *  particular. Every write path — move, comment, merge, crew-note — takes the
    *  same four conventions, tried in this order:
@@ -301,11 +291,11 @@ export function makeServer(
    *  human (no crew), the scrum master and any crew never taken off this card
    *  sign as before. */
   function takenOffWriter(body: Signature, k: Card): Unsignable | undefined {
-    const gone = takenOff.get(k.id);
-    if (!gone?.size) return;
+    const gone = k.removedCrews;
+    if (!gone?.length) return;
     const crew = body.crew && CREW_ID_RE.test(body.crew) ? body.crew
       : body.sessionId && validSessionId(body.sessionId) ? resolveAssignee(dir, body.sessionId)?.crew : undefined;
-    if (!crew || !gone.has(crew)) return;
+    if (!crew || !gone.includes(crew)) return;
     const live = k.assignee ? findAssigneeSession(readSnapshot(dir, Date.now()).agents, k.assignee) : undefined;
     if (crew === currentCrew(k, live)) return;
     return { error: NO_LONGER_ASSIGNED, status: 409 };
@@ -467,7 +457,6 @@ export function makeServer(
         const who = resolveAssignee(dir, sessionId);
         if (!who) continue;
         writeBoard(dir, assignCard(board, p.cardId, who));
-        noteTakenOff(p.cardId, card.assignee, who);
         bound.push({ cardId: p.cardId, who, cwd: matched?.cwd || p.cwd });
         wrote = true;
       }
@@ -1034,7 +1023,6 @@ export function makeServer(
       pendingSpawns = pendingSpawns.filter((p) => p.cardId !== cardId);
       const next = assignCard(board, cardId, null);
       writeBoard(dir, next);
-      noteTakenOff(cardId, card.assignee, null);
       push();
       const delivery = await notifyTakenOff(next, card, null, title);
       return json({ ok: true, delivery });
@@ -1051,7 +1039,6 @@ export function makeServer(
     pendingSpawns = pendingSpawns.filter((p) => p.cardId !== cardId);
     const next = assignCard(board, cardId, resolved);
     writeBoard(dir, next);
-    noteTakenOff(cardId, card.assignee, resolved);
     push();
     const cwd = loadStatus(dir, body.sessionId)?.cwd;
     if (cwd) await recordWork(cardId, resolved, cwd);
