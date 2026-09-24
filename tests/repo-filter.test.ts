@@ -8,7 +8,7 @@ import { addCard, defaultBoard, moveCard, setCardKind, setCardRepo, type Board, 
 import type { AgentStatus } from "../src/schema";
 import {
   normaliseRepo, knownRepos, cardInFilter, filterCards, parseRepoFilter, serialiseRepoFilter, filterRepo,
-  dropIndex, visibleMoveTarget,
+  dropIndex, visibleMoveTarget, repoKey, scrumTarget, newlyHidden,
   type RepoFilter,
 } from "../src/ui/repoFilter";
 import { scrumHears } from "../src/lib/crew";
@@ -46,6 +46,24 @@ test("a full path becomes its folder name and keeps the path", () => {
 
 test("a worktree path is the repo it belongs to", () => {
   expect(normaliseRepo("/r/agent-smith/.claude/worktrees/repo-filter", [])).toEqual({ repo: "agent-smith", repoPath: "/r/agent-smith" });
+});
+
+test("a typed absolute path is kept as typed, even when a known repo shares its name", () => {
+  const known = [{ name: "api", path: "/Users/guy/work/api" }];
+  expect(normaliseRepo("/Users/guy/personal/api", known)).toEqual({ repo: "api", repoPath: "/Users/guy/personal/api" });
+});
+
+test("a path inside a worktree is the repo it belongs to", () => {
+  expect(normaliseRepo("/x/api/.claude/worktrees/foo/src", [])).toEqual({ repo: "api", repoPath: "/x/api" });
+  expect(repoKey("/x/api/.claude/worktrees/foo/src")).toBe("api");
+});
+
+test("~, ~/ and / name no folder, so there is nothing to save", () => {
+  for (const s of ["~", "~/", " ~/ ", "/", "//"]) expect(normaliseRepo(s, [])).toBeNull();
+});
+
+test("trailing slashes don't change what is saved", () => {
+  expect(normaliseRepo("/a/b//", [])).toEqual({ repo: "b", repoPath: "/a/b" });
 });
 
 // ---- knownRepos -------------------------------------------------------------
@@ -106,6 +124,40 @@ test("filterRepo is the repo a new card should carry", () => {
   expect(filterRepo({ kind: "none" }, known)).toBeNull();
   expect(filterRepo({ kind: "repo", repo: "agent-smith" }, known)).toEqual({ repo: "agent-smith", repoPath: "/g/agent-smith" });
   expect(filterRepo({ kind: "repo", repo: "gone" }, known)).toEqual({ repo: "gone" });
+});
+
+test("scrumTarget uses the filtered repo, else the fallback folder", () => {
+  const known = [{ name: "agent-smith", path: "/g/agent-smith" }];
+  const repo = (r: string): RepoFilter => ({ kind: "repo", repo: r });
+  expect(scrumTarget(repo("agent-smith"), known, "/g/Half-Life")).toEqual({ repo: "agent-smith", folder: "/g/agent-smith" });
+  expect(scrumTarget(repo("gone"), known, "/g/Half-Life")).toEqual({ repo: "gone", folder: "" });
+  expect(scrumTarget({ kind: "all" }, known, "/g/Half-Life")).toEqual({ repo: "Half-Life", folder: "/g/Half-Life" });
+  expect(scrumTarget({ kind: "none" }, known, "")).toEqual({ repo: "", folder: "" });
+});
+
+// ---- cards leaving the view -----------------------------------------------------
+
+test("newlyHidden names a watched card the filter just started hiding", () => {
+  const none: RepoFilter = { kind: "none" };
+  const before = [card(), { ...card(), id: "other" }];
+  // the server stamps a repo on the card an agent was launched for
+  const after = [{ ...card(), repo: "agent-smith" }, { ...card(), id: "other", repo: "agent-smith" }];
+  expect(newlyHidden(before, after, ["card_none"], none).map((c) => c.id)).toEqual(["card_none"]);
+});
+
+test("newlyHidden counts a new watched card that lands outside the view", () => {
+  const AS_: RepoFilter = { kind: "repo", repo: "agent-smith" };
+  expect(newlyHidden([], [card("tubetable")], ["card_tubetable"], AS_).map((c) => c.id)).toEqual(["card_tubetable"]);
+  expect(newlyHidden([], [card("agent-smith")], ["card_agent-smith"], AS_)).toEqual([]);
+});
+
+test("newlyHidden ignores cards already hidden, unwatched, deleted, or an unfiltered view", () => {
+  const AS_: RepoFilter = { kind: "repo", repo: "agent-smith" };
+  const t = card("tubetable");
+  expect(newlyHidden([t], [t], ["card_tubetable"], AS_)).toEqual([]);
+  expect(newlyHidden([card("agent-smith")], [{ ...card("agent-smith"), repo: "x" }], [], AS_)).toEqual([]);
+  expect(newlyHidden([card("agent-smith")], [], ["card_agent-smith"], AS_)).toEqual([]);
+  expect(newlyHidden([card()], [card("x")], ["card_none"], { kind: "all" })).toEqual([]);
 });
 
 // ---- scrum routing ----------------------------------------------------------

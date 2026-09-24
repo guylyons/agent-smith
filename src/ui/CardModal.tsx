@@ -334,7 +334,9 @@ export function CardModal({
               onCommit={(v, known) => {
                 // A path is saved as its folder name (+ the path), so every card
                 // for a project is spelled the same and routes the same.
-                const { repo, repoPath } = normaliseRepo(v, known);
+                const saved = normaliseRepo(v, known);
+                if (!saved) { toast(`"${v}" names no folder. Type the project folder, e.g. ~/code/agent-smith.`); return; }
+                const { repo, repoPath } = saved;
                 if (repo === (card.repo ?? "") && (!repoPath || repoPath === card.repoPath)) return;
                 mutate((b) => setCardRepo(b, card.id, repo, repoPath), () => setCardRepoAction(card.id, repo, repoPath));
               }}

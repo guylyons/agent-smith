@@ -20,7 +20,7 @@ export const MAX_RECENT = 8;
 export function pushRecent(list: string[], folder: string, max = MAX_RECENT): string[] {
   const f = worktreeRoot(folder.trim());
   if (!f) return list.slice(0, max);
-  return [f, ...list.filter((p) => p !== f)].slice(0, max);
+  return [...new Set([f, ...list.map(worktreeRoot)])].filter(Boolean).slice(0, max);
 }
 
 /** Remembered folders first (that's the history the user built), then whatever
@@ -46,9 +46,12 @@ export function parseRecent(raw: string): string[] {
 }
 
 /** The project a live agent's folder belongs to: an agent in a worktree runs
- *  in <repo>/.claude/worktrees/<name>, and the project is the <repo>. */
+ *  in <repo>/.claude/worktrees/<name> (or a folder inside it), and the project
+ *  is the <repo>. Trailing slashes go, so "/a/b/" and "/a/b" are one folder;
+ *  a bare root ("/") is kept. */
 export function worktreeRoot(folder: string): string {
-  return folder.replace(/[\\/]\.claude[\\/]worktrees[\\/][^\\/]+[\\/]?$/, "");
+  const f = folder.replace(/[\\/]\.claude[\\/]worktrees[\\/][^\\/]+(?:[\\/].*)?$/, "");
+  return f.replace(/(.)[\\/]+$/, "$1");
 }
 
 /** The one folder to call "the current project": the most recent launch, else

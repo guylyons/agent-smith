@@ -5,7 +5,7 @@ import type { Board, Column, Card, Stage } from "../lib/board";
 import {
   renameColumn, setInstruction, setColumnStage, deleteColumn, reorderColumn,
   deleteCard, restoreCard, moveCard, restoreColumn, cardMoveTarget, STAGES,
-  mergeBlockers, mergeBlockReason, repoName, mergedColumn,
+  mergeBlockers, mergeBlockReason, mergedColumn,
 } from "../lib/board";
 import {
   addColumnAction, renameColumnAction, setInstructionAction, setColumnStageAction, deleteColumnAction,
@@ -28,11 +28,13 @@ import {
 } from "./cardUnread";
 import {
   knownRepos, filterCards, filterRepo, dropIndex, visibleMoveTarget, loadRepoFilter, saveRepoFilter,
-  parseRepoFilter, serialiseRepoFilter, type RepoFilter,
+  parseRepoFilter, serialiseRepoFilter, scrumTarget, newlyHidden, cardInFilter, type RepoFilter,
 } from "./repoFilter";
 import { refocusAfterMove, moveSettled, cardButton, type PendingFocus } from "./moveFocus";
 
 const CARD_MIME = "application/x-line-card";
+/** How long a card you touched stays watched for leaving the filtered view. */
+const WATCH_MS = 5 * 60_000;
 const COL_MIME = "application/x-line-column";
 
 // A board edit: the pure op to show immediately, and the one scoped server call
@@ -62,7 +64,17 @@ export function TheLine({
   // Where to land inside the open card (a notice's comment, a move's stage, a
   // fresh card's description). Lives exactly as long as that viewing.
   const [openFocus, setOpenFocus] = useState<CardFocus | null>(null);
-  const showCard = (id: string | null, focus?: CardFocus) => { setOpenCardId(id); setOpenFocus(focus ?? null); };
+  const showCard = (id: string | null, focus?: CardFocus) => {
+    if (id) watch(id);
+    setOpenCardId(id); setOpenFocus(focus ?? null);
+  };
+
+  // Cards you just made, opened or launched an agent for, and when. If the repo
+  // filter starts hiding one (the server stamps a repo on spawn, say), a toast
+  // says where it went instead of it vanishing silently. Kept a few minutes: a
+  // card you touched an hour ago moving out of view is not news.
+  const watched = useRef(new Map<string, number>());
+  function watch(id: string) { watched.current.set(id, Date.now()); }
 
   // Adopt snapshots from the server (our own echoes, or edits from another tab
   // / an agent). Active text fields keep their own draft, so this never yanks a
@@ -107,11 +119,43 @@ export function TheLine({
     mutate(null, () => addColumnAction("")); // blank name -> its input auto-focuses
   }
 
-  // The project a new scrum master card is for: the folder you last launched an
+  // Which project's cards to show. Remembered per browser; it only hides cards,
+  // never changes them. A remembered repo that has since left the board is still
+  // offered, so the view is never stuck on a filter you can't pick your way out of.
+  const [repoFilter, setRepoFilter] = useState(loadRepoFilter);
+  const known = knownRepos(board, agents);
+  const filterNames = known.map((k) => k.name);
+  if (repoFilter.kind === "repo" && !filterNames.includes(repoFilter.repo)) filterNames.push(repoFilter.repo);
+  function pickFilter(f: RepoFilter) { setRepoFilter(f); saveRepoFilter(f); }
+
+  // A watched card the filter just started hiding: name its repo and offer the
+  // way back. Both boards are judged by the current filter, so changing the
+  // filter yourself never fires this.
+  const prevCards = useRef<Card[]>(board.cards);
+  const filterNow = useRef(repoFilter);
+  filterNow.current = repoFilter;
+  function announceHidden(c: Card) {
+    watched.current.delete(c.id);
+    toast(
+      `"${c.title || "Untitled"}" is ${c.repo ? `in ${c.repo}` : "in no repo"}, so the repo filter hides it.`,
+      { label: "SHOW ALL", run: () => pickFilter({ kind: "all" }) },
+    );
+  }
+  useEffect(() => {
+    const now = Date.now();
+    for (const [id, at] of watched.current) if (now - at > WATCH_MS) watched.current.delete(id);
+    const hidden = newlyHidden(prevCards.current, board.cards, watched.current.keys(), repoFilter);
+    prevCards.current = board.cards;
+    for (const c of hidden) announceHidden(c);
+  }, [board.cards]);
+
+  // The project a new scrum master card is for: the filtered repo when the view
+  // is on one (so the card lands in view), else the folder you last launched an
   // agent in, else one a live agent is working in. The name and path are baked
   // into the card's starter brief; both stay editable in the card.
-  const scrumFolder = projectFolder(loadRecentFolders(), agents.map((a) => a.cwd));
-  const scrumRepo = scrumFolder ? repoName(scrumFolder) : "";
+  const { repo: scrumRepo, folder: scrumFolder } = scrumTarget(
+    repoFilter, known, projectFolder(loadRecentFolders(), agents.map((a) => a.cwd)),
+  );
 
   // Make the project's scrum master card in the backlog and open it for editing.
   // The server keeps one per project, so pressing this again just opens it.
@@ -123,6 +167,10 @@ export function TheLine({
         if (!r) return;
         if (r.existing) toast(`${scrumRepo || "This project"} already has a scrum master card. Opened it.`);
         showCard(r.id, r.existing ? undefined : { kind: "new" });
+        // The board may already hold the card (its echo can beat this reply),
+        // in which case the watcher above never sees it arrive: check it here.
+        const c = prevCards.current.find((k) => k.id === r.id);
+        if (c && !cardInFilter(c, filterNow.current)) announceHidden(c);
       });
     });
   }
@@ -156,15 +204,6 @@ export function TheLine({
 
   const unreadOn = (card: Card) => unreadCommentCount(card, read.marks, ME);
 
-  // Which project's cards to show. Remembered per browser; it only hides cards,
-  // never changes them. A remembered repo that has since left the board is still
-  // offered, so the view is never stuck on a filter you can't pick your way out of.
-  const [repoFilter, setRepoFilter] = useState(loadRepoFilter);
-  const known = knownRepos(board, agents);
-  const filterNames = known.map((k) => k.name);
-  if (repoFilter.kind === "repo" && !filterNames.includes(repoFilter.repo)) filterNames.push(repoFilter.repo);
-  function pickFilter(f: RepoFilter) { setRepoFilter(f); saveRepoFilter(f); }
-
   return (
     <section className="win line">
       <div className="line-head">
@@ -186,7 +225,7 @@ export function TheLine({
           className="pix add-scrum"
           onClick={onAddScrum}
           title={scrumRepo
-            ? `Make the scrum master card for ${scrumRepo} (${scrumFolder})`
+            ? `Make the scrum master card for ${scrumRepo}${scrumFolder ? ` (${scrumFolder})` : ""}`
             : "Make a scrum master card (no project folder yet: name it in the card)"}
         >+ SCRUM MASTER</button>
       </div>
@@ -223,7 +262,7 @@ export function TheLine({
           agents={agents}
           mutate={mutate}
           focus={openFocus}
-          onSpawnForCard={onSpawnForCard}
+          onSpawnForCard={(task, cardId, seed) => { watch(cardId); onSpawnForCard(task, cardId, seed); }}
           onClose={() => showCard(null)}
         />
       )}
