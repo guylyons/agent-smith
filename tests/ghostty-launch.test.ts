@@ -150,7 +150,7 @@ test("a cardId is shell-quoted so it can't inject into the launch command", () =
   expect(out).toContain("AGENT_CARD='x'\\''; rm -rf /'");
 });
 
-test("workerPermissionSettings allows the board read, card writes, local git, and a merge into its own repo", () => {
+test("workerPermissionSettings allows the board read, card writes, and local git", () => {
   const s = workerPermissionSettings("http://localhost:4173", "/Users/guy/github/agent-smith");
   expect(s.permissions.allow).toEqual([
     "Bash(curl -s http://localhost:4173/board)",
@@ -169,7 +169,6 @@ test("workerPermissionSettings allows the board read, card writes, local git, an
     "Bash(git log:*)",
     "Bash(git add:*)",
     "Bash(git commit:*)",
-    "Bash(git -C /Users/guy/github/agent-smith merge:*)",
   ]);
   // never the spawn/kill/prompt endpoints, the MCP tools that reach other
   // sessions, or git push — those stay behind a human approval
@@ -179,15 +178,13 @@ test("workerPermissionSettings allows the board read, card writes, local git, an
   expect(JSON.stringify(s)).not.toContain("git push");
 });
 
-test("workerPermissionSettings scopes merge to the repo root it is given, and nothing else", () => {
+test("workerPermissionSettings allows no git merge: merging stays human-only, through the merge queue", () => {
   const root = "/tmp/some repo/root";
   const allow = workerPermissionSettings("http://localhost:4173", root).permissions.allow;
-  const gitRules = allow.filter((r) => r.includes("git") && !r.startsWith("Bash(git status") && !r.startsWith("Bash(git diff")
-    && !r.startsWith("Bash(git log") && !r.startsWith("Bash(git add") && !r.startsWith("Bash(git commit"));
-  // exactly one extra git rule, and it names this root
-  expect(gitRules).toEqual([`Bash(git -C ${root} merge:*)`]);
-  // never a bare merge that would work in any repo, and no other history-rewriting verb
-  expect(allow).not.toContain("Bash(git merge:*)");
+  // no merge in any form: bare, or scoped by -C to the repo root
+  expect(allow.some((r) => /\bmerge\b/.test(r))).toBe(false);
+  expect(allow.some((r) => r.includes(root))).toBe(false);
+  // and no other history-rewriting or remote verb
   for (const verb of ["push", "reset", "rebase", "checkout", "switch", "branch", "worktree"]) {
     expect(allow.some((r) => r.includes(`git ${verb}`) || r.includes(` ${verb}:`))).toBe(false);
   }
