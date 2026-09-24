@@ -2060,3 +2060,117 @@ button:not(:disabled):active{transform:translateY(1px)}
   animation:mic-pulse .9s ease-in-out infinite}
 @keyframes mic-pulse{0%,100%{box-shadow:0 0 0 0 rgba(190,60,40,.65)}50%{box-shadow:0 0 0 4px rgba(190,60,40,0)}}
 @media (prefers-reduced-motion:reduce){.mic-btn.listening{animation:none}}
+
+/* ---- view tabs: WORKSHOP / MOOD -------------------------------------------
+   A segmented pair in the statline. The page you're on is filled, the other
+   is an outline, the same pairing the rest of the header uses. */
+.view-tabs{display:inline-flex}
+.view-tab{font-family:var(--mono);font-size:12px;letter-spacing:calc(.5px + var(--track));cursor:pointer;
+  background:var(--box-lo);color:var(--dim);border:2px solid var(--bevel);padding:6px 9px}
+.view-tab + .view-tab{border-left:none}
+.view-tab:hover{color:var(--gold)}
+.view-tab.on{background:var(--bevel);color:var(--on-bevel);cursor:default}
+
+/* ---- the MOOD board -----------------------------------------------------------
+   A panel holding a pannable, zoomable canvas (see MoodBoard.tsx). The canvas
+   is the one place the page wants more than 1080px, so it takes the room. */
+.mood{max-width:1400px;margin:26px auto 0;padding:16px;display:flex;flex-direction:column;gap:10px}
+.mood h2{font-size:14px;letter-spacing:.5px}
+.mood .hint{font-size:13px;color:var(--dim);margin-top:6px}
+.mood-bar{display:flex;gap:12px;align-items:flex-end;justify-content:space-between;flex-wrap:wrap}
+.mood-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.mood-zoom{display:inline-flex;gap:4px}
+.mood-zoom-pct{min-width:58px}
+.mood-kind-select,.mood-card-select{font-family:var(--mono);font-size:12px;letter-spacing:.5px;cursor:pointer;
+  background:var(--box-lo);color:var(--bone);border:2px solid var(--bevel);padding:5px 6px;max-width:100%}
+.mood-card-select{flex:1;min-width:0}
+
+.mood-viewport{
+  position:relative;overflow:hidden;touch-action:none;cursor:grab;
+  height:max(420px, calc(100vh - 250px));
+  background-color:var(--night);border:2px solid var(--bevel);
+  /* A dot grid that pans and scales with the canvas (MoodBoard sets its
+     position and size), so you can see the board move. */
+  background-image:radial-gradient(circle, color-mix(in srgb, var(--dim) 45%, transparent) 1px, transparent 1.5px);
+}
+.mood-viewport:active{cursor:grabbing}
+.mood-viewport.is-linking{cursor:crosshair}
+.mood-world{position:absolute;left:0;top:0;transform-origin:0 0;width:0;height:0}
+.mood-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;
+  color:var(--dim);font-size:14px;text-align:center;padding:16px;pointer-events:none}
+.mood-empty .pix{color:var(--bone);font-size:13px}
+.mood-empty code{font-family:var(--code);color:var(--gold)}
+
+/* links: drawn under the notes, with a fat invisible twin to click on */
+.mood-links{position:absolute;left:0;top:0;width:1px;height:1px;overflow:visible;pointer-events:none}
+.mood-link line{stroke:var(--dim);stroke-width:2.5}
+.mood-links marker path{fill:var(--dim)}
+.mood-link.sel line:not(.mood-link-hit){stroke:var(--gold)}
+.mood-link line.mood-link-hit{stroke:transparent;stroke-width:16;pointer-events:stroke;cursor:pointer}
+.mood-link.loose{stroke:var(--gold);stroke-width:2.5;stroke-dasharray:6 5}
+.mood-link-label{position:absolute;transform:translate(-50%,-50%);white-space:nowrap;cursor:pointer;
+  font-family:var(--mono);font-size:12px;letter-spacing:.5px;padding:2px 6px;
+  background:var(--night);color:var(--bone);border:2px solid var(--dim)}
+.mood-link-label.sel,.mood-link-label:hover{border-color:var(--gold);color:var(--gold)}
+.mood-linkbar,.mood-linking{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--gold)}
+.mood-linkbar .reply-input{flex:0 1 260px}
+
+/* notes */
+.mnote{
+  --k:var(--dim);
+  position:absolute;cursor:grab;user-select:none;
+  background:var(--box);color:var(--bone);
+  border:2px solid var(--k);border-top-width:8px;border-radius:var(--radius-sm);
+  padding:8px 10px 10px;box-shadow:0 var(--px) 0 0 rgba(0,0,0,.45);
+  display:flex;flex-direction:column;gap:5px;
+}
+.mnote:hover{box-shadow:0 var(--px) 0 0 rgba(0,0,0,.45),0 0 0 2px var(--gold)}
+.mnote.sel{outline:3px solid var(--gold);outline-offset:2px}
+.mnote.dragging{cursor:grabbing;opacity:.92;z-index:2}
+.mnote.link-from{outline:3px dashed var(--gold);outline-offset:2px}
+.mnote.k-focus{--k:var(--gold)}
+.mnote.k-idea{--k:var(--bevel)}
+.mnote.k-risk{--k:var(--clay)}
+.mnote.k-question{--k:var(--bone);border-style:dashed;border-top-style:solid}
+.mnote.k-done{--k:var(--leaf)}
+.mnote.k-note{--k:var(--dim)}
+.mnote-kind{font-size:11px;color:var(--k)}
+.mnote-title{font-size:15px;font-weight:600;line-height:1.35;overflow-wrap:anywhere}
+.mnote-body{font-size:13px;line-height:1.5;color:var(--bone);opacity:.9;overflow-wrap:anywhere}
+.mnote-body p + p,.mnote-body ul,.mnote-body ol{margin-top:4px}
+.mnote-body ul,.mnote-body ol{padding-left:18px}
+.mnote-body code{font-family:var(--code);color:var(--gold)}
+.mnote-by{font-size:12px;color:var(--dim)}
+.mnote-card{align-self:flex-start;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;
+  font-family:var(--mono);font-size:12px;padding:3px 6px;
+  background:var(--box-lo);color:var(--gold);border:2px solid var(--bevel)}
+.mnote-card:hover{border-color:var(--gold)}
+/* the link handle: a ring on the right edge, shown on hover/focus/select */
+.mnote-handle{position:absolute;right:-11px;top:50%;transform:translateY(-50%);
+  width:20px;height:20px;border-radius:50%;cursor:crosshair;padding:0;
+  background:var(--night);border:3px solid var(--gold);opacity:0}
+.mnote:hover .mnote-handle,.mnote:focus-within .mnote-handle,.mnote.sel .mnote-handle,.mnote-handle:focus-visible{opacity:1}
+/* a heading: a big bare label that names an area of the board */
+.mnote.k-heading{background:transparent;border:none;box-shadow:none;padding:4px 0}
+.mnote.k-heading:hover{box-shadow:none;outline:2px dashed var(--bevel);outline-offset:4px}
+.mnote.k-heading .mnote-title{font-family:var(--display);font-size:28px;color:var(--gold);letter-spacing:calc(1px + var(--track));text-transform:uppercase}
+
+/* editing a note in place */
+.mnote-edit{display:flex;flex-direction:column;gap:6px;cursor:default}
+.mnote-edit .reply-input{flex:0 0 auto;width:100%}
+.mnote-edit-title{font-weight:600}
+.mnote-edit-body{resize:vertical;line-height:1.5;min-height:64px}
+.mnote-edit-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.mnote.k-heading .mnote-edit{background:var(--box);padding:8px;border:2px solid var(--bevel)}
+.mnote-del{color:var(--clay)}
+
+@media (max-width:720px){
+  .mood{margin-top:16px;padding:12px}
+  .mood .hint{font-size:12px}
+  .mood-viewport{height:max(360px, calc(100vh - 300px))}
+  .view-tab{padding:6px 7px}
+}
+/* Only animate the handle's fade when motion is welcome. */
+@media (prefers-reduced-motion:no-preference){
+  .mnote-handle{transition:opacity .12s}
+}

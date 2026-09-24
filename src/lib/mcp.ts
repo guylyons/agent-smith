@@ -8,6 +8,7 @@
 // card-scoped mutation against the latest board, so two writers can never
 // clobber each other, and the open UI updates live.
 import type { Board } from "./board";
+import { MOOD_KINDS, formatMood, moodBounds, type Mood } from "./mood";
 
 export type ApiResult = { status: number; body: any };
 export type Api = {
@@ -391,6 +392,164 @@ export const TOOLS: Tool[] = [
     },
   },
 ];
+
+
+// ---- the MOOD board ---------------------------------------------------------
+// The team's big picture (see src/lib/mood.ts): where THE LINE tracks each
+// task, the mood board is where an agent says what it all adds up to.
+
+const NOTE_ID = { type: "string", description: "The note's id, e.g. note_1a2b3c4d (from mood_read)." };
+const KIND = {
+  type: "string",
+  enum: [...MOOD_KINDS],
+  description: "What the note is saying: focus (what we're on now), idea, risk, question (needs an answer), done (just landed), note, or heading (a big bare label for an area of the board).",
+};
+
+const getMood = async (ctx: Ctx): Promise<Mood> => (await request(ctx, "GET", "/mood")).mood as Mood;
+
+/** The display name to sign a note with: an explicit author, else this
+ *  folder's live agent by its desk name, else the generic one. */
+async function moodAuthor(ctx: Ctx, author?: string): Promise<string> {
+  const sig = await signatureFor(ctx, "", author);
+  if ("author" in sig) return sig.author;
+  if ("sessionId" in sig) {
+    try {
+      const agents: { sessionId: string; name: string }[] = (await request(ctx, "GET", "/agents")).agents ?? [];
+      return agents.find((a) => a.sessionId === sig.sessionId)?.name ?? UNKNOWN_AUTHOR;
+    } catch { /* fall through */ }
+  }
+  return UNKNOWN_AUTHOR;
+}
+
+function optionalNum(args: Args, key: string): number | undefined {
+  const v = args[key];
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== "number" || !Number.isFinite(v)) throw new Error(`${key} must be a number`);
+  return v;
+}
+
+/** Where a note goes when the agent doesn't say: under everything already on
+ *  the board, so it never lands on top of someone else's note. */
+export function nextNoteSpot(mood: Mood): { x: number; y: number } {
+  const b = moodBounds(mood);
+  return b ? { x: b.x, y: b.y + b.h + 40 } : { x: 0, y: 0 };
+}
+
+TOOLS.push(
+  {
+    name: "mood_read",
+    description:
+      "Read the MOOD board: the team's big-picture canvas of notes (focus, ideas, risks, open questions, what just landed) and the links between them. Read it before adding to it, so you update a note rather than repeat it.",
+    inputSchema: { type: "object", properties: {} },
+    async run(_args, ctx) {
+      return formatMood(await getMood(ctx));
+    },
+  },
+  {
+    name: "mood_note_add",
+    description:
+      "Put a note on the MOOD board to tell the human, at a glance, what is going on: what you're focused on, a risk you see, a question that needs an answer, what just landed. Keep the title short; put detail in body. Omit x/y to place it below everything else.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Short headline, a few words." },
+        body: { type: "string", description: "Optional detail, a line or two." },
+        kind: KIND,
+        cardId: { type: "string", description: "Optional THE LINE card this note is about, e.g. card_867a2e3b." },
+        x: { type: "number", description: "Canvas x of the note's left edge. Notes are ~220 wide." },
+        y: { type: "number", description: "Canvas y of the note's top edge. Notes are ~120 tall." },
+      },
+      required: ["title"],
+    },
+    async run(args, ctx) {
+      const title = str(args, "title");
+      let x = optionalNum(args, "x");
+      let y = optionalNum(args, "y");
+      if (x === undefined || y === undefined) {
+        const spot = nextNoteSpot(await getMood(ctx));
+        x ??= spot.x;
+        y ??= spot.y;
+      }
+      const body: Args = { title, x, y, author: await moodAuthor(ctx) };
+      for (const k of ["body", "kind", "cardId"]) {
+        const v = optionalStr(args, k);
+        if (v !== undefined) body[k] = v;
+      }
+      const out = await request(ctx, "POST", "/action/mood-note-add", body);
+      return `Added ${out.noteId} at ${x},${y}.`;
+    },
+  },
+  {
+    name: "mood_note_update",
+    description: "Change a MOOD board note: retitle it, rewrite its body, change its kind (e.g. question -> done), move it, or point it at a card. Fields you leave out are untouched.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        noteId: NOTE_ID,
+        title: { type: "string" },
+        body: { type: "string", description: "Replaces the body; \"\" clears it." },
+        kind: KIND,
+        cardId: { type: "string", description: "THE LINE card it is about; \"\" unlinks it." },
+        x: { type: "number" },
+        y: { type: "number" },
+      },
+      required: ["noteId"],
+    },
+    async run(args, ctx) {
+      const body: Args = { noteId: str(args, "noteId") };
+      for (const k of ["title", "body", "kind", "cardId"]) {
+        const v = optionalStr(args, k);
+        if (v !== undefined) body[k] = v;
+      }
+      for (const k of ["x", "y"]) {
+        const v = optionalNum(args, k);
+        if (v !== undefined) body[k] = v;
+      }
+      await request(ctx, "POST", "/action/mood-note-update", body);
+      return `Updated ${body.noteId}.`;
+    },
+  },
+  {
+    name: "mood_note_delete",
+    description: "Take a note off the MOOD board, along with its links. Prefer turning a finished note into kind \"done\" over deleting it, unless it is wrong or stale.",
+    inputSchema: { type: "object", properties: { noteId: NOTE_ID }, required: ["noteId"] },
+    async run(args, ctx) {
+      const noteId = str(args, "noteId");
+      await request(ctx, "POST", "/action/mood-note-delete", { noteId });
+      return `Deleted ${noteId}.`;
+    },
+  },
+  {
+    name: "mood_link",
+    description: "Draw an arrow between two MOOD board notes, with an optional short label (e.g. \"blocks\", \"leads to\", \"needs\"). One link per pair of notes.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        from: { ...NOTE_ID, description: "The note the arrow starts at." },
+        to: { ...NOTE_ID, description: "The note the arrow points to." },
+        label: { type: "string", description: "Optional, a word or two." },
+      },
+      required: ["from", "to"],
+    },
+    async run(args, ctx) {
+      const body: Args = { from: str(args, "from"), to: str(args, "to") };
+      const label = optionalStr(args, "label");
+      if (label !== undefined) body.label = label;
+      const out = await request(ctx, "POST", "/action/mood-link-add", body);
+      return `Linked ${body.from} -> ${body.to} (${out.linkId}).`;
+    },
+  },
+  {
+    name: "mood_unlink",
+    description: "Remove an arrow between two MOOD board notes, by its link id (from mood_read).",
+    inputSchema: { type: "object", properties: { linkId: { type: "string", description: "e.g. link_1a2b3c4d" } }, required: ["linkId"] },
+    async run(args, ctx) {
+      const linkId = str(args, "linkId");
+      await request(ctx, "POST", "/action/mood-link-delete", { linkId });
+      return `Removed ${linkId}.`;
+    },
+  },
+);
 
 const BY_NAME = new Map(TOOLS.map((t) => [t.name, t]));
 

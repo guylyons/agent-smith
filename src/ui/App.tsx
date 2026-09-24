@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { viewFromHash, type AppView } from "./view";
 import { useSnapshot } from "./useSnapshot";
 import { Backdrop } from "./Backdrop";
 import { Crt, TubeBevel } from "./Crt";
@@ -13,7 +14,8 @@ import { FaceHud } from "./FaceHud";
 import { Toaster } from "./Toaster";
 import { Dictation } from "./Dictation";
 import { Notifier } from "./Notifier";
-import { onOpenAgent } from "./nav";
+import { MoodBoard } from "./MoodBoard";
+import { onOpenAgent, onOpenCard, openCard } from "./nav";
 import { applyAllSettings, readDisplay, writeDisplay, loadBool, loadBoolDefaultOn, saveSetting, KEYS, LINE_ROWS_DEFAULT, type Display } from "./settings";
 import { diffUnread, loadUnread, saveUnread, type PrevStates } from "./unread";
 import type { AgentStatus } from "../schema";
@@ -26,6 +28,34 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [alertsEnabled, setAlertsEnabled] = useState(false);
+  // Which page is up: the workshop (desks + THE LINE) or the MOOD board. Kept
+  // in the URL hash, so a reload, a bookmark and the back button all agree.
+  const [view, setViewState] = useState<AppView>(() => viewFromHash(location.hash));
+  useEffect(() => {
+    const onHash = () => setViewState(viewFromHash(location.hash));
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+  const setView = useCallback((v: AppView) => {
+    location.hash = v === "mood" ? "mood" : "";
+    setViewState(v);
+  }, []);
+  // A card opened from the MOOD board (or a notice) lives on THE LINE, which
+  // only the workshop mounts: switch over, then ask again once it is listening.
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const pendingCard = useRef<string | null>(null);
+  useEffect(() => onOpenCard((cardId) => {
+    if (viewRef.current !== "mood") return;
+    pendingCard.current = cardId;
+    setView("workshop");
+  }), [setView]);
+  useEffect(() => {
+    if (view !== "workshop" || !pendingCard.current) return;
+    const id = pendingCard.current;
+    pendingCard.current = null;
+    openCard(id);
+  }, [view]);
   // Theme / CRT / background live here rather than in the Settings panel: the
   // CRT overlay needs the mode to play its power-on sweep, and the panel is
   // unmounted most of the time.
@@ -133,9 +163,15 @@ export function App() {
       <Backdrop />
       <Crt mode={display.crt} />
       <TubeBevel mode={display.bevel} />
-      <Header snap={snap} live={live} onNewAgent={() => setSpawnSeed({})} onFind={() => setPaletteOpen(true)} onSettings={() => setSettingsOpen(true)} />
-      <Crew agents={snap.agents} board={snap.board} unread={unread} onOpen={openAgent} />
-      <TheLine board={snap.board} agents={snap.agents} lineRows={display.lineRows} onSpawnForCard={(task, cardId, seed) => setSpawnSeed({ task, cardId, ...seed })} />
+      <Header snap={snap} live={live} view={view} onView={setView} onNewAgent={() => setSpawnSeed({})} onFind={() => setPaletteOpen(true)} onSettings={() => setSettingsOpen(true)} />
+      {view === "mood" ? (
+        <MoodBoard mood={snap.mood} board={snap.board} onOpenCard={openCard} />
+      ) : (
+        <>
+          <Crew agents={snap.agents} board={snap.board} unread={unread} onOpen={openAgent} />
+          <TheLine board={snap.board} agents={snap.agents} lineRows={display.lineRows} onSpawnForCard={(task, cardId, seed) => setSpawnSeed({ task, cardId, ...seed })} />
+        </>
+      )}
       {selected && selected.sessionId === selectedId && (
         <ConversationDrawer agent={selected} ended={ended} onClose={() => setSelectedId(null)} />
       )}

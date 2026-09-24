@@ -11,6 +11,7 @@ import { loadPersonas, applyPersonas } from "./lib/personas";
 import { applyCrew, pickName, mintCrewId, findAssigneeSession, isAssigneeSession, addNote, CREW_ID_RE } from "./lib/crew";
 import { sendTaskReadiness } from "./lib/sendTaskReady";
 import { readBoard, writeBoard, boardFile, addCard, moveCard, moveToWorkColumn, addComment, assignCard, renameCard, setCardDescription, cardTaskPrompt, addColumn, renameColumn, setInstruction, setColumnStage, deleteColumn, reorderColumn, restoreColumn, deleteCard, restoreCard, deleteComment, setCardTouches, setCardRepo, setCardKind, findScrumCard, scrumBrief, repoName, claimBlockReason, mergeBlockReason, landMergedCard, mergeReleaseNotes, type Board, type Card } from "./lib/board";
+import { readMood, writeMood, moodFile, formatMood, addNote as addMoodNote, updateNote, raiseNote, deleteNote, restoreNote, addLink, linkBlockReason, setLinkLabel, deleteLink, type Mood, type MoodLink, type NotePatch } from "./lib/mood";
 import { mainCheckout } from "./lib/worktree";
 import { focusSession, interruptSession, killAgent, sendPrompt, sendFreshPrompt, spawnAgent } from "./ghostty";
 import { readRepo } from "./repo";
@@ -26,6 +27,7 @@ import {
   PickFolderBody, SpawnBody, ColumnAddBody, ColumnUpdateBody, ColumnReorderBody, ColumnRestoreBody,
   CardRestoreBody, CardAddBody, CommentDeleteBody, CardMoveBody, CardUpdateBody, CardMergeBody,
   CardCommentBody, SendTaskBody, CardAssignBody, UploadBody, CrewNoteBody, RenameBody, SpriteBody, PromptBody,
+  MoodNoteAddBody, MoodNoteRestoreBody, MoodNoteRef, MoodNoteUpdateBody, MoodLinkAddBody, MoodLinkRef, MoodLinkUpdateBody,
 } from "./lib/actionBodies";
 
 function json(body: unknown, status = 200): Response {
@@ -72,9 +74,10 @@ export function readSnapshot(dir: string, now: number): Snapshot {
   }
   // personas and crew resolve INSIDE applyOverrides so a name you typed
   // yourself wins: user override > crew name > persona name > inferRole > hashed
-  return buildSnapshot(applyOverrides(applyCrew(applyPersonas(agents, loadPersonas())), readOverrides(dir)), now, {
+  const snap = buildSnapshot(applyOverrides(applyCrew(applyPersonas(agents, loadPersonas())), readOverrides(dir)), now, {
     board: readBoard(dir),
   });
+  return { ...snap, mood: readMood(dir) };
 }
 
 export type ChatHitResult = { sessionId: string; name: string; role: string; snippet: string; hitRole: ChatMessage["role"] };
@@ -834,6 +837,72 @@ export function makeServer(
     return json(r, r.ok ? 200 : 400);
   }
 
+  // ---- mood-*: the MOOD board (src/lib/mood.ts) -------------------------------
+  // The same discipline as card-*: each action names the one note or link it
+  // changes and applies it to a fresh read, so the human dragging a note and
+  // an agent adding one compose instead of clobbering each other.
+
+  /** mood-note-update/-delete: the note must exist on a fresh read. */
+  const withMoodNote = <S extends z.ZodType>(schema: S, fn: (ctx: Ctx, body: z.output<S>, mood: Mood, noteId: string) => Result) =>
+    withBody(MoodNoteRef, (ctx, { noteId }) => {
+      const mood = readMood(dir);
+      if (!mood.notes.some((n) => n.id === noteId)) return json({ ok: false, error: `unknown note: ${noteId}` }, 404);
+      return withBody(schema, (ctx, body) => fn(ctx, body, mood, noteId))(ctx);
+    });
+  /** mood-link-update/-delete: the link must exist on a fresh read. */
+  const withMoodLink = <S extends z.ZodType>(schema: S, fn: (ctx: Ctx, body: z.output<S>, mood: Mood, linkId: string) => Result) =>
+    withBody(MoodLinkRef, (ctx, { linkId }) => {
+      const mood = readMood(dir);
+      if (!mood.links.some((l) => l.id === linkId)) return json({ ok: false, error: `unknown link: ${linkId}` }, 404);
+      return withBody(schema, (ctx, body) => fn(ctx, body, mood, linkId))(ctx);
+    });
+
+  function moodNoteAdd(_ctx: Ctx, body: z.output<typeof MoodNoteAddBody>): Response {
+    const { mood, id } = addMoodNote(readMood(dir), {
+      title: body.title, x: body.x, y: body.y, kind: body.kind, body: body.body, w: body.w,
+      cardId: body.cardId, by: body.author || undefined,
+    });
+    writeMood(dir, mood);
+    return json({ ok: true, noteId: id });
+  }
+
+  function moodNoteUpdate(_ctx: Ctx, body: z.output<typeof MoodNoteUpdateBody>, mood: Mood, noteId: string): Response {
+    const { raise, ...fields } = body;
+    let next = updateNote(mood, noteId, fields as NotePatch);
+    if (raise) next = raiseNote(next, noteId);
+    writeMood(dir, next);
+    return json({ ok: true });
+  }
+
+  function moodNoteDelete(_ctx: Ctx, _body: unknown, mood: Mood, noteId: string): Response {
+    writeMood(dir, deleteNote(mood, noteId));
+    return json({ ok: true });
+  }
+
+  function moodNoteRestore(_ctx: Ctx, { note, links }: z.output<typeof MoodNoteRestoreBody>): Response {
+    writeMood(dir, restoreNote(readMood(dir), note, links as MoodLink[]));
+    return json({ ok: true, noteId: note.id });
+  }
+
+  function moodLinkAdd(_ctx: Ctx, { from, to, label }: z.output<typeof MoodLinkAddBody>): Response {
+    const mood = readMood(dir);
+    const blocked = linkBlockReason(mood, from, to);
+    if (blocked) return json({ ok: false, error: blocked }, 400);
+    const r = addLink(mood, from, to, label);
+    writeMood(dir, r.mood);
+    return json({ ok: true, linkId: r.id });
+  }
+
+  function moodLinkUpdate(_ctx: Ctx, { label }: z.output<typeof MoodLinkUpdateBody>, mood: Mood, linkId: string): Response {
+    writeMood(dir, setLinkLabel(mood, linkId, label));
+    return json({ ok: true });
+  }
+
+  function moodLinkDelete(_ctx: Ctx, _body: unknown, mood: Mood, linkId: string): Response {
+    writeMood(dir, deleteLink(mood, linkId));
+    return json({ ok: true });
+  }
+
   // inbox-drain: a session's Stop hook collecting the board events that
   // arrived while it was busy. Hands them over once; the hook feeds them
   // back to the agent as the reason its turn should continue.
@@ -888,6 +957,13 @@ export function makeServer(
     "card-assign": withCard(CardAssignBody, cardAssign),
     "upload": withBody(UploadBody, upload),
     "crew-note": withBody(CrewNoteBody, crewNote),
+    "mood-note-add": withBody(MoodNoteAddBody, moodNoteAdd),
+    "mood-note-update": withMoodNote(MoodNoteUpdateBody, moodNoteUpdate),
+    "mood-note-delete": withMoodNote(NoFields, moodNoteDelete),
+    "mood-note-restore": withBody(MoodNoteRestoreBody, moodNoteRestore),
+    "mood-link-add": withBody(MoodLinkAddBody, moodLinkAdd),
+    "mood-link-update": withMoodLink(MoodLinkUpdateBody, moodLinkUpdate),
+    "mood-link-delete": withMoodLink(NoFields, moodLinkDelete),
     "inbox-drain": withSessionId(NoFields, inboxDrain),
     "rename": withSessionId(RenameBody, renameSession),
     "sprite": withSessionId(SpriteBody, setSprite),
@@ -957,6 +1033,14 @@ export function makeServer(
       // API. Always a fresh read, so an agent that just wrote sees its write.
       if (url.pathname === "/board") {
         return json({ board: readBoard(dir), boardPath: boardFile(dir) });
+      }
+
+      // the MOOD board + where it lives; `?format=text` is the agent-readable
+      // summary the MCP mood_read tool returns.
+      if (url.pathname === "/mood") {
+        const mood = readMood(dir);
+        if (url.searchParams.get("format") === "text") return new Response(formatMood(mood), { headers: { "content-type": "text/plain; charset=utf-8" } });
+        return json({ mood, moodPath: moodFile(dir) });
       }
 
       // the live sessions, with names/roles resolved the way the board shows

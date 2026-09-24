@@ -1,13 +1,15 @@
 import type { AgentStatus } from "../schema";
 import type { Board } from "./board";
 import { defaultBoard } from "./board";
+import type { Mood } from "./mood";
 import { displayState } from "./liveness";
 
 // The snapshot the server broadcasts to the browser: the live agents plus the
 // kanban board (THE LINE). The board is fully manual — it's read from disk, not
-// derived from agent state — so it just rides along here for delivery. (An
-// agent that needs the board fetches GET /board itself; nothing else rides.)
-export type Snapshot = { agents: AgentStatus[]; board: Board };
+// derived from agent state — so it just rides along here for delivery, and so
+// does the MOOD board (the server adds it; see readSnapshot). An agent that
+// needs either fetches GET /board or GET /mood itself.
+export type Snapshot = { agents: AgentStatus[]; board: Board; mood?: Mood };
 
 /** Collapse the /clear ghost: a /clear starts a NEW session id in the SAME
  *  process without firing SessionEnd, so the old session's status file lingers
