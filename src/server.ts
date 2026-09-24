@@ -15,7 +15,7 @@ import { readMood, writeMood, moodFile, formatMood, addNote as addMoodNote, upda
 import { mainCheckout } from "./lib/worktree";
 import { focusSession, interruptSession, killAgent, sendPrompt, sendFreshPrompt, spawnAgent } from "./ghostty";
 import { readRepo } from "./repo";
-import { readMergeState, mergeWork, holdForClaims, cleanupMergedWork } from "./lib/merge";
+import { readMergeState, readMergePreview, mergeWork, holdForClaims, cleanupMergedWork } from "./lib/merge";
 import { saveUpload, resolveUploadPath } from "./lib/uploads";
 import { chooseFolder } from "./lib/chooser";
 import { initialIdle, onConnect, onDisconnect, shouldShutDown, type IdleState } from "./lib/idle";
@@ -1194,6 +1194,14 @@ export function makeServer(
         }
         const state = await readMergeState(where.cwd);
         return json(holdForClaims(state, board, cardId));
+      }
+
+      // what a MERGE would land: the branch's commits and changed files,
+      // capped, for the card to show above its key. Read-only.
+      if (url.pathname === "/merge-preview") {
+        const where = cardWorkDir(url.searchParams.get("cardId") ?? "");
+        if ("error" in where) return json({ error: where.error }, where.status);
+        return json(await readMergePreview(where.cwd));
       }
 
       // a session's git context (branch, commits, working-tree status)
