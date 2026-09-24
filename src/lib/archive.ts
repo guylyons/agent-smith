@@ -130,3 +130,29 @@ export function writeArchive(dir: string, archive: Archive): void {
   writeFileSync(tmp, JSON.stringify({ version: VERSION, ...clean }));
   renameSync(tmp, archiveFile(dir));
 }
+
+/** Give every card that has no number one, once, in the order the cards were
+ *  made — the archive's and the board's together, so a number held by an
+ *  archived card is never handed out again. Cards carry no creation time, so
+ *  the order is a best guess: the first comment's time, else when it was
+ *  archived, else where it sits (archive first, as those are the older cards).
+ *  A card in both files (a restore cut short) gets one number in both. Returns
+ *  the inputs unchanged when every card is numbered already and the counter
+ *  is past them all. */
+export function numberCards(board: Board, archive: Archive): { board: Board; archive: Archive; changed: boolean } {
+  const all: Card[] = [...archive.cards, ...board.cards];
+  const nums = new Map<string, number>();
+  for (const k of all) if (k.num && !nums.has(k.id)) nums.set(k.id, k.num);
+  const born = (k: Card) => k.comments?.[0]?.at ?? (k as Partial<ArchivedCard>).archivedAt ?? Infinity;
+  const todo = all.filter((k, i) => !nums.has(k.id) && all.findIndex((x) => x.id === k.id) === i);
+  let next = Math.max(board.nextNum ?? 1, 1 + Math.max(0, ...nums.values()));
+  // Array.sort is stable, so cards with no known age keep their file order.
+  for (const k of todo.sort((a, b) => born(a) - born(b))) nums.set(k.id, next++);
+  if (!todo.length && board.nextNum === next) return { board, archive, changed: false };
+  const withNum = <T extends Card>(k: T): T => (k.num ? k : { ...k, num: nums.get(k.id)! });
+  return {
+    board: { ...board, cards: board.cards.map(withNum), nextNum: next },
+    archive: { cards: archive.cards.map(withNum) },
+    changed: true,
+  };
+}

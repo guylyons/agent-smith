@@ -3,11 +3,11 @@
 // the key lit up as exactly that, with a next step, instead of a bare error.
 import { test, expect } from "bun:test";
 import { readFileSync } from "node:fs";
-import { mergeGate, mergeRefusal } from "../src/lib/mergeRace";
+import { mergeGate, mergeRefusal, previewKey } from "../src/lib/mergeRace";
 import type { MergeState } from "../src/lib/merge";
 
 const state = (o: Partial<MergeState> = {}): MergeState => ({
-  repo: true, branch: "ag-6", base: "main", ahead: 2, dirty: false, rootBranch: "main", rootDirty: false, baseCheckedOut: true,
+  repo: true, branch: "ag-6", base: "main", ahead: 2, tip: "a".repeat(40), dirty: false, rootBranch: "main", rootDirty: false, baseCheckedOut: true,
   committed: true, ready: true, blocked: "", merging: false, ...o,
 });
 
@@ -83,4 +83,30 @@ test("the MERGE key re-reads the state before it sends the merge", () => {
   const send = fire.indexOf("mergeCard(");
   expect(recheck).toBeGreaterThan(-1);
   expect(send).toBeGreaterThan(recheck);
+});
+
+// An amend (or rebase) that keeps the count still moves the tip: the preview
+// must re-read, and a merge of what was shown must be held.
+test("previewKey: an amend with the same count changes the key", () => {
+  const before = state();
+  const amended = state({ tip: "b".repeat(40) });
+  expect(amended.ahead).toBe(before.ahead);
+  expect(previewKey(amended)).not.toBe(previewKey(before));
+  expect(previewKey(state())).toBe(previewKey(before));
+});
+
+test("mergeGate: the tip moved since the preview was read -> hold, review again", () => {
+  const g = mergeGate(state({ tip: "b".repeat(40) }), "a".repeat(40));
+  expect(g.go).toBe(false);
+  if (!g.go) expect(g.message).toMatch(/moved since you looked; review again/);
+  expect(mergeGate(state(), "a".repeat(40))).toEqual({ go: true });
+});
+
+test("the MERGE key keys the preview on previewKey and sends the tip it showed", () => {
+  const src = readFileSync(new URL("../src/ui/MergeKey.tsx", import.meta.url), "utf8");
+  expect(src).toContain("refresh={previewKey(state)}");
+  expect(src).not.toContain("state.ahead}`} />");
+  const fire = src.slice(src.indexOf("async function fire"));
+  expect(fire).toMatch(/mergeGate\(await reload\(\), seen\)/);
+  expect(fire).toMatch(/mergeCard\(cardId, seen\)/);
 });

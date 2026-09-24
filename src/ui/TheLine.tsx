@@ -21,6 +21,7 @@ import { stackMaxHeight } from "./stackCap";
 import { loadRecentFolders, projectFolder } from "./recentFolders";
 import { findLiveAssignee } from "../lib/sendTaskReady";
 import { displayState } from "../lib/liveness";
+import { cardRef } from "../lib/ticket";
 import {
   canPrime, loadMarks, markCardRead, newestCommentAt, primeMarks, saveMarks,
   unreadCommentCount,
@@ -29,7 +30,7 @@ import {
   knownRepos, filterCards, filterRepo, dropIndex, visibleMoveTarget, loadRepoFilter, saveRepoFilter,
   parseRepoFilter, serialiseRepoFilter, type RepoFilter,
 } from "./repoFilter";
-import { refocusAfterMove, moveSettled, type PendingFocus } from "./moveFocus";
+import { refocusAfterMove, moveSettled, cardButton, type PendingFocus } from "./moveFocus";
 
 const CARD_MIME = "application/x-line-card";
 const COL_MIME = "application/x-line-column";
@@ -96,7 +97,7 @@ export function TheLine({
     const now = Date.now();
     const dropped = !document.activeElement || document.activeElement === document.body;
     const id = refocusAfterMove(pending, board, dropped, now);
-    const el = id && document.querySelector<HTMLElement>(`.card[data-card-id="${CSS.escape(id)}"] .card-open`);
+    const el = id && cardButton(id);
     if (el) { el.focus(); el.scrollIntoView({ block: "nearest" }); }
     if (moveSettled(pending, incoming, now)) pendingFocus.current = null;
   }, [board, incoming]);
@@ -586,6 +587,9 @@ function CardView({
               the avatar, which reads as "nothing here" — the same as a card whose
               footer is empty for other reasons. A chip makes "nobody is on this"
               a thing you can scan a backlog column for. */}
+          {/* The card's number, so people and agents can point at it ("see
+              #42"). Quiet: it's for reference, not for scanning. */}
+          <span className="card-ref" title={`Card ${cardRef(card)}`}>{cardRef(card)}</span>
           {repo && <span className="card-repo" title={repo.title}>{repo.label}</span>}
           {card.assignee
             ? (assignedAgent
@@ -626,7 +630,7 @@ function CardView({
  *  what the face shows, in words. The chips inside the open button are only
  *  pictures and initials, so the name has to carry them. */
 export function cardName(
-  card: Pick<Card, "title" | "kind" | "assignee">,
+  card: Pick<Card, "title" | "kind" | "assignee"> & Partial<Pick<Card, "id" | "num">>,
   staffing: "live" | "ended" | "none",
   unread: number,
   commentCount: number,
@@ -638,6 +642,7 @@ export function cardName(
   } else parts.push("unassigned");
   if (unread) parts.push(`${unread} new comment${unread > 1 ? "s" : ""}`);
   else if (commentCount) parts.push(`${commentCount} comment${commentCount > 1 ? "s" : ""}`);
+  if (card.id) parts.push(`card ${cardRef({ id: card.id, num: card.num })}`);
   return parts.join(", ");
 }
 

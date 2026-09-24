@@ -24,12 +24,36 @@ export function sweepConfirmLabel(n: number): string {
   return `REMOVE ${n} WORKTREE${n === 1 ? "" : "S"}`;
 }
 
-type Sweep =
+export type Sweep =
   | { step: "idle" }
-  | { step: "busy" }
+  | { step: "busy"; doing: "checking" | "removing" }
   | { step: "confirm"; plan: CleanupPlan }
   | { step: "done"; result: SweepResult }
   | { step: "error"; error: string };
+
+/** The sweep's one main button: the same element in every step, so focus
+ *  stays on it while it looks, confirms and removes. `busy` greys it without
+ *  `disabled`, which would drop focus to the page. */
+export function sweepButton(sweep: Sweep): { label: string; danger: boolean; busy: boolean } {
+  if (sweep.step === "busy") return { label: sweep.doing === "removing" ? "REMOVING…" : "CHECKING…", danger: sweep.doing === "removing", busy: true };
+  if (sweep.step === "confirm" && sweep.plan.remove.length > 0) return { label: sweepConfirmLabel(sweep.plan.remove.length), danger: true, busy: false };
+  return { label: "🧹 CLEAN UP MERGED WORKTREES", danger: false, busy: false };
+}
+
+/** What the live region says for each step, so a screen reader hears the
+ *  sweep's progress and outcome without hunting for it. */
+export function sweepStatus(sweep: Sweep): string {
+  const n = (k: number) => `${k} worktree${k === 1 ? "" : "s"}`;
+  switch (sweep.step) {
+    case "idle": return "";
+    case "busy": return sweep.doing === "removing" ? "Removing worktrees…" : "Checking worktrees…";
+    case "error": return sweep.error;
+    case "confirm": return sweep.plan.remove.length
+      ? `${n(sweep.plan.remove.length)} can go, ${sweep.plan.keep.length} stay.`
+      : "Nothing to clean up.";
+    case "done": return `Removed ${n(sweep.result.removed.length)}, kept ${sweep.result.kept.length}.`;
+  }
+}
 
 function SweepList({ title, lines }: { title: string; lines: string[] }) {
   if (!lines.length) return null;
@@ -45,31 +69,37 @@ function SweepList({ title, lines }: { title: string; lines: string[] }) {
 // Look first, then one confirm; the server re-checks each one as it goes.
 function WorktreeSweep() {
   const [sweep, setSweep] = useState<Sweep>({ step: "idle" });
+  const mainRef = useRef<HTMLButtonElement>(null);
   async function look() {
-    setSweep({ step: "busy" });
+    setSweep({ step: "busy", doing: "checking" });
     const r = await previewWorktreeCleanup();
     setSweep("error" in r ? { step: "error", error: r.error } : { step: "confirm", plan: r });
   }
   async function remove(plan: CleanupPlan) {
-    setSweep({ step: "busy" });
+    setSweep({ step: "busy", doing: "removing" });
     const r = await runWorktreeCleanup(plan.remove.map((w) => w.path));
     setSweep("error" in r ? { step: "error", error: r.error } : { step: "done", result: r });
   }
+  function press() {
+    if (sweep.step === "busy") return;
+    if (sweep.step === "confirm" && sweep.plan.remove.length > 0) void remove(sweep.plan);
+    else void look();
+  }
+  const btn = sweepButton(sweep);
+  const status = sweepStatus(sweep);
   return (
     <>
       <div className="pix settings-label">WORKTREES</div>
       <div className="settings-row">
-        {sweep.step === "confirm" && sweep.plan.remove.length > 0 ? (
-          <>
-            <button className="deskbtn danger" onClick={() => void remove(sweep.plan)}>{sweepConfirmLabel(sweep.plan.remove.length)}</button>
-            <button className="deskbtn" onClick={() => setSweep({ step: "idle" })}>CANCEL</button>
-          </>
-        ) : (
-          <button className="deskbtn" disabled={sweep.step === "busy"} onClick={() => void look()}>
-            {sweep.step === "busy" ? "CHECKING…" : "🧹 CLEAN UP MERGED WORKTREES"}
-          </button>
+        <button ref={mainRef} className={`deskbtn${btn.danger ? " danger" : ""}`} aria-disabled={btn.busy} onClick={press}>
+          {btn.label}
+        </button>
+        {sweep.step === "confirm" && sweep.plan.remove.length > 0 && (
+          // CANCEL unmounts itself: hand focus back to the main button first.
+          <button className="deskbtn" onClick={() => { mainRef.current?.focus(); setSweep({ step: "idle" }); }}>CANCEL</button>
         )}
       </div>
+      <div className="sr-only" role="status">{status}</div>
       {sweep.step === "idle" && (
         <div className="pix settings-hint">
           Lists worktrees under .claude/worktrees that are clean, merged into main and not in use by an agent, then removes them and their branches after you confirm.

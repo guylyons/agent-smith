@@ -148,7 +148,7 @@ export function formatBoard(board: Board): string {
     const cards = board.cards.filter((c) => c.columnId === col.id);
     if (cards.length === 0) out.push("  (empty)");
     for (const card of cards) {
-      const bits = [`  [${card.id}] ${card.title}`];
+      const bits = [`  [${card.id}] ${numLabel(card)}${card.title}`];
       if (card.repo) bits.push(`repo: ${card.repo}`);
       if (card.assignee) bits.push(`assigned: ${card.assignee.name}`);
       const n = card.comments?.length ?? 0;
@@ -159,6 +159,12 @@ export function formatBoard(board: Board): string {
   return out.join("\n");
 }
 
+/** "#42 " for a numbered card, so an agent can match the number a person
+ *  quotes to the id the tools take; "" for one not numbered yet. */
+function numLabel(card: { num?: number }): string {
+  return card.num ? `#${card.num} ` : "";
+}
+
 /** One card in full — the detail view an agent reads before acting on it. */
 export function formatCard(board: Board, cardId: string): string {
   const view = cardView(board, cardId);
@@ -166,7 +172,7 @@ export function formatCard(board: Board, cardId: string): string {
   const { card, columns } = view;
   const col = columns.find((c) => c.id === card.columnId);
   const out = [
-    `[${card.id}] ${card.title}`,
+    `[${card.id}] ${numLabel(card)}${card.title}`,
     `column: ${card.columnId}${col ? ` (${col.name})` : ""}`,
     `assignee: ${card.assignee ? `${card.assignee.name} (${card.assignee.id})` : "none"}`,
   ];

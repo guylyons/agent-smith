@@ -302,8 +302,8 @@ export async function fetchMergePreview(cardId: string): Promise<{ preview: Merg
  *  cleanly, so a failure is never a half-finished merge. No toast here: the
  *  MERGE key words a refusal itself, since one caused by the branch moving
  *  since the key lit up reads differently from a conflict (src/lib/mergeRace.ts). */
-export async function mergeCard(cardId: string): Promise<MergeResult> {
-  return (await post("card-merge", { cardId, author: ME })) as MergeResult;
+export async function mergeCard(cardId: string, tip?: string): Promise<MergeResult> {
+  return (await post("card-merge", { cardId, author: ME, tip })) as MergeResult;
 }
 
 /** CONFIG's worktree sweep, read-only: which worktrees merged by hand can go,

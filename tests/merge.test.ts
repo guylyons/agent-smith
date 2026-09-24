@@ -8,7 +8,7 @@ import { runExclusive } from "../src/lib/merge-queue";
 // --- the rules, without a repo ---------------------------------------------
 
 const facts = (over: Partial<MergeFacts> = {}): MergeFacts => ({
-  repo: true, branch: "ag-6", base: "main", ahead: 2, dirty: false,
+  repo: true, branch: "ag-6", base: "main", ahead: 2, tip: "", dirty: false,
   rootBranch: "main", rootDirty: false, baseCheckedOut: true, ...over,
 });
 
@@ -381,4 +381,37 @@ test("with a detached main checkout the worktree goes but git branch -d keeps th
   expect(r.why).toMatch(/branch ag-jjd kept/);
   expect(existsSync(wt)).toBe(false);
   expect(await out(root, "branch", "--list", "ag-jjd")).toContain("ag-jjd");
+});
+
+// The tip the human saw rides along with the merge. A branch that moved since
+// — even an amend that leaves the commit count alone — is refused, not landed.
+async function tipOf(cwd: string): Promise<string> {
+  const p = Bun.spawn(["git", "-C", cwd, "rev-parse", "HEAD"], { stdout: "pipe" });
+  return (await new Response(p.stdout).text()).trim();
+}
+
+test("readMergeState carries the branch tip SHA", async () => {
+  const root = await freshRepo();
+  const wt = await workOn(root, "ag-tip", "feature.txt", "hello\n");
+  expect((await readMergeState(wt)).tip).toBe(await tipOf(wt));
+});
+
+test("mergeWork refuses when the tip moved since it was seen, and lands nothing", async () => {
+  const root = await freshRepo();
+  const wt = await workOn(root, "ag-amend", "feature.txt", "hello\n");
+  const seen = await tipOf(wt);
+  await git(wt, "commit", "-q", "--amend", "-m", "sneaky amend");
+  const mainBefore = await tipOf(root);
+
+  const r = await mergeWork(wt, { tip: seen });
+  expect(r.ok).toBe(false);
+  expect(r.error).toMatch(/moved since you looked; review again/);
+  expect(await tipOf(root)).toBe(mainBefore);
+  expect(existsSync(join(root, "feature.txt"))).toBe(false);
+});
+
+test("mergeWork lands when the tip is the one that was seen", async () => {
+  const root = await freshRepo();
+  const wt = await workOn(root, "ag-same", "feature.txt", "hello\n");
+  expect(await mergeWork(wt, { tip: await tipOf(wt) })).toMatchObject({ ok: true, branch: "ag-same" });
 });

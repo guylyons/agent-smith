@@ -112,3 +112,14 @@ test("readMergePreview on a branch with nothing new is empty; outside a repo it 
   mkdirSync(plain, { recursive: true });
   expect(await readMergePreview(plain)).toEqual({ error: "not a git repository" });
 });
+
+test("readMergePreview carries the branch tip SHA", async () => {
+  const root = freshRepo();
+  const wt = join(root, ".wt", "tipped");
+  git(root, "worktree", "add", "-q", "-b", "tipped", wt, "HEAD");
+  writeFileSync(join(wt, "a.txt"), "one\n");
+  git(wt, "add", "-A"); git(wt, "commit", "-q", "-m", "add a");
+  const p = await readMergePreview(wt);
+  if ("error" in p) throw new Error(p.error);
+  expect(p.tip).toBe(git(wt, "rev-parse", "HEAD"));
+});
