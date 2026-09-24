@@ -598,10 +598,14 @@ export function makeServer(
     const mode = permissionMode ?? (req.headers.get("sec-fetch-site") ? undefined : "auto");
     // The persona's model is only a default: one picked at launch wins.
     // A card spawn by curl (the scrum master staffing a card) sends plain
-    // text; the browser sends the full prompt. Either way the agent must get
-    // the card's protocol footer exactly once.
-    const footer = cardId && !task.includes("-- THE LINE --") ? cardTaskFooter(readBoard(dir), cardId, url.origin, name, { crew: crew.id }) : "";
-    const sent = footer ? `${task}\n\n${footer}` : task;
+    // text; the browser sends the full prompt, whose footer was built before
+    // this agent had a name or crew id. Either way the agent gets the card's
+    // protocol footer exactly once, ours: it carries the crew id, so the
+    // agent's writes are refused once it is taken off the card.
+    const footer = cardId ? cardTaskFooter(readBoard(dir), cardId, url.origin, name, { crew: crew.id }) : "";
+    const cut = footer ? task.indexOf("-- THE LINE --") : -1;
+    const taskText = cut === -1 ? task : task.slice(0, cut).trimEnd();
+    const sent = footer ? `${taskText}\n\n${footer}` : task;
     const r = await spawn(cwd, sent, { model: model ?? cast?.model, permissionMode: mode, worktree, branch, persona, serverUrl: url.origin, cardId, crew });
     // Bind the card to the new session once it shows up, hooks or not.
     if (r.ok && cardId && r.cwd) {
