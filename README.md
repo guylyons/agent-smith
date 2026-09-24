@@ -1,15 +1,31 @@
 # Agent Workshop
 
 A live board of your open Claude Code sessions, styled as a SNES/CRT pixel-art
-workshop. Every open session shows up as a person at a desk — with the ticket
-they're on, what they're doing right now, whether they're **working**, **idle**,
-or **need you** (a permission prompt or a question), and a badge when they have
-active subagents. "THE LINE" is a simple, editable kanban board — renamable,
-draggable columns and cards, with a per-column instruction any agent can read.
+workshop. Every open session appears as a person at a desk, showing:
+
+- the ticket they're on and what they're doing right now,
+- whether they're **working**, **idle** or **need you** (a permission prompt or a
+  question),
+- a badge when they have active subagents.
+
+Alongside the desks, the app gives you:
+
+- **THE LINE**, an editable kanban board. Each column carries an instruction any
+  agent can read, and agents move and comment on their own cards.
+- **The MOOD board**, a free-form canvas where agents tell you the high-level story.
+- **The GAME view**, a map of the Nostromo with each agent in its room.
+- **Personas, crew and team memory**, so an agent can take a role, keep its identity
+  through `/clear`, and recall past decisions.
 
 ![the workshop](docs/workshop.png)
 
-It connects to your sessions two ways, working together:
+**Requires** macOS and Ghostty (terminal actions use Ghostty's AppleScript
+dictionary), plus [Bun](https://bun.sh). It is a single-user, local tool with no
+auth. See [Requirements & limits](#requirements--limits).
+
+## How it sees your sessions
+
+It connects two ways, working together:
 
 - **Hooks** (real time) — Claude Code calls `hooks/status.ts` on session events,
   so activity, permission prompts, and questions show up the instant they happen.
@@ -34,8 +50,8 @@ bun run install-hooks   # recommended — required to see permission prompts (se
 bun run app             # opens the workshop as a stand-alone window
 ```
 
-Or `bun run dev` to start the server and open the printed URL in a browser tab
-yourself. Either way, your currently-open sessions appear right away (via the
+Or `bun run dev` to start the server (port 4173, or set `PORT`) and open the
+printed URL in a browser tab yourself. Either way, your currently-open sessions appear right away (via the
 scanner). New sessions report automatically via the hooks; sessions you already
 have open won't fire hooks until you restart them, but the scanner keeps
 showing them in the meantime.
@@ -104,7 +120,7 @@ transcript can't see — most importantly, **permission prompts** flipping a
 session to "need you" the moment they appear — and precise terminal targeting
 for focus/prompt/pause (see below).
 
-## The board
+## The desks
 
 Each open session is a pixel character with:
 
@@ -126,7 +142,7 @@ Each open session is a pixel character with:
 - **subagent badge** — a small `⊂N` badge when the session has active `Task`
   subagents (a parent delegating to subagents is shown as working, not idle).
 
-### THE LINE
+## THE LINE
 
 A simple, fully editable kanban board. Everything is renamable and draggable,
 and **each column carries an instruction** describing what to do with work that
@@ -158,6 +174,18 @@ read and act on.
 
 A fresh board starts with `Backlog · In Progress · Review · Done`; reshape it
 however you like.
+
+### Landing finished work
+
+Once an agent has **committed** work on its card's branch, a **MERGE** key rises
+out of the card. It arms on the first press and merges on the second, because a
+merge writes to your main checkout. Above the key, a preview lists what will
+land. A card with nothing committed gets no key.
+
+Merged cards move off THE LINE into an archive (`~/.agent-status/.line-archive.json`)
+so the board stays small. Nothing is lost: archived cards keep their comments and
+assignee, and you can restore them to the Merged column. Worktrees merged by hand
+never go through MERGE; the config dialog can preview and remove those.
 
 ### The card API (how agents drive their own tickets)
 
@@ -206,7 +234,9 @@ session idle types the backlog in.) The card modal says which happened —
 a busy assignee has waiting. The inbox is in memory only: restarting the
 dashboard drops every queued note, and nothing sends them again. The board
 itself is saved, so an agent that was busy across a restart should re-read its
-card rather than wait for a note that will never come. **SEND TASK** is only offered for an idle assignee:
+card rather than wait for a note that will never come.
+
+**SEND TASK** is only offered for an idle assignee:
 a fresh task clears the agent's context first, so sending one mid-work would
 wipe what it was doing.
 
@@ -230,7 +260,7 @@ bun run install-mcp     # claude mcp add --scope user the-line -- bun run src/mc
 claude mcp list         # the-line: … - ✔ Connected
 ```
 
-Sixteen tools, named for what they do (the six `mood_*` ones are covered under [The MOOD board](#the-mood-board)):
+Nineteen tools, named for what they do. The `mood_*` tools are covered under [The MOOD board](#the-mood-board), the `memory_*` tools under [Team memory](#team-memory):
 
 | Tool | What it does |
 | --- | --- |
@@ -312,6 +342,23 @@ on the open page live, like the board's.
 
 Stored in `~/.agent-status/.mood.json`. Your pan and zoom are remembered per
 browser.
+
+## The GAME view
+
+Press **GAME** in the header (or open `/#game`) for a map of the Nostromo. Each
+agent walks to the room that matches what it is doing:
+
+| Room | Who is there |
+| --- | --- |
+| Bridge | Anyone waiting on you, and the scrum master |
+| Medbay | Anyone holding a card in a `REVIEW` column |
+| Mess | Idle agents |
+| Computer | `frontend-ux` |
+| Comms | `editor` and `release-manager` |
+| Workshop | Everyone else |
+
+Hypersleep, cargo and the airlock are on the map too. Agents walk between rooms
+along the corridors, or jump when your system asks for reduced motion.
 
 ## Team memory
 
