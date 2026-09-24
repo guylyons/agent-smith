@@ -39,9 +39,13 @@
     --scrim-a:0;
     --crt-strength:1;          /* per-theme multiplier on the whole CRT stack */
     --bev-strength:1;          /* the same dial for the glass bevel */
-    /* One font for everything: Source Code Pro, with monospace fallbacks. */
+    /* One font for everything: Source Code Pro, with monospace fallbacks.
+       CONFIG > FONT swaps --mono and --code inline on <html> (settings.ts). */
     --mono:"Source Code Pro",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
     --display:var(--mono);     /* the face for titles; themes may differ */
+    /* The width the header, crew, THE LINE and the foot share. Wide screens
+       get most of the window; below this the page just fills it. */
+    --page-w:1600px;
     /* The panel recipe. Themes swap the whole thing — Material trades the
        chunky bevel for elevation, NOSTROMO for a thin glowing edge. */
     --win-border:var(--px) solid var(--bone);
@@ -65,24 +69,25 @@
   button,input,textarea,select{border-radius:var(--radius-sm)}
   html,body{background:var(--night);color:var(--bone)}
   /* ---- type scale ----------------------------------------------------------
-     Everything is set in whole pixels on one ladder — 10 11 12 13 14 15 16 17,
-     then 21 / 28 / 32 / 36 for display numerals. Whole steps, because a pixel
+     Everything is set in whole pixels on one ladder — 11 12 13 14 15 16 17 18,
+     then 22 / 29 / 33 / 37 for display numerals. Whole steps, because a pixel
      UI in a monospace face wants glyphs that land on the grid; a half-pixel
      size is the one thing that makes this look blurry rather than bigger.
 
      The four rungs that carry the app:
-       12  micro labels — uppercase, tracked (.pix, section heads, captions)
-       13  secondary text — meta, timestamps, hints
-       14  reading text — comments, messages, card bodies
-       16  body default, and the one field you type a title into
-     The whole ladder moved up one rung from where it started (9-16 / 20-34):
-     those four used to be 11 / 12 / 13 / 15, and 11px of tracked uppercase is
-     under the comfortable floor for a screen you read all day. The display
+       13  micro labels — uppercase, tracked (.pix, section heads, captions)
+       14  secondary text — meta, timestamps, hints
+       15  reading text — comments, messages, card bodies
+       17  body default, and the one field you type a title into
+     The whole ladder has moved up two rungs from where it started (9-16 /
+     20-34): those four were 11 / 12 / 13 / 15, and 11px of tracked uppercase
+     is under the comfortable floor for a screen you read all day. The second
+     rung came with the wider page, where the old sizes read small. The display
      sizes moved with them, so a heading still sits the same distance above
      its body text instead of the hierarchy flattening out. */
   body{
     font-family:var(--mono);
-    font-size:16px;
+    font-size:17px;
     line-height:1.5;
     padding:24px 20px 40px;
     -webkit-font-smoothing:antialiased;
@@ -379,7 +384,7 @@
   /* ---- tube control ---- */
   .tube{
     position:fixed;top:16px;right:16px;z-index:100;
-    font-family:var(--mono);font-size:12px;
+    font-family:var(--mono);font-size:13px;
     background:var(--box);color:var(--bone);
     border:3px solid var(--bone);
     box-shadow:inset 0 0 0 2px var(--bevel),0 3px 0 rgba(0,0,0,.55);
@@ -401,42 +406,42 @@
   }
 
   /* ---- header ---- */
-  header{max-width:1080px;margin:0 auto 20px;display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap}
+  header{max-width:var(--page-w);margin:0 auto 20px;display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap}
   .head-main{flex:1;min-width:260px;position:relative}
 
   /* ---- notification center ---- */
   .notif{position:absolute;top:0;right:0;z-index:40}
   .notif-bell{position:relative;background:var(--box);border:2px solid var(--bevel);
-    color:var(--bone);cursor:pointer;padding:5px 8px;font-size:16px;line-height:1}
+    color:var(--bone);cursor:pointer;padding:5px 8px;font-size:17px;line-height:1}
   .notif-bell:hover{background:var(--box-lo)}
   .notif-bell.has-unread{border-color:var(--gold)}
   .notif-badge{position:absolute;top:-7px;right:-7px;background:var(--clay);color:var(--on-danger);
-    min-width:17px;height:17px;padding:0 4px;font-size:13px;font-weight:700;line-height:17px;text-align:center}
+    min-width:17px;height:17px;padding:0 4px;font-size:14px;font-weight:700;line-height:17px;text-align:center}
   .notif-scrim{position:fixed;inset:0;z-index:39}
   .notif-panel{position:absolute;top:34px;right:0;z-index:41;width:340px;max-width:88vw;
     background:var(--box);border:2px solid var(--bevel);box-shadow:0 12px 40px rgba(0,0,0,.5);
     overflow:hidden}
   .notif-panel-head{display:flex;align-items:center;justify-content:space-between;gap:8px;
     padding:9px 11px;border-bottom:1px solid var(--box-lo)}
-  .notif-panel-head .pix{font-size:13px;color:var(--gold);letter-spacing:.5px}
+  .notif-panel-head .pix{font-size:14px;color:var(--gold);letter-spacing:.5px}
   .notif-actions{display:flex;gap:10px}
-  .notif-link{background:none;border:none;color:var(--dim);cursor:pointer;font-size:14px;padding:0}
+  .notif-link{background:none;border:none;color:var(--dim);cursor:pointer;font-size:15px;padding:0}
   .notif-link:hover{color:var(--bone);text-decoration:underline}
   .notif-list{max-height:60vh;overflow-y:auto}
-  .notif-empty{padding:18px 12px;color:var(--dim);font-size:14px;text-align:center}
+  .notif-empty{padding:18px 12px;color:var(--dim);font-size:15px;text-align:center}
   .notif-item{display:flex;gap:9px;align-items:flex-start;width:100%;text-align:left;
     background:none;border:none;border-bottom:1px solid var(--box-lo);color:var(--bone);
     cursor:pointer;padding:9px 11px}
   .notif-item:hover{background:var(--box-lo)}
   .notif-item.unread{background:rgba(242,177,52,.08)}
   .notif-item.unread:hover{background:rgba(242,177,52,.14)}
-  .notif-kind{flex:0 0 auto;font-size:14px;width:18px;text-align:center}
+  .notif-kind{flex:0 0 auto;font-size:15px;width:18px;text-align:center}
   .notif-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
-  .notif-line1{font-size:14px;color:var(--bone);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .notif-line1{font-size:15px;color:var(--bone);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .notif-card{color:var(--dim)}
-  .notif-text{font-size:14px;color:var(--dim);line-height:1.45;
+  .notif-text{font-size:15px;color:var(--dim);line-height:1.45;
     display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-  .notif-ago{flex:0 0 auto;font-size:13px;color:var(--dim)}
+  .notif-ago{flex:0 0 auto;font-size:14px;color:var(--dim)}
 
   /* Claude usage meter — an HP bar for the fleet's token budget */
   .usage{
@@ -446,7 +451,7 @@
     box-shadow:inset 0 0 0 2px var(--bevel),0 3px 0 rgba(0,0,0,.55);
     padding:10px 12px;
   }
-  .usage-label{font-size:12px;color:var(--gold);letter-spacing:.5px}
+  .usage-label{font-size:13px;color:var(--gold);letter-spacing:.5px}
   .usage-bar{
     display:flex;gap:2px;margin-top:9px;padding:3px;
     background:var(--box-lo);border:2px solid var(--bevel);
@@ -455,21 +460,21 @@
   .usage-cell.on{background:var(--leaf);box-shadow:inset 0 -3px 0 rgba(0,0,0,.3)}
   .usage.hp-warn .usage-cell.on{background:var(--gold)}
   .usage.hp-low  .usage-cell.on{background:var(--clay);animation:blink 1.1s steps(2) infinite}
-  .usage-text{font-size:12px;color:var(--dim);margin-top:9px;white-space:nowrap}
+  .usage-text{font-size:13px;color:var(--dim);margin-top:9px;white-space:nowrap}
   @media (prefers-reduced-motion:reduce){.usage-cell.on{animation:none}}
-  .title{font-family:var(--display);font-size:21px;letter-spacing:calc(1px + var(--track));text-shadow:0 var(--px) 0 #000}
-  .sub{font-size:13px;color:var(--dim);margin-top:10px}
+  .title{font-family:var(--display);font-size:22px;letter-spacing:calc(1px + var(--track));text-shadow:0 var(--px) 0 #000}
+  .sub{font-size:14px;color:var(--dim);margin-top:10px}
   /* Not an error to fix, but the board is not live — say it in the one line the
      eye already goes to for status. */
   .sub.offline{color:var(--clay)}
-  .statline{display:flex;flex-wrap:wrap;gap:16px;margin-top:14px;font-size:13px}
+  .statline{display:flex;flex-wrap:wrap;gap:16px;margin-top:14px;font-size:14px}
   .statline b{color:var(--gold)}
   .caret{display:inline-block;width:8px;height:12px;background:var(--gold);vertical-align:-2px;animation:blink 1s steps(2) infinite}
   @keyframes blink{50%{opacity:0}}
 
   /* ---- crew ---- */
   .crew{
-    max-width:1080px;margin:0 auto;
+    max-width:var(--page-w);margin:0 auto;
     display:grid;gap:14px;
     /* minmax(0,…) not a bare 1fr: a bare track grows to its widest line of
        text, which pushed the desks (and their buttons) off a narrow window. */
@@ -480,9 +485,9 @@
   .crew-empty{
     display:block;text-align:center;
     border:2px dashed var(--bevel);padding:26px 18px;
-    color:var(--gold);font-size:13px;line-height:1.9;
+    color:var(--gold);font-size:14px;line-height:1.9;
   }
-  .crew-empty-hint{color:var(--dim);font-size:13px;margin-top:6px}
+  .crew-empty-hint{color:var(--dim);font-size:14px;margin-top:6px}
   .crew-empty-hint b{color:var(--bone);font-weight:400}
   .desk{padding:14px;display:flex;gap:14px;align-items:flex-start}
   /* An idle desk fades its CONTENT, never the panel: fading the whole card makes
@@ -495,29 +500,29 @@
   @keyframes bob{50%{transform:translateY(-3px)}}
   .bubble{
     position:absolute;top:-10px;right:-6px;
-    background:var(--clay);color:#fff;font-size:13px;
+    background:var(--clay);color:#fff;font-size:14px;
     padding:5px 7px;border:3px solid var(--bone);
     animation:pop .8s steps(2) infinite;
   }
   @keyframes pop{50%{transform:translateY(-3px)}}
   .who{flex:1;min-width:0}
-  .name{font-size:14px;letter-spacing:.5px}
-  .spec{font-size:13px;color:var(--dim);margin-top:7px;text-transform:uppercase}
+  .name{font-size:15px;letter-spacing:.5px}
+  .spec{font-size:14px;color:var(--dim);margin-top:7px;text-transform:uppercase}
   .repo{
-    font-size:13px;color:var(--dim);margin-top:5px;
+    font-size:14px;color:var(--dim);margin-top:5px;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   }
   .ticket{
-    display:inline-block;margin-top:11px;font-size:13px;
+    display:inline-block;margin-top:11px;font-size:14px;
     background:var(--box-lo);border:2px solid var(--bevel);padding:4px 7px;
   }
   .oncard{
-    font-size:13px;color:var(--gold);margin-top:9px;
+    font-size:14px;color:var(--gold);margin-top:9px;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   }
-  .doing{font-size:14px;color:var(--bone);margin-top:10px;line-height:1.5;min-height:2.4em}
+  .doing{font-size:15px;color:var(--bone);margin-top:10px;line-height:1.5;min-height:2.4em}
   .doing::before{content:"> ";color:var(--gold)}
-  .state{display:flex;align-items:center;gap:7px;margin-top:10px;font-size:13px}
+  .state{display:flex;align-items:center;gap:7px;margin-top:10px;font-size:14px}
   .statefor{color:var(--dim)}
   /* a desk idle past the stale threshold: still present, visibly dormant */
   .desk.is-stale>.sprite-wrap,.desk.is-stale>.who{opacity:.4}
@@ -530,21 +535,23 @@
   .lamp.done{background:var(--leaf)}
 
   /* ---- the line: a simple kanban board ---- */
-  .line{max-width:1080px;margin:26px auto 0;padding:16px}
-  .line h2{font-size:14px;letter-spacing:.5px}
-  .line .hint{font-size:13px;color:var(--dim);margin-top:9px}
+  .line{max-width:var(--page-w);margin:26px auto 0;padding:16px}
+  .line h2{font-size:15px;letter-spacing:.5px}
+  .line .hint{font-size:14px;color:var(--dim);margin-top:9px}
   .board{display:flex;gap:10px;margin-top:16px;overflow-x:auto;align-items:flex-start;padding-bottom:6px}
   .col{
-    flex:0 0 210px;min-width:210px;
+    /* 210px is the floor; with room to spare the columns share it out
+       rather than leaving the right of a wide board empty. */
+    flex:1 0 210px;min-width:210px;
     background:var(--box-lo);border:2px solid var(--bevel);
     display:flex;flex-direction:column;gap:8px;padding:8px;
   }
   .col.dragover{border-color:var(--gold);background:rgba(240,196,80,.08)}
   .col-head{display:flex;align-items:center;gap:5px}
-  .grip{cursor:grab;color:var(--dim);font-size:13px;user-select:none;padding:0 2px}
+  .grip{cursor:grab;color:var(--dim);font-size:14px;user-select:none;padding:0 2px}
   .grip:active{cursor:grabbing}
   .col-name{
-    flex:1;min-width:0;font-size:13px;color:var(--gold);
+    flex:1;min-width:0;font-size:14px;color:var(--gold);
     background:transparent;border:2px solid transparent;padding:4px 5px;
   }
   .col-name:hover{border-color:var(--bevel)}
@@ -552,7 +559,7 @@
   .col-name:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
   /* The stage picker: quiet until hovered, like the name beside it. */
   .col-stage{
-    flex:0 0 auto;font-family:var(--mono);font-size:10px;letter-spacing:.5px;cursor:pointer;
+    flex:0 0 auto;font-family:var(--mono);font-size:11px;letter-spacing:.5px;cursor:pointer;
     color:var(--dim);background:transparent;border:2px solid transparent;padding:3px 2px;
   }
   .col-stage:hover{border-color:var(--bevel);color:var(--bone)}
@@ -562,13 +569,13 @@
      rule in ROLLOVER — no need to repeat it here. */
   .col-del,.card-del{
     flex:0 0 auto;background:transparent;border:none;color:var(--dim);cursor:pointer;
-    font-size:14px;line-height:1;
+    font-size:15px;line-height:1;
     min-width:24px;min-height:24px;display:inline-flex;align-items:center;justify-content:center;
   }
   .col-del:hover,.card-del:hover{color:var(--clay)}
   .col-instr{
     width:100%;box-sizing:border-box;resize:vertical;min-height:48px;
-    font-family:var(--mono);font-size:13px;line-height:1.5;
+    font-family:var(--mono);font-size:14px;line-height:1.5;
     background:var(--night);color:var(--bone);border:2px solid var(--bevel);padding:5px 6px;
   }
   .col-instr:focus{border-color:var(--gold)}
@@ -599,12 +606,12 @@
   .card:active{cursor:grabbing}
   .card-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
   .card-title-text{
-    font-family:var(--mono);font-size:14px;line-height:1.45;color:var(--bone);
+    font-family:var(--mono);font-size:15px;line-height:1.45;color:var(--bone);
     padding:3px 4px;word-break:break-word;
   }
   .card-meta{display:flex;align-items:center;gap:6px;padding:0 4px;flex-wrap:wrap}
   .card-assignee{
-    font-family:var(--mono);font-size:12px;letter-spacing:.5px;
+    font-family:var(--mono);font-size:13px;letter-spacing:.5px;
     color:var(--on-accent);background:var(--gold);padding:3px 4px;line-height:1;
   }
   /* The other half of the assignee slot: a card nobody is on yet. Deliberately
@@ -612,7 +619,7 @@
      so it reads as the normal starting state and not as an error. It never
      appears beside .card-assignee, the two are exclusive. */
   .card-unassigned{
-    font-family:var(--mono);font-size:11px;letter-spacing:.5px;text-transform:uppercase;
+    font-family:var(--mono);font-size:12px;letter-spacing:.5px;text-transform:uppercase;
     color:var(--dim);background:transparent;
     border:1px dashed var(--bevel);border-radius:var(--radius-sm);
     padding:2px 4px;line-height:1;white-space:nowrap;
@@ -622,19 +629,19 @@
      ellipsizes rather than pushing the other chips off the row; the tooltip
      carries the whole name and path. */
   .card-repo{
-    font-family:var(--mono);font-size:11px;letter-spacing:.5px;
+    font-family:var(--mono);font-size:12px;letter-spacing:.5px;
     color:var(--bone);background:var(--box-lo);
     border:1px solid var(--bevel);border-radius:var(--radius-sm);
     padding:2px 4px;line-height:1;white-space:nowrap;
     max-width:14ch;overflow:hidden;text-overflow:ellipsis;
   }
-  .card-flag{font-size:13px;color:var(--dim);line-height:1}
+  .card-flag{font-size:14px;color:var(--dim);line-height:1}
   /* the assignee's agent sprite, shrunk to a small avatar on the card face */
   .card-avatar{flex:0 0 auto;display:inline-flex;line-height:0}
   .card-avatar .sprite{width:16px;height:24px}
   .add-card{
     width:100%;box-sizing:border-box;
-    font-family:var(--mono);font-size:13px;
+    font-family:var(--mono);font-size:14px;
     background:transparent;color:var(--dim);border:2px dashed var(--bevel);padding:5px 6px;
   }
   .add-card:focus{border-style:solid;border-color:var(--gold);color:var(--bone)}
@@ -642,14 +649,14 @@
   .add-card::placeholder{color:var(--dim)}
   .add-col{
     flex:0 0 auto;align-self:stretch;cursor:pointer;
-    font-size:13px;color:var(--dim);background:transparent;
+    font-size:14px;color:var(--dim);background:transparent;
     border:2px dashed var(--bevel);padding:8px 12px;
   }
   .add-col:hover{color:var(--gold);border-color:var(--gold)}
   /* THE LINE's heading row: the title, and the one board-wide action. */
   .line-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
   .add-scrum{
-    font-size:12px;letter-spacing:calc(.5px + var(--track));
+    font-size:13px;letter-spacing:calc(.5px + var(--track));
     color:var(--scrum);background:transparent;
     border:2px solid var(--scrum);border-radius:var(--radius-sm);
     padding:5px 8px;cursor:pointer;white-space:nowrap;
@@ -667,19 +674,19 @@
   .card.card-scrum:hover,.card.card-scrum:focus{border-color:var(--gold)}
   .card-kind{
     align-self:flex-start;
-    font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:calc(.5px + var(--track));
+    font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:calc(.5px + var(--track));
     color:var(--on-scrum);background:var(--scrum);
     border-radius:var(--radius-sm);padding:2px 5px;line-height:1.2;white-space:nowrap;
   }
 
-  footer{max-width:1080px;margin:22px auto 0;font-size:13px;color:var(--dim);line-height:2}
+  footer{max-width:var(--page-w);margin:22px auto 0;font-size:14px;color:var(--dim);line-height:2}
 
   /* The layout was desktop-only: one breakpoint that changed a font size, fixed
      210px columns in a horizontal scroller, and everything pinned to 1080px. On
      a phone that meant a column and a half and a lot of sideways scrolling. */
   @media (max-width:720px){
     body{padding:14px 12px 28px}
-    .title{font-size:15px}
+    .title{font-size:16px}
     header{gap:12px}
     /* The usage meter is ambient, not actionable — it goes first when space is short. */
     .usage{display:none}
@@ -688,7 +695,7 @@
        overflowing rather than wrapping. */
     .crew{grid-template-columns:minmax(0,1fr)}
     .line{margin-top:16px;padding:12px}
-    .line .hint{font-size:12px}
+    .line .hint{font-size:13px}
     /* A column just under the viewport, so the next one peeks in and the board
        still reads as a row you swipe rather than a mystery cut off at the edge. */
     .col{flex:0 0 82vw;min-width:82vw;scroll-snap-align:start}
@@ -725,26 +732,26 @@
 }
 .desk-actions{position:absolute;top:6px;right:6px;display:flex;gap:5px;opacity:0;transition:opacity .1s;z-index:2}
 .desk:hover .desk-actions,.desk:focus-within .desk-actions{opacity:1}
-.deskbtn{font-family:var(--mono);font-size:14px;background:var(--box-lo);color:var(--bone);border:2px solid var(--bevel);cursor:pointer;padding:2px 6px;line-height:1.2}
+.deskbtn{font-family:var(--mono);font-size:15px;background:var(--box-lo);color:var(--bone);border:2px solid var(--bevel);cursor:pointer;padding:2px 6px;line-height:1.2}
 /* The generic rollover is for outline buttons. A filled one (.primary, .on)
    would get a gold label dropped onto its own coloured ground — see the
    filled-button rule in the ROLLOVER section for what those do instead. */
 .deskbtn:not(:disabled):not(.primary):not(.on):hover{color:var(--gold);border-color:var(--gold)}
 .deskbtn:disabled{opacity:.5;cursor:default}
 .reply{display:flex;gap:6px;margin-top:10px}
-.reply-input{flex:1;min-width:0;font-family:var(--mono);font-size:14px;background:var(--night);color:var(--bone);border:2px solid var(--bevel);padding:5px 7px}
+.reply-input{flex:1;min-width:0;font-family:var(--mono);font-size:15px;background:var(--night);color:var(--bone);border:2px solid var(--bevel);padding:5px 7px}
 .reply-input:focus{outline:none;border-color:var(--gold)}
 .reply-input::placeholder{color:var(--dim)}
 
 /* new agent */
-.newagent-btn{font-family:var(--mono);font-size:12px;letter-spacing:.5px;
+.newagent-btn{font-family:var(--mono);font-size:13px;letter-spacing:.5px;
   background:var(--leaf);color:var(--on-ok);border:2px solid var(--bone);padding:6px 9px;cursor:pointer}
 /* CONFIG and FIND sit beside + NEW AGENT but are not the primary action, so
    they keep the panel ground and let the green button carry the weight. */
 .quiet-btn{background:var(--box);color:var(--bone)}
 .newagent{width:min(520px,92vw);max-height:90vh;overflow-y:auto;margin:8vh auto;padding:20px;display:flex;flex-direction:column;gap:9px}
-.newagent-title{font-size:15px;letter-spacing:1px;margin-bottom:6px}
-.newagent-label{font-size:12px;color:var(--dim);margin-top:8px}
+.newagent-title{font-size:16px;letter-spacing:1px;margin-bottom:6px}
+.newagent-label{font-size:13px;color:var(--dim);margin-top:8px}
 .newagent .reply-input{flex:0 0 auto}
 .newagent-task{resize:vertical;line-height:1.5;min-height:110px}
 .newagent-recent{display:flex;flex-wrap:wrap;gap:6px;margin-top:2px}
@@ -754,7 +761,7 @@
 /* pre-filled from a past, possibly unrelated launch — styled like a
    placeholder so it never reads as something the user typed themselves */
 .newagent-folder .reply-input.remembered{color:var(--dim);font-style:italic}
-.newagent-folder-hint{font-size:12px;color:var(--dim);line-height:1.5;margin-top:-2px}
+.newagent-folder-hint{font-size:13px;color:var(--dim);line-height:1.5;margin-top:-2px}
 .newagent-browse{display:flex;align-items:center;justify-content:center;padding:0 9px;flex:0 0 auto}
 /* a recent repo: the name, and (for remembered ones) a way to drop it */
 .newagent-chip{display:inline-flex}
@@ -762,20 +769,26 @@
 .newagent-chip .newagent-forget{border-left-width:0;padding:2px 5px;color:var(--dim);max-width:none}
 .newagent-chip .newagent-forget:not(:disabled):hover{color:var(--clay);border-color:var(--clay)}
 /* plain-language read-out of where the agent will actually run */
-.newagent-where{font-size:12px;color:var(--dim);line-height:1.6;margin-top:6px}
+.newagent-where{font-size:13px;color:var(--dim);line-height:1.6;margin-top:6px}
 .deskbtn.on{background:var(--bevel);color:var(--on-bevel)}
-.deskbtn.primary{background:var(--gold);color:var(--on-accent);border-color:var(--bone);font-family:var(--mono);font-size:13px;padding:9px 12px}
+.deskbtn.primary{background:var(--gold);color:var(--on-accent);border-color:var(--bone);font-family:var(--mono);font-size:14px;padding:9px 12px}
 .newagent-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
-.newagent-hint{font-size:12px;color:var(--dim);line-height:1.8;margin-top:10px}
+.newagent-hint{font-size:13px;color:var(--dim);line-height:1.8;margin-top:10px}
 
 /* ---- settings ---- */
 .settings{width:min(420px,92vw);max-height:90vh;overflow-y:auto;margin:8vh auto;padding:0;display:flex;flex-direction:column}
 .settings-head{display:flex;align-items:center;justify-content:space-between;padding:14px;border-bottom:var(--rule)}
-.settings-title{font-size:15px;letter-spacing:1px}
+.settings-title{font-size:16px;letter-spacing:1px}
 .settings-body{padding:16px;display:flex;flex-direction:column;gap:6px}
-.settings-label{font-size:12px;color:var(--gold);letter-spacing:.5px;margin-top:12px}
+.settings-label{font-size:13px;color:var(--gold);letter-spacing:.5px;margin-top:12px}
 .settings-row{display:flex;flex-wrap:wrap;gap:6px}
-.settings-hint{font-size:12px;color:var(--dim);line-height:1.8;margin-top:6px}
+.settings-select{
+  align-self:flex-start;min-width:220px;max-width:100%;cursor:pointer;
+  font-family:var(--mono);font-size:15px;
+  color:var(--bone);background:var(--night);border:2px solid var(--bevel);padding:7px 8px;
+}
+.settings-select:focus-visible{outline:none;border-color:var(--gold)}
+.settings-hint{font-size:13px;color:var(--dim);line-height:1.8;margin-top:6px}
 
 /* ---- selectable 2D-art backgrounds ---- */
 /* body has an opaque bg in the mock; make it transparent so the z-index:-1
@@ -961,7 +974,7 @@ body{background:transparent}
 /* subagent count badge on a crew sprite */
 .crew-badge{
   position:absolute;bottom:-6px;right:-8px;
-  background:var(--bevel);color:var(--on-bevel);font-size:13px;
+  background:var(--bevel);color:var(--on-bevel);font-size:14px;
   padding:2px 5px;border:2px solid var(--bone);line-height:1;
 }
 
@@ -970,7 +983,7 @@ body{background:transparent}
    tab looks pushed in (inset shadow + nudged down) and glows gold. */
 .drawer-tabs{display:flex;gap:6px;padding:8px 8px 0;border-bottom:var(--rule)}
 .drawer-tabs .tab{
-  flex:1;font-family:var(--mono);font-size:13px;font-weight:600;letter-spacing:.5px;
+  flex:1;font-family:var(--mono);font-size:14px;font-weight:600;letter-spacing:.5px;
   background:var(--box-lo);color:var(--dim);
   border:2px solid var(--bevel);
   box-shadow:0 3px 0 rgba(0,0,0,.5);
@@ -983,19 +996,19 @@ body{background:transparent}
 
 /* INFO tab */
 .drawer-body.info{gap:6px}
-.info-row{display:flex;gap:10px;font-size:var(--msg,14px);align-items:baseline}
-.info-k{flex:0 0 60px;font-family:var(--mono);font-size:calc(var(--msg,14px) - 2px);color:var(--dim)}
+.info-row{display:flex;gap:10px;font-size:var(--msg,15px);align-items:baseline}
+.info-k{flex:0 0 60px;font-family:var(--mono);font-size:calc(var(--msg,15px) - 2px);color:var(--dim)}
 .info-v{flex:1;min-width:0;color:var(--bone);word-break:break-all}
-.info-sec{font-size:12px;letter-spacing:.5px;color:var(--gold);margin-top:12px;border-top:2px solid var(--bevel);padding-top:9px}
-.info-file{font-size:var(--msg,14px);color:var(--bone);display:flex;gap:8px}
+.info-sec{font-size:13px;letter-spacing:.5px;color:var(--gold);margin-top:12px;border-top:2px solid var(--bevel);padding-top:9px}
+.info-file{font-size:var(--msg,15px);color:var(--bone);display:flex;gap:8px}
 .info-code{color:var(--clay);flex:0 0 22px;font-family:ui-monospace,monospace}
-.info-commit{font-size:var(--msg,14px);color:var(--bone);display:flex;gap:9px;line-height:1.5}
+.info-commit{font-size:var(--msg,15px);color:var(--bone);display:flex;gap:9px;line-height:1.5}
 .info-hash{color:var(--leaf);flex:0 0 auto;font-family:ui-monospace,monospace}
 
 /* subagents strip in the conversation drawer */
 .subagents{border-bottom:var(--rule);padding:10px 14px;display:flex;flex-direction:column;gap:7px;max-height:34%;overflow-y:auto}
-.subagents-head{font-size:12px;letter-spacing:.5px;color:var(--dim)}
-.subagent{display:flex;align-items:center;gap:8px;font-size:var(--msg,14px)}
+.subagents-head{font-size:13px;letter-spacing:.5px;color:var(--dim)}
+.subagent{display:flex;align-items:center;gap:8px;font-size:var(--msg,15px)}
 .subagent .lamp{flex:0 0 auto}
 .subagent-desc{flex:0 0 auto;max-width:52%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--bone)}
 .subagent-doing{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dim)}
@@ -1010,38 +1023,38 @@ body{background:transparent}
    only the drawer scales — card comments share those markdown rules. A few of
    these classes (.msg-empty) also appear outside the drawer, so every read of
    --msg carries the shipped 14px as its fallback. */
-.drawer{position:relative;width:min(var(--drawer-w,560px),94vw);height:100%;display:flex;flex-direction:column;background:var(--box);padding:0;overflow:hidden;--msg:var(--drawer-font,14px)}
+.drawer{position:relative;width:min(var(--drawer-w,560px),94vw);height:100%;display:flex;flex-direction:column;background:var(--box);padding:0;overflow:hidden;--msg:var(--drawer-font,15px)}
 .drawer-head{display:flex;align-items:center;gap:12px;padding:14px;border-bottom:var(--rule)}
 .drawer-sprite{width:40px;flex:0 0 auto}
 .drawer-sprite .sprite{width:40px;height:60px}
 .drawer-id{flex:1;min-width:0}
-.drawer-id .name{font-size:14px}
-.drawer-id .spec{font-size:13px;color:var(--dim);margin-top:5px;text-transform:uppercase}
-.drawer-id .state{font-size:13px;margin-top:6px}
+.drawer-id .name{font-size:15px}
+.drawer-id .spec{font-size:14px;color:var(--dim);margin-top:5px;text-transform:uppercase}
+.drawer-id .state{font-size:14px;margin-top:6px}
 .drawer-btns{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end}
 .drawer-body{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:12px}
-.msg{display:flex;flex-direction:column;gap:4px;font-size:var(--msg,14px);line-height:1.5}
-.msg-who{font-family:var(--mono);font-size:calc(var(--msg,14px) - 2px);letter-spacing:.5px;color:var(--dim)}
+.msg{display:flex;flex-direction:column;gap:4px;font-size:var(--msg,15px);line-height:1.5}
+.msg-who{font-family:var(--mono);font-size:calc(var(--msg,15px) - 2px);letter-spacing:.5px;color:var(--dim)}
 .msg-text{white-space:pre-wrap;word-break:break-word}
 .msg-user{align-items:flex-end}
 .msg-user .msg-text{background:var(--box-lo);border:2px solid var(--bevel);padding:7px 9px;max-width:88%}
 .msg-user .msg-who{color:var(--gold)}
 .msg-assistant .msg-text{border-left:3px solid var(--leaf);padding-left:9px}
 .msg-tool{opacity:.7}
-.msg-tool .msg-text{font-size:var(--msg,14px);color:var(--dim)}
+.msg-tool .msg-text{font-size:var(--msg,15px);color:var(--dim)}
 .msg-tool .msg-text::before{content:"⚙ "}
 /* a run of tool calls reads as one tight list, not a line per 12px gap */
 .msg-tool + .msg-tool{margin-top:-8px}
-.msg-empty{color:var(--dim);font-size:var(--msg,14px);text-align:center;margin:auto}
+.msg-empty{color:var(--dim);font-size:var(--msg,15px);text-align:center;margin:auto}
 .drawer-foot{display:flex;gap:6px;padding:12px 14px;border-top:var(--rule);align-items:flex-end}
 /* min-height has to follow the text size, or a one-line placeholder is clipped
    at the bigger end of the A+ range before a keystroke has been typed. */
-.reply-textarea{resize:none;overflow-y:auto;line-height:1.5;min-height:calc(var(--msg,14px) * 1.5 + 15px);font-family:var(--mono);font-size:var(--msg,14px)}
+.reply-textarea{resize:none;overflow-y:auto;line-height:1.5;min-height:calc(var(--msg,15px) * 1.5 + 15px);font-family:var(--mono);font-size:var(--msg,15px)}
 /* image attachments dropped/pasted into the composer */
 .attach-row{display:flex;flex-wrap:wrap;gap:6px;padding:8px 14px 0}
-.attach-chip{display:inline-flex;align-items:center;gap:6px;background:var(--box-lo);border:2px solid var(--bevel);color:var(--bone);font-size:13px;padding:3px 4px 3px 7px;max-width:220px}
+.attach-chip{display:inline-flex;align-items:center;gap:6px;background:var(--box-lo);border:2px solid var(--bevel);color:var(--bone);font-size:14px;padding:3px 4px 3px 7px;max-width:220px}
 .attach-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.attach-x{font-family:var(--mono);font-size:13px;background:none;border:none;color:var(--dim);cursor:pointer;padding:0 2px;line-height:1}
+.attach-x{font-family:var(--mono);font-size:14px;background:none;border:none;color:var(--dim);cursor:pointer;padding:0 2px;line-height:1}
 .attach-x:hover{color:var(--clay)}
 /* Drag handle on the drawer's left edge. The hit area is 10px so it is easy to
    catch; the line it draws is one pixel-unit, and grows and turns gold on hover
@@ -1063,7 +1076,7 @@ body{background:transparent}
    it sits with the drawer's own controls and not the agent's. */
 .drawer-zoom{display:flex;align-items:stretch;gap:4px;flex:0 0 auto}
 .zoombtn{
-  font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:.5px;
+  font-family:var(--mono);font-size:13px;font-weight:600;letter-spacing:.5px;
   min-width:30px;padding:0 6px;cursor:pointer;
   background:var(--box-lo);color:var(--dim);border:2px solid var(--bevel)}
 .zoombtn:not(:disabled):hover{color:var(--gold);border-color:var(--gold)}
@@ -1073,22 +1086,22 @@ body{background:transparent}
 /* drop target highlight while dragging an image over the drawer */
 .drawer.drag-over{box-shadow:inset 0 0 0 var(--px) var(--bevel),inset 0 var(--px) 0 calc(var(--px)*2) rgba(255,255,255,.10),0 var(--px) 0 0 rgba(0,0,0,.55),inset 0 0 0 999px rgba(242,177,52,.10);border-color:var(--gold)}
 /* "thinking" pill — shown while the agent is working */
-.thinking-pill{align-self:flex-start;margin:2px 14px 8px;padding:5px 10px;background:var(--box-lo);border:2px solid var(--gold);color:var(--gold);font-size:14px;display:inline-flex;align-items:center;gap:7px;max-width:calc(100% - 28px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.thinking-pill{align-self:flex-start;margin:2px 14px 8px;padding:5px 10px;background:var(--box-lo);border:2px solid var(--gold);color:var(--gold);font-size:15px;display:inline-flex;align-items:center;gap:7px;max-width:calc(100% - 28px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .thinking-spin{display:inline-block;animation:spin 1.4s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.thinking-spin{animation:none}}
 /* pending AskUserQuestion — answer inline */
 .qpanel{padding:12px 14px;border-top:var(--px) solid var(--gold);background:var(--box-lo);display:flex;flex-direction:column;gap:10px;max-height:40%;overflow-y:auto}
 .qblock{display:flex;flex-direction:column;gap:6px}
-.qheader{font-size:12px;color:var(--gold);letter-spacing:.5px}
-.qtext{font-size:var(--msg,14px);color:var(--bone);line-height:1.5}
+.qheader{font-size:13px;color:var(--gold);letter-spacing:.5px}
+.qtext{font-size:var(--msg,15px);color:var(--bone);line-height:1.5}
 .qoptions{display:flex;flex-wrap:wrap;gap:6px}
 .qactions{display:flex;flex-wrap:wrap;gap:6px}
 .qactions .deskbtn[disabled]{opacity:.6;cursor:default}
 .qopt{text-align:left;max-width:100%;white-space:normal}
 .name-click{cursor:pointer}
 .name-click:hover{color:var(--gold)}
-.name-input{font-size:14px;padding:3px 6px;max-width:200px}
+.name-input{font-size:15px;padding:3px 6px;max-width:200px}
 .deskbtn.danger{color:var(--clay);border-color:var(--clay)}
 .deskbtn.danger:not(:disabled):hover{color:var(--on-danger);background:var(--clay)}
 .msg.is-pending{opacity:.55}
@@ -1105,7 +1118,7 @@ body{background:transparent}
 :is(.msg-text,.comment-text,.cardmodal-descview) pre.md-code{
   background:var(--box-lo);border:2px solid var(--bevel);
   padding:8px 10px;margin:6px 0;overflow-x:auto;
-  font-family:var(--code);font-size:14px;line-height:1.45;
+  font-family:var(--code);font-size:15px;line-height:1.45;
   white-space:pre;
 }
 :is(.msg-text,.comment-text,.cardmodal-descview) pre.md-code:last-child{margin-bottom:0}
@@ -1120,25 +1133,25 @@ body{background:transparent}
 :is(.msg-text,.comment-text,.cardmodal-descview) .md-list-cont{margin:4px 0 0}
 :is(.msg-text,.comment-text,.cardmodal-descview) .md-table-wrap{display:block;overflow-x:auto;margin:6px 0;max-width:100%}
 :is(.msg-text,.comment-text,.cardmodal-descview) .md-table-wrap:last-child{margin-bottom:0}
-:is(.msg-text,.comment-text,.cardmodal-descview) table{border-collapse:collapse;font-size:14px}
+:is(.msg-text,.comment-text,.cardmodal-descview) table{border-collapse:collapse;font-size:15px}
 :is(.msg-text,.comment-text,.cardmodal-descview) :is(th,td){border:1px solid var(--bevel);padding:4px 8px;text-align:left}
 :is(.msg-text,.comment-text,.cardmodal-descview) th{background:var(--box-lo);color:var(--gold)}
 /* Code blocks and tables carry their own 14px above, which would stay put while
    the words around them grew. Inside the drawer they follow --msg instead; card
    comments and card descriptions keep the fixed size. */
-.drawer .msg-text pre.md-code{font-size:var(--msg,14px)}
-.drawer .msg-text table{font-size:var(--msg,14px)}
+.drawer .msg-text pre.md-code{font-size:var(--msg,15px)}
+.drawer .msg-text table{font-size:var(--msg,15px)}
 
 /* toasts */
 .toaster{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:120;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}
-.toast{background:var(--clay);color:var(--on-danger);border:3px solid var(--bone);box-shadow:0 3px 0 rgba(0,0,0,.55);padding:9px 13px;font-size:13px;max-width:80vw;
+.toast{background:var(--clay);color:var(--on-danger);border:3px solid var(--bone);box-shadow:0 3px 0 rgba(0,0,0,.55);padding:9px 13px;font-size:14px;max-width:80vw;
   display:flex;align-items:center;gap:10px}
 /* The toaster ignores the pointer so it never blocks the board underneath; a
    toast carrying an action has to take it back, or its button is unclickable. */
 .toast:has(.toast-action){pointer-events:auto}
 .toast-text{flex:1;min-width:0}
 .toast-action{
-  flex:0 0 auto;cursor:pointer;font-family:inherit;font-size:12px;letter-spacing:.5px;
+  flex:0 0 auto;cursor:pointer;font-family:inherit;font-size:13px;letter-spacing:.5px;
   background:var(--on-danger);color:var(--clay);border:2px solid var(--on-danger);padding:3px 8px;
 }
 .toast-action:hover{background:transparent;color:var(--on-danger)}
@@ -1151,8 +1164,8 @@ body{background:transparent}
 
 /* sprite picker modal */
 .spritepicker{width:min(460px,92vw);max-height:90vh;overflow-y:auto;margin:8vh auto;padding:20px;display:flex;flex-direction:column;gap:9px}
-.spritepicker-title{font-size:15px;letter-spacing:1px;margin-bottom:6px}
-.spritepicker-label{font-size:12px;color:var(--dim);margin-top:8px}
+.spritepicker-title{font-size:16px;letter-spacing:1px;margin-bottom:6px}
+.spritepicker-label{font-size:13px;color:var(--dim);margin-top:8px}
 .spritepicker-preview{display:flex;justify-content:center;padding:14px;background:var(--night);border:2px solid var(--bevel)}
 .spritepicker-preview .sprite{width:64px;height:96px}
 .sprite-grid{display:flex;flex-wrap:wrap;gap:6px;margin-top:2px}
@@ -1164,27 +1177,27 @@ body{background:transparent}
 /* card detail modal (THE LINE) — a roomy Trello-style view of one card */
 .cardmodal{width:min(680px,94vw);max-height:88vh;margin:6vh auto;display:flex;flex-direction:column;padding:0;overflow:hidden}
 .cardmodal-head{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:var(--rule)}
-.cardmodal-crumb{flex:1;min-width:0;font-size:12px;letter-spacing:.5px;color:var(--gold);text-transform:uppercase}
-.cardmodal-x{background:transparent;border:none;color:var(--dim);cursor:pointer;font-size:15px;line-height:1;padding:2px 4px}
+.cardmodal-crumb{flex:1;min-width:0;font-size:13px;letter-spacing:.5px;color:var(--gold);text-transform:uppercase}
+.cardmodal-x{background:transparent;border:none;color:var(--dim);cursor:pointer;font-size:16px;line-height:1;padding:2px 4px}
 .cardmodal-x:hover{color:var(--clay)}
 .cardmodal-body{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:16px}
 .cardmodal-title{
-  width:100%;box-sizing:border-box;font-family:var(--mono);font-size:16px;line-height:1.4;
+  width:100%;box-sizing:border-box;font-family:var(--mono);font-size:17px;line-height:1.4;
   color:var(--bone);background:var(--night);border:2px solid var(--bevel);padding:9px 10px;
 }
 .cardmodal-title:focus{outline:none;border-color:var(--gold)}
 .cardmodal-row{display:flex;flex-direction:column;gap:7px}
-.cardmodal-label{font-size:12px;letter-spacing:.5px;color:var(--dim);text-transform:uppercase}
+.cardmodal-label{font-size:13px;letter-spacing:.5px;color:var(--dim);text-transform:uppercase}
 .cardmodal-select{
   align-self:flex-start;min-width:200px;max-width:100%;cursor:pointer;
-  font-family:var(--mono);font-size:14px;
+  font-family:var(--mono);font-size:15px;
   color:var(--bone);background:var(--night);border:2px solid var(--bevel);padding:7px 8px;
 }
 .cardmodal-select:focus{outline:none;border-color:var(--gold)}
 /* The repo label: sized like the selects above it, a short name not prose. */
 .cardmodal-repo{
   align-self:flex-start;width:280px;max-width:100%;box-sizing:border-box;
-  font-family:var(--mono);font-size:14px;
+  font-family:var(--mono);font-size:15px;
   color:var(--bone);background:var(--night);border:2px solid var(--bevel);padding:7px 8px;
 }
 .cardmodal-repo:focus{outline:none;border-color:var(--gold)}
@@ -1192,7 +1205,7 @@ body{background:transparent}
 .cardmodal-repo-path{overflow-wrap:anywhere}
 .cardmodal-assign-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:2px}
 .cardmodal-send,.cardmodal-spawn{
-  cursor:pointer;font-size:12px;letter-spacing:.5px;padding:8px 10px;
+  cursor:pointer;font-size:13px;letter-spacing:.5px;padding:8px 10px;
   border:2px solid var(--bevel);background:var(--box-lo);color:var(--bone);
 }
 .cardmodal-send{background:var(--gold);color:var(--on-accent);border-color:var(--bone)}
@@ -1328,10 +1341,10 @@ body{background:transparent}
 }
 
 .mergekey-legend{
-  font-size:16px;letter-spacing:2px;line-height:1;color:var(--leaf);
+  font-size:17px;letter-spacing:2px;line-height:1;color:var(--leaf);
   text-shadow:0 1px 0 rgba(0,0,0,.8);
 }
-.mergekey-sub{font-size:10px;letter-spacing:1px;line-height:1;color:var(--dim)}
+.mergekey-sub{font-size:11px;letter-spacing:1px;line-height:1;color:var(--dim)}
 
 /* a dead key: nothing to merge yet, or something in the way */
 .mergekey.is-held .mergekey-legend{color:var(--dim);text-shadow:none}
@@ -1350,8 +1363,8 @@ body{background:transparent}
 .mergekey.phase-merged .mergekey-legend{color:var(--leaf)}
 
 .mergekey-plate{flex:1 1 170px;display:flex;flex-direction:column;gap:4px;min-width:0}
-.mergekey-caption{font-size:12px;letter-spacing:.5px;color:var(--bone);overflow-wrap:anywhere}
-.mergekey-why{font-size:13px;color:var(--dim);line-height:1.4;overflow-wrap:anywhere}
+.mergekey-caption{font-size:13px;letter-spacing:.5px;color:var(--bone);overflow-wrap:anywhere}
+.mergekey-why{font-size:14px;color:var(--dim);line-height:1.4;overflow-wrap:anywhere}
 .mergekey-why.armed{color:var(--gold)}
 
 @media (prefers-reduced-motion:reduce){
@@ -1376,7 +1389,7 @@ body{background:transparent}
 .mergehint-move:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
 .cardmodal-desc{
   width:100%;box-sizing:border-box;resize:vertical;min-height:94px;
-  font-family:var(--mono);font-size:14px;line-height:1.6;
+  font-family:var(--mono);font-size:15px;line-height:1.6;
   color:var(--bone);background:var(--night);border:2px solid var(--bevel);padding:8px 9px;
 }
 .cardmodal-desc:focus{outline:none;border-color:var(--gold)}
@@ -1385,7 +1398,7 @@ body{background:transparent}
    description and uses the code face — these are file paths, not prose. */
 .cardmodal-touches{
   width:100%;box-sizing:border-box;resize:vertical;min-height:52px;
-  font-family:var(--code);font-size:13px;line-height:1.5;
+  font-family:var(--code);font-size:14px;line-height:1.5;
   color:var(--bone);background:var(--night);border:2px solid var(--bevel);padding:7px 9px;
   white-space:pre;
 }
@@ -1394,18 +1407,18 @@ body{background:transparent}
 /* Why staffing is refused: another card already claims these files. Louder than
    .cardmodal-empty -- it is the reason a button next to it is dead. */
 .cardmodal-blocked{
-  font-size:13px;line-height:1.45;color:var(--clay);
+  font-size:14px;line-height:1.45;color:var(--clay);
   border-left:3px solid var(--clay);padding:2px 0 2px 8px;
 }
 .cardmodal-comments{display:flex;flex-direction:column;gap:9px}
-.cardmodal-empty{font-size:13px;color:var(--dim);font-style:italic}
+.cardmodal-empty{font-size:14px;color:var(--dim);font-style:italic}
 .comment{background:var(--box-lo);border:2px solid var(--bevel);padding:8px 10px;display:flex;flex-direction:column;gap:5px}
 .comment-meta{display:flex;align-items:center;gap:8px}
-.comment-author{font-family:var(--mono);font-size:12px;color:var(--gold);letter-spacing:.5px}
-.comment-time{flex:1;font-size:13px;color:var(--dim)}
-.comment-del{background:transparent;border:none;color:var(--dim);cursor:pointer;font-size:13px;line-height:1;padding:1px 3px}
+.comment-author{font-family:var(--mono);font-size:13px;color:var(--gold);letter-spacing:.5px}
+.comment-time{flex:1;font-size:14px;color:var(--dim)}
+.comment-del{background:transparent;border:none;color:var(--dim);cursor:pointer;font-size:14px;line-height:1;padding:1px 3px}
 .comment-del:hover{color:var(--clay)}
-.comment-text{font-family:var(--mono);font-size:14px;line-height:1.6;color:var(--bone);word-break:break-word}
+.comment-text{font-family:var(--mono);font-size:15px;line-height:1.6;color:var(--bone);word-break:break-word}
 /* What a clicked notification was about: the comment, or the stage it moved to.
    Held in gold for as long as the card stays open, with a short ring on arrival
    so the eye finds it (the ring is dropped under reduced motion; the gold stays).
@@ -1424,12 +1437,12 @@ body{background:transparent}
 .comment-compose{display:flex;flex-direction:column;gap:7px;margin-top:2px}
 .comment-input{
   width:100%;box-sizing:border-box;resize:vertical;min-height:60px;
-  font-family:var(--mono);font-size:14px;line-height:1.6;
+  font-family:var(--mono);font-size:15px;line-height:1.6;
   color:var(--bone);background:var(--night);border:2px solid var(--bevel);padding:8px 9px;
 }
 .comment-input:focus{outline:none;border-color:var(--gold)}
 .comment-post{
-  align-self:flex-end;cursor:pointer;font-size:12px;letter-spacing:.5px;
+  align-self:flex-end;cursor:pointer;font-size:13px;letter-spacing:.5px;
   color:var(--on-accent);background:var(--gold);border:2px solid var(--gold);padding:7px 12px;
 }
 .comment-post:disabled{opacity:.4;cursor:default}
@@ -1443,22 +1456,22 @@ body{background:transparent}
 .palette-backdrop{position:fixed;inset:0;z-index:90;background:rgba(4,8,18,.6);display:flex;justify-content:center;align-items:flex-start}
 .palette{width:min(620px,94vw);margin-top:12vh;display:flex;flex-direction:column;max-height:70vh;overflow:hidden}
 .palette-inputrow{display:flex;align-items:center;gap:9px;padding:12px 14px;border-bottom:var(--rule)}
-.palette-prompt{color:var(--gold);font-size:17px;line-height:1}
-.palette-input{font-size:15px}
+.palette-prompt{color:var(--gold);font-size:18px;line-height:1}
+.palette-input{font-size:16px}
 .palette-list{flex:1;overflow-y:auto;padding:6px}
-.palette-group{font-size:12px;color:var(--dim);letter-spacing:.6px;padding:9px 8px 4px}
+.palette-group{font-size:13px;color:var(--dim);letter-spacing:.6px;padding:9px 8px 4px}
 .palette-row{display:flex;align-items:center;gap:9px;padding:7px 8px;cursor:pointer;border:2px solid transparent}
 .palette-row.on{background:var(--box-lo);border-color:var(--gold)}
 .palette-icon{flex:0 0 auto;width:18px;text-align:center;color:var(--dim)}
-.palette-title{flex:0 0 auto;font-family:var(--mono);font-size:14px;color:var(--bone);max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.palette-sub{flex:1;min-width:0;font-size:13px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.palette-title{flex:0 0 auto;font-family:var(--mono);font-size:15px;color:var(--bone);max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.palette-sub{flex:1;min-width:0;font-size:14px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* A body-text excerpt reads as a quotation, not as metadata — italic sets it
    apart from the column/role subtitles that occupy the same slot. */
 .palette-sub.is-snippet{font-style:italic}
 /* Themed: the wash is mixed from --gold so it follows the accent colour rather
    than pinning the default theme's amber into every theme. */
 .palette-mark{color:var(--gold);font-weight:400;font-style:normal;background:color-mix(in srgb, var(--gold) 14%, transparent)}
-.palette-foot{padding:8px 14px;border-top:var(--rule);font-size:12px;color:var(--dim);letter-spacing:.5px}
+.palette-foot{padding:8px 14px;border-top:var(--rule);font-size:13px;color:var(--dim);letter-spacing:.5px}
 
 /* ---- background layers ----------------------------------------------------
    Behind everything: the art background, then the THEME's wash, then the USER's
@@ -1499,24 +1512,24 @@ body{background:transparent}
 .card-img a:hover img,.card-img a:focus-visible img{border-color:var(--gold)}
 .card-img-missing{
   display:inline-flex;align-items:center;justify-content:center;
-  width:76px;height:76px;font-size:21px;line-height:1;color:var(--dim);
+  width:76px;height:76px;font-size:22px;line-height:1;color:var(--dim);
   border:2px dashed var(--bevel);border-radius:var(--radius-sm);
 }
 .card-img-x{
   position:absolute;top:-7px;right:-7px;
-  width:20px;height:20px;padding:0;line-height:1;font-size:12px;cursor:pointer;
+  width:20px;height:20px;padding:0;line-height:1;font-size:13px;cursor:pointer;
   background:var(--clay);color:var(--on-danger);border:2px solid var(--bone);border-radius:var(--radius-sm);
 }
 .card-img-x:hover{filter:brightness(1.15)}
 .card-img-x:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
-.card-attach{align-self:flex-start;font-size:12px;letter-spacing:calc(.5px + var(--track))}
+.card-attach{align-self:flex-start;font-size:13px;letter-spacing:calc(.5px + var(--track))}
 .comment-actions{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
 .comment-actions .comment-post{align-self:auto}
 /* drop target: the whole card lights up, with a label so it's unmistakable */
 .cardmodal.drag-over{border-color:var(--gold);box-shadow:var(--win-shadow-hover)}
 .cardmodal-droplabel{
   position:absolute;inset:0;z-index:2;display:flex;align-items:center;justify-content:center;
-  background:rgba(0,0,0,.45);color:var(--gold);font-size:14px;letter-spacing:calc(1px + var(--track));
+  background:rgba(0,0,0,.45);color:var(--gold);font-size:15px;letter-spacing:calc(1px + var(--track));
   border:3px dashed var(--gold);pointer-events:none;
 }
 
@@ -1527,7 +1540,7 @@ body{background:transparent}
   position:absolute;top:-10px;left:-10px;z-index:3;
   width:26px;height:26px;
   display:flex;align-items:center;justify-content:center;
-  font-size:15px;font-weight:700;line-height:1;
+  font-size:16px;font-weight:700;line-height:1;
   color:var(--on-danger);background:var(--clay);
   border:3px solid var(--bone);border-radius:var(--radius-sm);
   box-shadow:0 2px 0 rgba(0,0,0,.5);
@@ -1559,7 +1572,7 @@ body{background:transparent}
    land first, in gold like the claim notes in the card modal. One line, cut
    with an ellipsis: a long title must not stretch the card. */
 .card-flag.card-flag-wait{
-  color:var(--gold);font-size:11px;line-height:1.3;
+  color:var(--gold);font-size:12px;line-height:1.3;
   flex:1 1 100%;min-width:0;max-width:100%;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
@@ -1652,12 +1665,12 @@ body{background:transparent}
    Nothing here animates: the face is a pure function of fleet state (see
    lib/face.ts), so there is no timer to smooth and no flicker to suppress.
 
-   It sits in normal flow at the foot of the page, on the same 1080px column
+   It sits in normal flow at the foot of the page, on the same --page-w column
    as the header, the crew grid and THE LINE. A fixed bar would hang over the
    board and swallow clicks along the whole bottom edge of the window, which
    is a real cost for a readout nobody needs pinned. */
 .facehud{
-  max-width:1080px;margin:26px auto 0;
+  max-width:var(--page-w);margin:26px auto 0;
   background:var(--box);border:3px solid var(--bone);
   box-shadow:inset 0 0 0 2px var(--bevel),0 3px 0 rgba(0,0,0,.55);
   padding:10px 12px;
@@ -1674,10 +1687,10 @@ body{background:transparent}
   border-right:2px solid var(--bevel);
 }
 .facehud-num{
-  font-family:var(--display);font-size:36px;line-height:1;
+  font-family:var(--display);font-size:37px;line-height:1;
   color:var(--gold);text-shadow:0 var(--px) 0 #000;
 }
-.facehud-cap{font-size:10px;color:var(--dim);letter-spacing:calc(1px + var(--track));margin-top:6px}
+.facehud-cap{font-size:11px;color:var(--dim);letter-spacing:calc(1px + var(--track));margin-top:6px}
 /* The same two thresholds the header's usage meter uses, so the fleet can never
    read "amber" in one panel and "fine" in the other. */
 .facehud-panel.hp-warn .facehud-num{color:var(--gold)}
@@ -1690,7 +1703,7 @@ body{background:transparent}
   padding:4px 6px;background:var(--box-lo);border:2px solid var(--bevel);
 }
 .facehud-slot{
-  font-family:var(--display);font-size:16px;line-height:1;text-align:center;
+  font-family:var(--display);font-size:17px;line-height:1;text-align:center;
 }
 .facehud-slot.is-working{color:var(--leaf)}
 .facehud-slot.is-idle{color:var(--dim)}
@@ -1708,8 +1721,8 @@ body{background:transparent}
   display:flex;flex-direction:column;justify-content:center;gap:1px;
   padding:0 14px;min-width:132px;
 }
-.facehud-row{display:flex;align-items:baseline;gap:6px;font-size:13px;line-height:1.25}
-.facehud-rowlabel{flex:1 1 auto;font-size:11px;color:var(--dim);letter-spacing:calc(.5px + var(--track))}
+.facehud-row{display:flex;align-items:baseline;gap:6px;font-size:14px;line-height:1.25}
+.facehud-rowlabel{flex:1 1 auto;font-size:12px;color:var(--dim);letter-spacing:calc(.5px + var(--track))}
 .facehud-rowcount{font-family:var(--display);color:var(--gold);min-width:20px;text-align:right}
 .facehud-rowslash{color:var(--bevel)}
 .facehud-rowtotal{font-family:var(--display);color:var(--dim);min-width:20px}
@@ -1721,7 +1734,7 @@ body{background:transparent}
 }
 @media (max-width:560px){
   .facehud-panel{min-width:0;padding:0 10px}
-  .facehud-num{font-size:28px}
+  .facehud-num{font-size:29px}
 }
 
 
@@ -1780,7 +1793,7 @@ body{background:transparent}
 /* the phosphor itself */
 :root[data-theme="alien"] body{text-shadow:var(--glow)}
 :root[data-theme="alien"] .title{
-  font-size:32px;letter-spacing:4px;
+  font-size:33px;letter-spacing:4px;
   text-shadow:0 0 12px rgba(120,255,170,.55);
 }
 /* thin bright edges everywhere a chunky bone border used to be */
@@ -1907,7 +1920,7 @@ body{background:transparent}
    the textarea it swaps with, so opening it doesn't shift the layout. */
 .cardmodal-descview{
   width:100%;min-height:94px;cursor:text;
-  font-family:var(--mono);font-size:14px;line-height:1.6;
+  font-family:var(--mono);font-size:15px;line-height:1.6;
   color:var(--bone);background:var(--night);word-break:break-word;
   border:2px solid var(--bevel);border-radius:var(--radius-sm);padding:8px 9px;
 }
@@ -2066,7 +2079,7 @@ button:not(:disabled):active{transform:translateY(1px)}
 /* One mic for every text field in the app: it follows the focus and pins itself
    to the focused field's corner, so it has to clear the modals (z-index 120). */
 .mic-btn{position:fixed;z-index:130;display:flex;align-items:center;justify-content:center;
-  font-size:13px;line-height:1;padding:0;cursor:pointer;
+  font-size:14px;line-height:1;padding:0;cursor:pointer;
   background:var(--box-lo);color:var(--bone);border:2px solid var(--bevel);
   opacity:.55;transition:opacity .12s}
 .mic-btn:hover{opacity:1;border-color:var(--gold)}
@@ -2080,7 +2093,7 @@ button:not(:disabled):active{transform:translateY(1px)}
    A segmented pair in the statline. The page you're on is filled, the other
    is an outline, the same pairing the rest of the header uses. */
 .view-tabs{display:inline-flex}
-.view-tab{font-family:var(--mono);font-size:12px;letter-spacing:calc(.5px + var(--track));cursor:pointer;
+.view-tab{font-family:var(--mono);font-size:13px;letter-spacing:calc(.5px + var(--track));cursor:pointer;
   background:var(--box-lo);color:var(--dim);border:2px solid var(--bevel);padding:6px 9px}
 .view-tab + .view-tab{border-left:none}
 .view-tab:hover{color:var(--gold)}
@@ -2088,15 +2101,15 @@ button:not(:disabled):active{transform:translateY(1px)}
 
 /* ---- the MOOD board -----------------------------------------------------------
    A panel holding a pannable, zoomable canvas (see MoodBoard.tsx). The canvas
-   is the one place the page wants more than 1080px, so it takes the room. */
-.mood{max-width:1400px;margin:26px auto 0;padding:16px;display:flex;flex-direction:column;gap:10px}
-.mood h2{font-size:14px;letter-spacing:.5px}
-.mood .hint{font-size:13px;color:var(--dim);margin-top:6px}
+   shares the page width like everything else. */
+.mood{max-width:var(--page-w);margin:26px auto 0;padding:16px;display:flex;flex-direction:column;gap:10px}
+.mood h2{font-size:15px;letter-spacing:.5px}
+.mood .hint{font-size:14px;color:var(--dim);margin-top:6px}
 .mood-bar{display:flex;gap:12px;align-items:flex-end;justify-content:space-between;flex-wrap:wrap}
 .mood-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .mood-zoom{display:inline-flex;gap:4px}
 .mood-zoom-pct{min-width:58px}
-.mood-kind-select,.mood-card-select{font-family:var(--mono);font-size:12px;letter-spacing:.5px;cursor:pointer;
+.mood-kind-select,.mood-card-select{font-family:var(--mono);font-size:13px;letter-spacing:.5px;cursor:pointer;
   background:var(--box-lo);color:var(--bone);border:2px solid var(--bevel);padding:5px 6px;max-width:100%}
 .mood-card-select{flex:1;min-width:0}
 
@@ -2112,8 +2125,8 @@ button:not(:disabled):active{transform:translateY(1px)}
 .mood-viewport.is-linking{cursor:crosshair}
 .mood-world{position:absolute;left:0;top:0;transform-origin:0 0;width:0;height:0}
 .mood-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;
-  color:var(--dim);font-size:14px;text-align:center;padding:16px;pointer-events:none}
-.mood-empty .pix{color:var(--bone);font-size:13px}
+  color:var(--dim);font-size:15px;text-align:center;padding:16px;pointer-events:none}
+.mood-empty .pix{color:var(--bone);font-size:14px}
 .mood-empty code{font-family:var(--code);color:var(--gold)}
 
 /* links: drawn under the notes, with a fat invisible twin to click on */
@@ -2124,10 +2137,10 @@ button:not(:disabled):active{transform:translateY(1px)}
 .mood-link line.mood-link-hit{stroke:transparent;stroke-width:16;pointer-events:stroke;cursor:pointer}
 .mood-link.loose{stroke:var(--gold);stroke-width:2.5;stroke-dasharray:6 5}
 .mood-link-label{position:absolute;transform:translate(-50%,-50%);white-space:nowrap;cursor:pointer;
-  font-family:var(--mono);font-size:12px;letter-spacing:.5px;padding:2px 6px;
+  font-family:var(--mono);font-size:13px;letter-spacing:.5px;padding:2px 6px;
   background:var(--night);color:var(--bone);border:2px solid var(--dim)}
 .mood-link-label.sel,.mood-link-label:hover{border-color:var(--gold);color:var(--gold)}
-.mood-linkbar,.mood-linking{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--gold)}
+.mood-linkbar,.mood-linking{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px;color:var(--gold)}
 .mood-linkbar .reply-input{flex:0 1 260px}
 
 /* notes */
@@ -2149,15 +2162,15 @@ button:not(:disabled):active{transform:translateY(1px)}
 .mnote.k-question{--k:var(--bone);border-style:dashed;border-top-style:solid}
 .mnote.k-done{--k:var(--leaf)}
 .mnote.k-note{--k:var(--dim)}
-.mnote-kind{font-size:11px;color:var(--k)}
-.mnote-title{font-size:15px;font-weight:600;line-height:1.35;overflow-wrap:anywhere}
-.mnote-body{font-size:13px;line-height:1.5;color:var(--bone);opacity:.9;overflow-wrap:anywhere}
+.mnote-kind{font-size:12px;color:var(--k)}
+.mnote-title{font-size:16px;font-weight:600;line-height:1.35;overflow-wrap:anywhere}
+.mnote-body{font-size:14px;line-height:1.5;color:var(--bone);opacity:.9;overflow-wrap:anywhere}
 .mnote-body p + p,.mnote-body ul,.mnote-body ol{margin-top:4px}
 .mnote-body ul,.mnote-body ol{padding-left:18px}
 .mnote-body code{font-family:var(--code);color:var(--gold)}
-.mnote-by{font-size:12px;color:var(--dim)}
+.mnote-by{font-size:13px;color:var(--dim)}
 .mnote-card{align-self:flex-start;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;
-  font-family:var(--mono);font-size:12px;padding:3px 6px;
+  font-family:var(--mono);font-size:13px;padding:3px 6px;
   background:var(--box-lo);color:var(--gold);border:2px solid var(--bevel)}
 .mnote-card:hover{border-color:var(--gold)}
 /* the link handle: a ring on the right edge, shown on hover/focus/select */
@@ -2168,7 +2181,7 @@ button:not(:disabled):active{transform:translateY(1px)}
 /* a heading: a big bare label that names an area of the board */
 .mnote.k-heading{background:transparent;border:none;box-shadow:none;padding:4px 0}
 .mnote.k-heading:hover{box-shadow:none;outline:2px dashed var(--bevel);outline-offset:4px}
-.mnote.k-heading .mnote-title{font-family:var(--display);font-size:28px;color:var(--gold);letter-spacing:calc(1px + var(--track));text-transform:uppercase}
+.mnote.k-heading .mnote-title{font-family:var(--display);font-size:29px;color:var(--gold);letter-spacing:calc(1px + var(--track));text-transform:uppercase}
 
 /* editing a note in place */
 .mnote-edit{display:flex;flex-direction:column;gap:6px;cursor:default}
@@ -2181,7 +2194,7 @@ button:not(:disabled):active{transform:translateY(1px)}
 
 @media (max-width:720px){
   .mood{margin-top:16px;padding:12px}
-  .mood .hint{font-size:12px}
+  .mood .hint{font-size:13px}
   .mood-viewport{height:max(360px, calc(100vh - 300px))}
   .view-tab{padding:6px 7px}
 }

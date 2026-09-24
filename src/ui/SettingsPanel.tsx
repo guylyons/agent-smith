@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { ModalBackdrop } from "./Backdrop";
 import {
-  THEMES, CRT_MODES, BEVEL_MODES, BACKGROUNDS, CUSTOM_BG,
+  THEMES, FONTS, CRT_MODES, BEVEL_MODES, BACKGROUNDS, CUSTOM_BG,
   LINE_ROWS_MIN, LINE_ROWS_MAX, LINE_ROWS_OFF,
   type BevelMode, type CrtMode, type Display,
 } from "./settings";
@@ -64,6 +64,17 @@ export function SettingsPanel({ display, onChange, alertsEnabled, onToggleAlerts
             ))}
           </div>
           <div className="pix settings-hint">{theme.hint}</div>
+
+          <label className="pix settings-label" htmlFor="ui-font">FONT</label>
+          <select
+            id="ui-font"
+            className="settings-select"
+            value={display.font}
+            onChange={(e) => onChange({ font: e.target.value })}
+          >
+            {FONTS.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
+          </select>
+          <div className="pix settings-hint">The face for the whole app. THEME'S OWN uses the one the theme ships with.</div>
 
           <div className="pix settings-label">DISPLAY · CRT</div>
           <div className="settings-row">
