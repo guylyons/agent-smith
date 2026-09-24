@@ -12,7 +12,8 @@ import { ModalBackdrop } from "./Backdrop";
 import { MergeKey } from "./MergeKey";
 import { renderMarkdown, imageSrc } from "./markdown";
 import { imagesIn, imageMarkdown, appendImage, removeImage } from "./cardImages";
-import { toast } from "./toast";
+import { toast, toastError } from "./toast";
+import { cardRef } from "../lib/ticket";
 import type { CardFocus } from "./nav";
 import { findLiveAssignee, sendTaskReadiness } from "../lib/sendTaskReady";
 import { knownRepos, normaliseRepo, type KnownRepo } from "./repoFilter";
@@ -305,6 +306,12 @@ export function CardModal({
       >
         <div className="cardmodal-head">
           <span className="pix cardmodal-crumb">IN {columnName || "—"}</span>
+          {/* The card's number, with a one-click copy so it can be pasted to
+              an agent or a teammate. */}
+          <button type="button" className="cardmodal-ref" title="Copy this card's number"
+            aria-label={`Card ${cardRef(card)}, copy`} onClick={() => copyRef(cardRef(card))}>
+            {cardRef(card)} <span aria-hidden="true">⧉</span>
+          </button>
           {card.kind === "scrum" && <span className="card-kind">★ SCRUM MASTER</span>}
           <button className="cardmodal-x" title="Close" onClick={close}>✕</button>
         </div>
@@ -535,6 +542,14 @@ export function CardModal({
       </div>
     </ModalBackdrop>
   );
+}
+
+// Put a card's number on the clipboard. The Clipboard API can refuse (no focus, an
+// insecure origin), so say so rather than pretend it worked.
+function copyRef(ref: string) {
+  const done = () => toast(`Copied card ${ref}`);
+  const fail = () => toastError(`Couldn't copy. This is card ${ref}`);
+  try { navigator.clipboard.writeText(ref).then(done, fail); } catch { fail(); }
 }
 
 // Thumbnails of the images currently in a field's text, each removable. Direct

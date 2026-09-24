@@ -40,3 +40,8 @@ test("cardName: says what's new, or how many comments there are", () => {
   expect(cardName(card, "none", 2, 5)).toBe("Untitled, scrum master, unassigned, 2 new comments");
   expect(cardName(card, "none", 0, 1)).toBe("Untitled, scrum master, unassigned, 1 comment");
 });
+
+test("cardName: ends with the card's id, since the face shows it", () => {
+  const card = { id: "card_cb55a1f2", num: 42, title: "IDs", kind: undefined, assignee: null } as any;
+  expect(cardName(card, "none", 0, 0)).toBe("IDs, unassigned, card #42");
+});
