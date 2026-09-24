@@ -2,7 +2,7 @@ import { test, expect } from "bun:test";
 import { fixtureDir } from "./fixtures";
 import { mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { mergeVerdict, readMergeState, mergeWork, repoRoot, type MergeFacts } from "../src/lib/merge";
+import { mergeVerdict, readMergeState, mergeWork, repoRoot, cleanupMergedWork, type MergeFacts } from "../src/lib/merge";
 import { runExclusive } from "../src/lib/merge-queue";
 
 // --- the rules, without a repo ---------------------------------------------
@@ -260,4 +260,125 @@ test("a conflict against a detached main checkout is refused and main does not m
   expect(r.ok).toBe(false);
   expect(r.error).toMatch(/could not merge ag-jjc into main/);
   expect(await out(root, "rev-parse", "main")).toBe(before);
+});
+
+// --- cleaning up after a merge ----------------------------------------------
+// A worktree the dashboard made lives at <repo>/.claude/worktrees/<name>. Once
+// its branch has landed and the tree is clean, both go; anything else stays and
+// the result says why, so the card can too.
+
+/** A worktree where the launcher puts one, with `file` committed on `branch`. */
+async function agentWorktree(root: string, branch: string, file = "feature.txt"): Promise<string> {
+  const wt = join(root, ".claude", "worktrees", branch);
+  await git(root, "worktree", "add", "-q", "-b", branch, wt, "HEAD");
+  writeFileSync(join(wt, file), `${branch}\n`);
+  await git(wt, "add", "-A");
+  await git(wt, "commit", "-q", "-m", `work on ${branch}`);
+  return wt;
+}
+
+test("a clean, merged worktree and its branch are removed", async () => {
+  const root = await freshRepo();
+  const wt = await agentWorktree(root, "ag-done");
+  expect((await mergeWork(wt)).ok).toBe(true);
+
+  expect(await cleanupMergedWork(wt, "ag-done")).toEqual({ removed: true, branchDeleted: true });
+  expect(existsSync(wt)).toBe(false);
+  expect(await out(root, "worktree", "list")).not.toContain("ag-done");
+  expect(await out(root, "branch", "--list", "ag-done")).toBe("");
+  // The merge itself is untouched.
+  expect(await out(root, "show", "main:feature.txt")).toBe("ag-done");
+});
+
+test("files the repo ignores (the launcher's local settings) don't keep a worktree", async () => {
+  const root = await freshRepo();
+  writeFileSync(join(root, ".gitignore"), ".claude/settings.local.json\n");
+  await git(root, "add", "-A");
+  await git(root, "commit", "-q", "-m", "ignore local settings");
+  const wt = await agentWorktree(root, "ag-ign");
+  mkdirSync(join(wt, ".claude"), { recursive: true });
+  writeFileSync(join(wt, ".claude", "settings.local.json"), "{}\n");
+  expect((await mergeWork(wt)).ok).toBe(true);
+
+  expect(await cleanupMergedWork(wt, "ag-ign")).toMatchObject({ removed: true });
+  expect(existsSync(wt)).toBe(false);
+});
+
+test("a dirty worktree is left alone and says why", async () => {
+  const root = await freshRepo();
+  const wt = await agentWorktree(root, "ag-dirty");
+  expect((await mergeWork(wt)).ok).toBe(true);
+  writeFileSync(join(wt, "after.txt"), "written after the merge\n");
+
+  const r = await cleanupMergedWork(wt, "ag-dirty");
+  expect(r.removed).toBe(false);
+  expect(r.why).toMatch(/uncommitted/);
+  expect(existsSync(join(wt, "after.txt"))).toBe(true);
+  expect(await out(root, "branch", "--list", "ag-dirty")).toContain("ag-dirty");
+});
+
+test("an unmerged branch is left alone and says why", async () => {
+  const root = await freshRepo();
+  const wt = await agentWorktree(root, "ag-open");
+
+  const r = await cleanupMergedWork(wt, "ag-open");
+  expect(r.removed).toBe(false);
+  expect(r.why).toMatch(/not merged into main/);
+  expect(existsSync(wt)).toBe(true);
+  expect(await out(root, "branch", "--list", "ag-open")).toContain("ag-open");
+});
+
+test("a worktree on a different branch than the one merged is left alone", async () => {
+  const root = await freshRepo();
+  const wt = await agentWorktree(root, "ag-moved");
+  expect((await mergeWork(wt)).ok).toBe(true);
+  await git(wt, "checkout", "-q", "-b", "ag-next");
+
+  const r = await cleanupMergedWork(wt, "ag-moved");
+  expect(r.removed).toBe(false);
+  expect(r.why).toMatch(/ag-next/);
+  expect(existsSync(wt)).toBe(true);
+});
+
+test("the main checkout and worktrees outside .claude/worktrees are never touched, silently", async () => {
+  const root = await freshRepo();
+  const wt = await workOn(root, "ag-elsewhere", "feature.txt", "hello\n");
+  expect((await mergeWork(wt)).ok).toBe(true);
+
+  expect(await cleanupMergedWork(wt, "ag-elsewhere")).toEqual({ removed: false });
+  expect(existsSync(wt)).toBe(true);
+  expect(await cleanupMergedWork(root, "main")).toEqual({ removed: false });
+  expect(existsSync(join(root, "README"))).toBe(true);
+});
+
+test("a locked worktree is kept and the git error is the reason", async () => {
+  const root = await freshRepo();
+  const wt = await agentWorktree(root, "ag-lock");
+  expect((await mergeWork(wt)).ok).toBe(true);
+  await git(root, "worktree", "lock", wt);
+
+  const r = await cleanupMergedWork(wt, "ag-lock");
+  expect(r.removed).toBe(false);
+  expect(r.why).toMatch(/lock/);
+  expect(existsSync(wt)).toBe(true);
+  expect(await out(root, "branch", "--list", "ag-lock")).toContain("ag-lock");
+});
+
+test("a path that no longer exists is not an error", async () => {
+  expect(await cleanupMergedWork(join(base, "gone-already"), "x")).toEqual({ removed: false });
+});
+
+test("with a detached main checkout the worktree goes but git branch -d keeps the branch, and says so", async () => {
+  // `git branch -d` checks against HEAD, which a detached (jj) checkout leaves
+  // behind the merge. We never fall back to -D.
+  const root = await freshRepo();
+  const wt = await agentWorktree(root, "ag-jjd");
+  await git(root, "checkout", "-q", "--detach");
+  expect((await mergeWork(wt)).ok).toBe(true);
+
+  const r = await cleanupMergedWork(wt, "ag-jjd");
+  expect(r).toMatchObject({ removed: true, branchDeleted: false });
+  expect(r.why).toMatch(/branch ag-jjd kept/);
+  expect(existsSync(wt)).toBe(false);
+  expect(await out(root, "branch", "--list", "ag-jjd")).toContain("ag-jjd");
 });

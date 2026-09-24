@@ -3,7 +3,7 @@ import { test, expect } from "bun:test";
 import { fixtureDir } from "./fixtures";
 import { readSnapshot } from "../src/server";
 import { setNameOverride } from "../src/lib/overrides";
-import { mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
 const dir = fixtureDir("server-test");
@@ -996,7 +996,7 @@ async function git(cwd: string, ...args: string[]): Promise<void> {
 /** A throwaway repo with a linked worktree holding one committed change, plus a
  *  status file pointing a session at that worktree. Returns the card id of a
  *  card assigned to it. */
-async function mergeFixture(post: (p: string, b: object) => Promise<Response>): Promise<string> {
+async function mergeFixture(post: (p: string, b: object) => Promise<Response>, opts: { wt?: string } = {}): Promise<string> {
   // A repo of its OWN per call. Re-initialising one path raced with git's
   // background housekeeping from the previous fixture: the setup commit failed
   // silently and the endpoint under test answered "nothing committed yet".
@@ -1008,7 +1008,7 @@ async function mergeFixture(post: (p: string, b: object) => Promise<Response>): 
   writeFileSync(join(mergeRepo, "README"), "root\n");
   await git(mergeRepo, "add", "-A");
   await git(mergeRepo, "commit", "-q", "-m", "root");
-  const wt = join(mergeRepo, "wt");
+  const wt = join(mergeRepo, opts.wt ?? "wt");
   await git(mergeRepo, "worktree", "add", "-q", "-b", "feature", wt, "HEAD");
   writeFileSync(join(wt, "feature.txt"), "done\n");
   await git(wt, "add", "-A");
@@ -1123,6 +1123,52 @@ test("card-merge leaves sessions alone when the merge is refused", async () => {
   writeFileSync(join(mergeRepo, "wt", "dirty.txt"), "uncommitted\n");
   expect((await mergePost(base, { cardId, author: "You" })).status).toBe(409);
   expect(quit).toEqual([]);
+  server.stop(true);
+});
+
+// A worktree the dashboard made (<repo>/.claude/worktrees/<name>) is removed
+// with its branch once the work lands; one it can't remove stays, and the card
+// says why. Either way the merge stands.
+const AGENT_WT = join(".claude", "worktrees", "feature");
+const gitOut = (cwd: string, ...args: string[]) => Bun.spawnSync(["git", "-C", cwd, ...args]).stdout.toString().trim();
+
+test("card-merge removes the agent's clean worktree and its merged branch", async () => {
+  const { server, base, post } = await cardApiServer({ quit: async () => ({ ok: true }) });
+  const cardId = await mergeFixture(post, { wt: AGENT_WT });
+  const res = (await (await mergePost(base, { cardId, author: "You" })).json()) as any;
+  expect(res).toMatchObject({ ok: true, branch: "feature", cleanup: { removed: true, branchDeleted: true } });
+  expect(existsSync(join(mergeRepo, AGENT_WT))).toBe(false);
+  expect(gitOut(mergeRepo, "worktree", "list")).not.toContain("feature");
+  expect(gitOut(mergeRepo, "branch", "--list", "feature")).toBe("");
+  expect(gitOut(mergeRepo, "show", "main:feature.txt")).toBe("done");
+
+  // The card still answers for its work: merged, not an error.
+  const state = await fetch(`${base}/merge-state?cardId=${cardId}`);
+  expect(state.status).toBe(200);
+  expect(await state.json()).toMatchObject({ committed: false, ready: false, blocked: "already merged" });
+  server.stop(true);
+});
+
+test("card-merge keeps a worktree it can't remove, and says why on the card", async () => {
+  const { server, base, post } = await cardApiServer({ quit: async () => ({ ok: true }) });
+  const cardId = await mergeFixture(post, { wt: AGENT_WT });
+  await git(mergeRepo, "worktree", "lock", join(mergeRepo, AGENT_WT));
+  const res = (await (await mergePost(base, { cardId, author: "You" })).json()) as any;
+  expect(res).toMatchObject({ ok: true, cleanup: { removed: false } });
+  expect(existsSync(join(mergeRepo, AGENT_WT))).toBe(true);
+  expect(gitOut(mergeRepo, "branch", "--list", "feature")).toContain("feature");
+  const { board } = (await (await fetch(`${base}/board`)).json()) as any;
+  expect(board.cards[0].comments.some((c: any) => /^worktree kept: .*lock/.test(c.text))).toBe(true);
+  server.stop(true);
+});
+
+test("card-merge leaves a worktree outside .claude/worktrees alone, without a note", async () => {
+  const { server, base, post } = await cardApiServer({ quit: async () => ({ ok: true }) });
+  const cardId = await mergeFixture(post);
+  expect(await (await mergePost(base, { cardId, author: "You" })).json()).toMatchObject({ ok: true, cleanup: { removed: false } });
+  expect(existsSync(join(mergeRepo, "wt"))).toBe(true);
+  const { board } = (await (await fetch(`${base}/board`)).json()) as any;
+  expect(board.cards[0].comments.map((c: any) => c.text)).toEqual(["Merged feature into main."]);
   server.stop(true);
 });
 

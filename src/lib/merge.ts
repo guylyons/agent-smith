@@ -6,7 +6,8 @@
 // The split here is deliberate: `mergeVerdict` is pure (facts in, verdict out)
 // so the rules are unit-tested without a repo, and the git-touching functions
 // only gather facts and run the one command.
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { existsSync, realpathSync } from "node:fs";
 import { runExclusive, pending } from "./merge-queue";
 import { mergeBlockers, mergeBlockReason, type Board } from "./board";
 
@@ -252,4 +253,51 @@ async function mergeDetached(root: string, branch: string, base: string): Promis
   const moved = await git(root, ["update-ref", "-m", `merge ${branch}`, `refs/heads/${base}`, commit.stdout, baseTip.stdout]);
   if (moved.code !== 0) return refused(moved.stderr);
   return { ok: true, branch, base };
+}
+
+export type CleanupResult = {
+  /** the worktree directory is gone */
+  removed: boolean;
+  /** and so is its branch */
+  branchDeleted?: boolean;
+  /** why something was kept, for the card. Absent when the directory was never
+   *  ours to remove (the main checkout, a folder the user picked). */
+  why?: string;
+};
+
+function real(p: string): string {
+  try { return realpathSync(p); } catch { return p; }
+}
+
+/**
+ * After `branch` has landed, remove the worktree the dashboard made for it
+ * (`<repo>/.claude/worktrees/<name>`) and delete the branch. Only a clean tree
+ * whose branch is in the trunk goes, and only with the safe forms: `git
+ * worktree remove` (no --force) and `git branch -d` (never -D). Anything else
+ * is kept with a `why`. Never throws; the merge stands whatever happens here.
+ */
+export async function cleanupMergedWork(cwd: string, branch: string): Promise<CleanupResult> {
+  if (!cwd || !existsSync(cwd)) return { removed: false };
+  const root = await repoRoot(cwd);
+  if (!root) return { removed: false };
+  const top = await git(cwd, ["rev-parse", "--show-toplevel"]);
+  const here = real(cwd);
+  // The main checkout, a subfolder, or a worktree someone put elsewhere: not ours.
+  if (top.code !== 0 || real(top.stdout) !== here) return { removed: false };
+  if (dirname(here) !== join(real(root), ".claude", "worktrees")) return { removed: false };
+
+  return runExclusive(root, async () => {
+    const kept = (why: string): CleanupResult => ({ removed: false, why });
+    const [on, base, dirty] = await Promise.all([currentBranch(cwd), pickBase(root), isDirty(cwd, true)]);
+    if (on !== branch) return kept(`worktree kept: it is on ${on || "a detached HEAD"}, not ${branch}`);
+    if (dirty) return kept(`worktree kept: ${here} has uncommitted changes`);
+    if (!base || (await git(root, ["merge-base", "--is-ancestor", branch, base])).code !== 0) {
+      return kept(`worktree kept: ${branch} is not merged into ${base || "a main branch"}`);
+    }
+    const rm = await git(root, ["worktree", "remove", here]);
+    if (rm.code !== 0) return kept(`worktree kept: ${rm.stderr || "git worktree remove failed"}`);
+    const del = await git(root, ["branch", "-d", branch]);
+    if (del.code !== 0) return { removed: true, branchDeleted: false, why: `branch ${branch} kept: ${del.stderr || "git branch -d failed"}` };
+    return { removed: true, branchDeleted: true };
+  });
 }
