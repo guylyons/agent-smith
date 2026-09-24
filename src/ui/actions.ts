@@ -5,6 +5,7 @@ import { flashSend } from "./flash";
 import { signalDying } from "./dying";
 import { playSubmit } from "./sounds";
 import type { Board, Card, Column, Stage } from "../lib/board";
+import type { ArchivedCard } from "../lib/archive";
 import type { MoodKind, MoodLink, MoodNote, NotePatch } from "../lib/mood";
 // Shared with the UI as types only — nothing server-side is bundled into the browser.
 import type { ChatMessage, QuestionOption, Question, PendingQuestion, BlockingTool } from "../lib/conversation";
@@ -17,7 +18,7 @@ import type { MergePreview } from "../lib/mergePreview";
  *  for a busy one's Stop hook to collect when its turn ends. */
 export type Delivery = { sessionId: string; name: string; via: "typed" | "queued" };
 
-type Result = { ok: boolean; error?: string; cardId?: string; existing?: boolean; noteId?: string; linkId?: string; path?: string; url?: string; cancelled?: boolean; branch?: string; base?: string; delivery?: Delivery[] };
+type Result = { ok: boolean; error?: string; archived?: number; cardId?: string; existing?: boolean; noteId?: string; linkId?: string; path?: string; url?: string; cancelled?: boolean; branch?: string; base?: string; delivery?: Delivery[] };
 
 async function post(action: string, body: object): Promise<Result> {
   try {
@@ -77,6 +78,22 @@ export function renameColumnAction(columnId: string, name: string): void { void 
 export function setInstructionAction(columnId: string, instruction: string): void { void act("column-update", { columnId, instruction }); }
 export function setColumnStageAction(columnId: string, stage: Stage | null): void { void act("column-update", { columnId, stage }); }
 export function deleteColumnAction(columnId: string): void { void act("column-delete", { columnId }); }
+/** Archive a merged column's cards (see src/lib/archive.ts). How many went, or null on failure. */
+export async function archiveColumnAction(columnId: string): Promise<number | null> {
+  const r = await post("column-archive", { columnId });
+  if (!r.ok) { toastError(r.error ?? "column-archive failed"); return null; }
+  return r.archived ?? 0;
+}
+export function unarchiveCardAction(cardId: string): Promise<boolean> { return act("card-unarchive", { cardId }); }
+/** The archived cards, newest first; [] when the server can't be reached. */
+export async function fetchArchive(): Promise<ArchivedCard[]> {
+  try {
+    const res = await fetch("/archive");
+    return ((await res.json()) as { cards?: ArchivedCard[] }).cards ?? [];
+  } catch {
+    return [];
+  }
+}
 export function reorderColumnAction(columnId: string, toIndex: number): void { void act("column-reorder", { columnId, toIndex }); }
 export function restoreColumnAction(column: Column, index: number, cards: Card[]): void {
   void act("column-restore", { column, index, cards });

@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { buildSnapshot } from "../src/lib/snapshot";
+import { buildSnapshot, snapshotEvent } from "../src/lib/snapshot";
 import { defaultBoard, addColumn } from "../src/lib/board";
 import type { AgentStatus } from "../src/schema";
 
@@ -78,4 +78,19 @@ test("the board is passed through unchanged", () => {
 test("with no board given, the snapshot carries the default board", () => {
   const snap = buildSnapshot([A({})], 1000);
   expect(snap.board).toEqual(defaultBoard());
+});
+
+test("snapshotEvent leaves out a board and mood the client already has", () => {
+  const board = { columns: [], cards: [{ id: "x", title: "X", columnId: "k" }] } as any;
+  const mood = { notes: [], links: [] } as any;
+  const first = snapshotEvent({ agents: [], board, mood, archived: 0 }, {});
+  expect(first.event.board).toBe(board);
+  expect(first.event.mood).toBe(mood);
+  const second = snapshotEvent({ agents: [], board: { ...board }, mood: { ...mood }, archived: 0 }, first.sent);
+  expect("board" in second.event).toBe(false);
+  expect("mood" in second.event).toBe(false);
+  expect(second.event.agents).toEqual([]);
+  const changed = snapshotEvent({ agents: [], board: { columns: [], cards: [] }, mood, archived: 1 }, second.sent);
+  expect(changed.event.board).toEqual({ columns: [], cards: [] });
+  expect("mood" in changed.event).toBe(false);
 });
