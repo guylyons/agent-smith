@@ -259,7 +259,7 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
 
   return (
     <>
-    <ModalBackdrop onClose={onClose}>
+    <ModalBackdrop onClose={onClose} label={agent.name}>
       <aside className={`win drawer${dragOver ? " drag-over" : ""}${dying ? " is-dying" : ""}`}
         onDragOver={(e) => { if (e.dataTransfer?.types.includes("Files")) { e.preventDefault(); setDragOver(true); } }}
         onDragLeave={(e) => { if (e.currentTarget === e.target) setDragOver(false); }}
@@ -276,7 +276,8 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
                 onBlur={commitRename}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") commitRename();
-                  if (e.key === "Escape") { setNameDraft(agent.name); setEditingName(false); }
+                  // Esc cancels the rename only; the drawer stays open.
+                  if (e.key === "Escape") { e.preventDefault(); setNameDraft(agent.name); setEditingName(false); }
                 }} />
             ) : (
               <div className="pix name name-click" title="Click to rename"
@@ -447,7 +448,6 @@ export function ConversationDrawer({ agent, ended, onClose }: { agent: AgentStat
                 onPaste={onPaste}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); }
-                  if (e.key === "Escape") onClose();
                 }}
               />
               <button className="deskbtn" disabled={busy || (!text.trim() && attachments.length === 0)} onClick={() => void send()}>▸ SEND</button>

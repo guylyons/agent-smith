@@ -12,9 +12,13 @@ import {
 
 type Read = { kind: "loading" } | { kind: "preview"; preview: Preview } | { kind: "error"; message: string };
 
-/** `refresh` changes whenever the branch moves (the MERGE key's poll sees a
- *  new commit), which re-reads the list without blanking it in between. */
-export function MergePreview({ cardId, refresh }: { cardId: string; refresh: string }) {
+/** `refresh` changes whenever the branch tip moves (the MERGE key's poll sees
+ *  a new commit, an amend, a rebase), which re-reads the list without blanking
+ *  it in between. `onShown` hears the tip SHA of each list drawn, so the key
+ *  can send the tip the human actually saw with the merge. */
+export function MergePreview({ cardId, refresh, onShown }: {
+  cardId: string; refresh: string; onShown: (tip: string | null) => void;
+}) {
   const [read, setRead] = useState<Read>({ kind: "loading" });
   // null until the first read decides the default; after that it is the
   // human's, and a re-read never folds a list they opened.
@@ -24,8 +28,9 @@ export function MergePreview({ cardId, refresh }: { cardId: string; refresh: str
     let alive = true;
     void fetchMergePreview(cardId).then((r) => {
       if (!alive) return;
-      if ("error" in r) { setRead({ kind: "error", message: r.error }); return; }
+      if ("error" in r) { setRead({ kind: "error", message: r.error }); onShown(null); return; }
       setRead({ kind: "preview", preview: r.preview });
+      onShown(r.preview.tip || null);
       setOpen((o) => o ?? startsOpen(r.preview));
     });
     return () => { alive = false; };
