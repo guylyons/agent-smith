@@ -1,9 +1,9 @@
 import { test, expect } from "bun:test";
 import {
   createFight, stepFight, resizeFight, stillFight, mulberry32, particleColor, gap, flameRange,
-  SCENARIOS, type World,
+  gratesFor, GRATE_W, SCENARIOS, type World,
 } from "../src/ui/fight";
-import { RIP_FRAMES, XENO_FRAMES, RIP_MUZZLE } from "../src/ui/fight-sprites";
+import { RIP_FRAMES, XENO_FRAMES, TECH_FRAMES, RIP_MUZZLE } from "../src/ui/fight-sprites";
 
 const DT = 1 / 60;
 
@@ -17,7 +17,7 @@ function runUntil(w: World, done: (w: World) => boolean, secs = 60): boolean {
 }
 
 test("every sprite frame is a rectangle with a color for every letter", () => {
-  for (const f of [...Object.values(RIP_FRAMES), ...Object.values(XENO_FRAMES)]) {
+  for (const f of [...Object.values(RIP_FRAMES), ...Object.values(XENO_FRAMES), ...Object.values(TECH_FRAMES)]) {
     expect(f.rows).toHaveLength(f.h);
     for (const row of f.rows) {
       expect(row).toHaveLength(f.w);
@@ -103,4 +103,26 @@ test("flame cools from white-hot to red as it ages", () => {
   expect(particleColor(p).color).toBe("#fff8e0");
   expect(particleColor({ ...p, age: 0.6 }).color).toBe("#f2561d");
   expect(particleColor({ ...p, age: 0.99 }).alpha).toBeLessThan(0.1);
+});
+
+test("grates sit on the strip at every width", () => {
+  for (const width of [90, 170, 400, 700]) {
+    const gs = gratesFor(width);
+    expect(gs.length).toBeGreaterThan(0);
+    for (const g of gs) { expect(g).toBeGreaterThanOrEqual(0); expect(g + GRATE_W).toBeLessThanOrEqual(width); }
+  }
+});
+
+test("in a grate round it comes up through an open grate, from below the deck", () => {
+  const w = createFight(400, 32, mulberry32(4), { only: "grate", quick: true });
+  expect(runUntil(w, (w) => w.xeno.present && w.xeno.y > 0 && w.openGrate >= 0, 20)).toBe(true);
+});
+
+test("the tech bolts when it shows, and is back at his console once it's quiet", () => {
+  const w = createFight(400, 32, mulberry32(6), { only: "flee" });
+  expect(w.tech.state).toBe("work");
+  expect(runUntil(w, (w) => w.tech.state === "flee", 20)).toBe(true);
+  expect(runUntil(w, (w) => w.tech.state === "gone", 20)).toBe(true);
+  expect(runUntil(w, (w) => w.tech.state === "work", 30)).toBe(true);
+  expect(w.tech.x).toBe(w.tech.home);
 });

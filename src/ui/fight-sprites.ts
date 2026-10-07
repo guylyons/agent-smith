@@ -176,6 +176,114 @@ export const XENO_DEAD = frame(XENO, [
   ".OOOOOOOOOOOOOOOOOOOOO",
 ]);
 
+// The tech at his console: one of the Nostromo's engineers, in the crew's
+// ball cap and tan jacket (the "dallas" body in sprite-alien.ts), drawn facing
+// right toward his screen. He sits typing, then runs, arms up, when it shows.
+const TECH = {
+  O: "#1a1410", E: "#1a1410",
+  S: "#f0c6a0", s: "#d49f79",
+  A: "#4a5a7a", a: "#6a7a9a",
+  H: "#5a3a22",
+  J: "#b8a888", j: "#8c7e60", L: "#cabda0", P: "#c8402a",
+  k: "#7c6e52", B: "#3a2a1e",
+};
+
+const TECH_HEAD = [
+  "...OOOOO",
+  "..OAAaAAO",
+  "..OAAAAAAOO",
+  "..OHSSSSO",
+  "..OHSSESO",
+  "..OHSSSSO",
+  "...OHHsO",
+  "...OOSO",
+];
+
+const TECH_SIT = (hand: string[]) => frame(TECH, [
+  ...TECH_HEAD,
+  "..OLJJJO",
+  ...hand,
+  ".OJJJJJJO",
+  ".OkkkkkkkkO",
+  ".OkkkkkkkkO",
+  "..OOOOOOkO",
+  ".......OkO",
+  ".......OBBO",
+  ".......OOOO",
+]);
+
+export const TECH_SIT_A = TECH_SIT([
+  ".OLJJJJJOOO",
+  ".OJJPJjJJJSO",
+  ".OJJJJJOOOO",
+]);
+
+export const TECH_SIT_B = TECH_SIT([
+  ".OLJJJJJOOSO",
+  ".OJJPJjJJJO",
+  ".OJJJJJOOO",
+]);
+
+export const TECH_RUN_A = frame(TECH, [
+  ".OSO.......OSO",
+  ".OSO.OOOOO.OSO",
+  "..OSOAAaAAOOSO",
+  "..OOAAAAAAOOSO",
+  "...OHSSSSOOJO",
+  "...OHSSESOJJO",
+  "...OHSSOSJJO",
+  "....OHHsOJO",
+  "...OLJJJJJO",
+  "...OLJJJJO",
+  "...OJJPJJO",
+  "...OJJJJJO",
+  "...OkkkkkO",
+  "..OkkO.OkkO",
+  ".OkkO...OkkO",
+  ".OkO.....OkO",
+  "OBBO.....OBBO",
+  "OOOO.....OOOO",
+]);
+
+export const TECH_RUN_B = frame(TECH, [
+  "...OSO....OSO",
+  "...OSOOOOOOSO",
+  "...OSAAaAAOSO",
+  "...OAAAAAAOOSO",
+  "...OHSSSSOOJO",
+  "...OHSSESOJJO",
+  "...OHSSOSJJO",
+  "....OHHsOJO",
+  "...OLJJJJJO",
+  "...OLJJJJO",
+  "...OJJPJJO",
+  "...OJJJJJO",
+  "...OkkkkkO",
+  "....OkkkO",
+  "....OkOkO",
+  "...OkO.OkO",
+  "..OBBO.OBBO",
+  "..OOOO.OOOO",
+]);
+
+// Creeping back once it's quiet: arms down, a smaller step.
+const TECH_WALK = (legs: string[]) => frame(TECH, [
+  ...TECH_HEAD,
+  "..OLJJJO",
+  ".OLJJJJJO",
+  ".OJJPJJJO",
+  ".OJSJJJJO",
+  ".OOSJJJJO",
+  "..OkkkkkO",
+  ...legs,
+]);
+export const TECH_WALK_A = TECH_WALK(["..OkkOkkO", ".OkkO.OkO", ".OkO..OkO", "OBBO..OBBO", "OOOO..OOOO"]);
+export const TECH_WALK_B = TECH_WALK(["...OkkkO", "...OkOkO", "...OkOkO", "..OBBOBBO", "..OOOOOOO"]);
+
+export const TECH_FRAMES = {
+  sitA: TECH_SIT_A, sitB: TECH_SIT_B, runA: TECH_RUN_A, runB: TECH_RUN_B, walkA: TECH_WALK_A, walkB: TECH_WALK_B,
+};
+
 export const RIP_FRAMES = { stand: RIP_STAND, step: RIP_STEP, brace: RIP_BRACE };
 export const XENO_FRAMES = {
   walkA: XENO_WALK_A, walkB: XENO_WALK_B, shriek: XENO_SHRIEK, leap: XENO_LEAP, dead: XENO_DEAD,

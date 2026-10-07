@@ -1,8 +1,8 @@
 // Drawing the fight strip: the corridor, the two sprites, the fire and the
 // motion tracker, onto a 2D canvas from a fight.ts World. Split from
 // FightStrip.tsx so the component only owns the loop and its lifecycle.
-import { muzzle, particleColor, type World } from "./fight";
-import { RIP_FRAMES, XENO_FRAMES, type Frame } from "./fight-sprites";
+import { muzzle, particleColor, GRATE_W, type World } from "./fight";
+import { RIP_FRAMES, XENO_FRAMES, TECH_FRAMES, type Frame } from "./fight-sprites";
 
 export interface Scene { w: number; h: number; px: number; bg: HTMLCanvasElement; shade: HTMLCanvasElement; font: string; }
 
@@ -20,6 +20,7 @@ const PIPE = "#1c2332", PIPE_HI = "#2c3548";
 const DECK = "#1b2130", DECK_DOT = "#2a3347", DECK_EDGE = "#3a4560";
 const HAZARD = "#6b5317";
 const TRACKER = "#7fe07f";
+const GRATE = "#5d6a88";
 
 export function makeScene(w: number, h: number, px: number): Scene {
   const floor = h - 3;
@@ -114,14 +115,55 @@ export function drawFight(ctx: CanvasRenderingContext2D, w: World, sc: Scene, ca
     ctx.globalCompositeOperation = "source-over";
   }
 
-  // The xenomorph.
+  // Floor grates; an open one is a black hole with its lid flipped up.
+  w.grates.forEach((gx, i) => {
+    ctx.fillStyle = "#000"; ctx.fillRect(gx, w.floor, GRATE_W, sc.h - w.floor);
+    ctx.fillStyle = GRATE;
+    ctx.fillRect(gx - 1, w.floor, 1, sc.h - w.floor); ctx.fillRect(gx + GRATE_W, w.floor, 1, sc.h - w.floor);
+    if (i === w.openGrate) {
+      // The lid, flipped up on its hinge.
+      ctx.fillRect(gx - 1, w.floor - 6, 1, 6);
+    } else {
+      for (let b = gx + 1; b < gx + GRATE_W; b += 2) ctx.fillRect(b, w.floor, 1, sc.h - w.floor);
+    }
+  });
+
+  // The tech's console and stool, and the tech.
+  const k = w.tech, kx = k.home + 12;
+  ctx.fillStyle = PIPE; ctx.fillRect(kx + 1, w.floor - 17, 8, 8);
+  ctx.fillStyle = "#0c2a14"; ctx.fillRect(kx + 2, w.floor - 16, 6, 5);
+  ctx.fillStyle = TRACKER;
+  for (let row = 0; row < 3; row++) {
+    const len = 1 + ((Math.floor(w.t * (k.state === "work" ? 5 : 1)) + row * 3) % 5);
+    ctx.fillRect(kx + 2, w.floor - 15 + row * 1.5, len, 0.5);
+  }
+  ctx.fillStyle = PIPE_HI; ctx.fillRect(kx, w.floor - 9, 10, 1);
+  ctx.fillStyle = PIPE; ctx.fillRect(kx + 1, w.floor - 8, 1, 8); ctx.fillRect(kx + 8, w.floor - 8, 1, 8);
+  ctx.fillRect(k.home + 2, w.floor - 5, 5, 1); ctx.fillRect(k.home + 4, w.floor - 4, 1, 4); ctx.fillRect(k.home + 2, w.floor - 1, 5, 1);
+  const tf = k.state === "work"
+    ? (Math.floor(w.t * 7) % 3 ? "sitA" : "sitB")
+    : k.state === "flee" ? (Math.floor(k.t * 12) % 2 ? "runA" : "runB")
+    : (Math.floor(k.t * 6) % 2 ? "walkA" : "walkB");
+  if (k.state !== "gone") {
+    const f = TECH_FRAMES[tf];
+    const hop = k.state === "flee" && k.t < 0.15 ? 2 : 0;
+    ctx.drawImage(sprite(cache, `t-${tf}`, f, k.dir === -1, ""), Math.round(k.x), w.floor - f.h - hop);
+    if (k.state === "flee" && k.t < 0.7) {
+      ctx.fillStyle = "#ffd166"; ctx.font = sc.font;
+      ctx.fillText("!", Math.round(k.x) + 5, w.floor - f.h - 2);
+    }
+  }
+
+  // The xenomorph; below the deck while it's coming up through a grate.
   const x = w.xeno;
   if (x.present) {
     const f = XENO_FRAMES[x.frame];
     const hot = x.burn > 0 && Math.floor(w.t * 14) % 2 === 0;
+    ctx.save();
+    if (x.y > 0) { ctx.beginPath(); ctx.rect(-10, -10, sc.w + 20, w.floor + 10); ctx.clip(); }
     ctx.globalAlpha = Math.max(0, x.fade);
     ctx.drawImage(sprite(cache, `x-${x.frame}`, f, x.face === 1, hot ? "hot" : ""), Math.round(x.x), Math.round(w.floor - f.h + x.y));
-    ctx.globalAlpha = 1;
+    ctx.restore();
   }
 
   // Ripley.

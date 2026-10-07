@@ -7,6 +7,9 @@
 // and `floor` is the line everyone's feet stand on.
 import { RIP_FRAMES, XENO_FRAMES, RIP_MUZZLE, type RipFrame, type XenoFrame } from "./fight-sprites";
 
+/** How wide a floor grate is, in art pixels. */
+export const GRATE_W = 16;
+
 export type Rng = () => number;
 
 /** A small seeded PRNG, so a test (or the reduced-motion still) replays exactly. */
@@ -42,7 +45,15 @@ export interface Xeno {
   fade: number;
 }
 
-export const SCENARIOS = ["flee", "ash", "leap", "sputter", "drop"] as const;
+/** The tech at his console, who wants no part of any of this. */
+export interface Tech {
+  x: number; home: number; dir: 1 | -1;
+  state: "work" | "flee" | "gone" | "back";
+  /** Seconds in this state. */
+  t: number;
+}
+
+export const SCENARIOS = ["flee", "ash", "leap", "sputter", "drop", "grate"] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 
 export interface World {
@@ -51,7 +62,9 @@ export interface World {
   range: number;
   /** Which side the xenomorph comes from this round. */
   side: 1 | -1;
-  rip: Ripley; xeno: Xeno;
+  rip: Ripley; xeno: Xeno; tech: Tech;
+  /** Left edges of the floor grates, and which one is open (-1 none). */
+  grates: number[]; openGrate: number;
   parts: Particle[];
   fires: { x: number; life: number; max: number }[];
   /** Screen shake, in pixels; decays on its own. */
@@ -80,6 +93,8 @@ export function createFight(w: number, h: number, rng: Rng, opts: FightOpts = {}
     w, h, floor: h - 3, t: 0, range: flameRange(w), side: 1,
     rip: { x: Math.round(w * 0.2), dir: 1, frame: "stand", firing: false, power: 1, sputter: false, fireT: 0, walkT: 0, hurt: 0, vx: 0, jitter: 0 },
     xeno: { present: false, x: w + 10, y: 0, vy: 0, face: -1, frame: "walkA", walkT: 0, burn: 0, dead: false, fade: 1 },
+    tech: { x: techHome(w), home: techHome(w), dir: 1, state: "work", t: 0 },
+    grates: gratesFor(w), openGrate: -1,
     parts: [], fires: [], shake: 0, tracker: 0, scenario: "patrol", rounds: 0, rng, opts, beat: null,
   };
   return world;
@@ -89,7 +104,20 @@ export function createFight(w: number, h: number, rng: Rng, opts: FightOpts = {}
 export function resizeFight(world: World, w: number, h: number): void {
   world.w = w; world.h = h; world.floor = h - 3; world.range = flameRange(w);
   world.rip.x = clamp(world.rip.x, 2, Math.max(2, w - RIP_W - 2));
+  world.grates = gratesFor(w);
+  if (world.openGrate >= world.grates.length) world.openGrate = -1;
+  world.tech.home = techHome(w);
+  if (world.tech.state === "work") world.tech.x = world.tech.home;
 }
+
+/** One grate per ~120px of corridor, spread evenly. */
+export function gratesFor(w: number): number[] {
+  const n = Math.max(1, Math.round(w / 120));
+  return Array.from({ length: n }, (_, i) => Math.round(((i + 0.5) * w) / n - GRATE_W / 2));
+}
+
+/** Where the tech's stool sits; his console is just to the right of it. */
+export function techHome(w: number): number { return clamp(Math.round(w * 0.62), 4, Math.max(4, w - 26)); }
 
 export function flameRange(w: number): number { return clamp(Math.round(w * 0.3), 36, 64); }
 
@@ -294,6 +322,84 @@ function xenoDrop(landGap: number): Beat {
   };
 }
 
+/** Where the xenomorph stands to come up through grate `i`, centred on it. */
+function overGrate(w: World, i: number, frame: XenoFrame): number {
+  return w.grates[i] + GRATE_W / 2 - XENO_FRAMES[frame].w / 2;
+}
+
+/** Pop its head up out of grate `i`, look about, and drop back down. */
+function xenoPeek(i: number, s: number): Beat {
+  let t = 0;
+  const h = XENO_FRAMES.shriek.h;
+  return (w, dt) => {
+    const x = w.xeno;
+    if (t === 0) {
+      Object.assign(x, { present: true, burn: 0, dead: false, fade: 1, frame: "shriek", y: h, vy: 0, x: overGrate(w, i, "shriek") });
+      x.face = x.x + XENO_FRAMES.shriek.w / 2 > w.rip.x + RIP_W / 2 ? -1 : 1;
+      w.rip.dir = x.face === -1 ? 1 : -1;
+      w.openGrate = i;
+    }
+    t += dt;
+    // Up in a quarter second, a look round, down in a fifth.
+    const up = Math.min(1, t / 0.25), down = Math.max(0, (t - 0.25 - s) / 0.2);
+    x.y = h - 9 * up + 9 * Math.min(1, down);
+    if (down >= 1) { x.present = false; x.y = 0; w.openGrate = -1; return true; }
+    return false;
+  };
+}
+
+/** Burst all the way up out of grate `i`. */
+function xenoEmerge(i: number): Beat {
+  let t = 0;
+  const h = XENO_FRAMES.shriek.h;
+  return (w, dt) => {
+    const x = w.xeno;
+    if (t === 0) {
+      Object.assign(x, { present: true, burn: 0, dead: false, fade: 1, frame: "shriek", y: h, vy: 0, x: overGrate(w, i, "shriek"), face: w.side === 1 ? -1 : 1 });
+      w.openGrate = i; w.shake = Math.max(w.shake, 1);
+    }
+    t += dt;
+    x.y = h * (1 - Math.min(1, t / 0.45));
+    if (t >= 0.45) {
+      x.y = 0; x.frame = "walkA"; x.x = overGrate(w, i, "walkA"); w.openGrate = -1;
+      w.shake = Math.max(w.shake, 2); dust(w, x.x + XENO_FRAMES.walkA.w / 2, 8);
+      return true;
+    }
+    return false;
+  };
+}
+
+/** Bolt for the nearest grate on its way out and drop through it; with none
+ *  that way, just run for it. */
+function xenoDive(): Beat {
+  let gi: number | null = null;
+  let run: Beat | null = null;
+  return (w, dt) => {
+    const x = w.xeno;
+    if (gi === null) {
+      const cx = x.x + XENO_FRAMES[x.frame].w / 2;
+      const ahead = w.grates
+        .map((g, i) => ({ i, d: (g + GRATE_W / 2 - cx) * w.side }))
+        .filter((o) => o.d >= -4)
+        .sort((a, b) => a.d - b.d);
+      gi = ahead.length ? ahead[0].i : -1;
+      if (gi < 0) run = xenoFlee();
+    }
+    if (run) return run(w, dt);
+    const tx = overGrate(w, gi, "walkA");
+    if (x.y === 0 && Math.abs(tx - x.x) > 0.5) {
+      x.face = tx > x.x ? 1 : -1;
+      x.x += Math.sign(tx - x.x) * Math.min(Math.abs(tx - x.x), 150 * dt);
+      xenoWalk(x, 12, dt);
+      return false;
+    }
+    x.x = tx; x.frame = "walkA"; w.openGrate = gi;
+    x.y += 80 * dt;
+    if (x.y >= XENO_FRAMES.walkA.h) { x.present = false; x.y = 0; w.openGrate = -1; return true; }
+    return false;
+  };
+}
+
 /** The tail catches her: a flash, a shove backwards, a jolt. */
 const tailHit = act((w) => {
   w.rip.hurt = 0.35; w.rip.vx = -w.rip.dir * 70; w.shake = Math.max(w.shake, 3);
@@ -301,13 +407,16 @@ const tailHit = act((w) => {
 });
 
 /** The ending of a torching: it either runs for it or goes down. */
-const finish = (w: World): Beat => (w.rng() < 0.5 ? xenoFlee() : xenoDie());
+const finish = (w: World): Beat => {
+  const k = w.rng();
+  return k < 0.3 ? xenoFlee() : k < 0.55 ? xenoDive() : xenoDie();
+};
 
 function round(w: World): Beat {
   const rng = w.rng;
   const r = (a: number, b: number) => a + rng() * (b - a);
   const kind = w.opts.only ?? SCENARIOS[Math.floor(rng() * SCENARIOS.length)];
-  const side: 1 | -1 = rng() < 0.7 ? 1 : -1;
+  let side: 1 | -1 = rng() < 0.7 ? 1 : -1;
   const quick = !!w.opts.quick;
   const range = w.range;
 
@@ -315,7 +424,15 @@ function round(w: World): Beat {
   const room = range + XENO_FRAMES.walkA.w + 8;
   const lo = side === 1 ? 4 : Math.min(room, w.w - RIP_W - 4);
   const hi = side === 1 ? Math.max(4, w.w - RIP_W - room) : w.w - RIP_W - 4;
-  const stand = Math.round(lo + rng() * Math.max(0, hi - lo));
+  let stand = Math.round(lo + rng() * Math.max(0, hi - lo));
+  // Up through the floor: she stands a flame's reach from the grate it'll
+  // come out of, on whichever side there's room.
+  const gi = Math.floor(rng() * w.grates.length);
+  if (kind === "grate") {
+    const xw = XENO_FRAMES.walkA.w, gx = overGrate(w, gi, "walkA"), want = range * 0.7;
+    side = gx - want - RIP_W >= 4 ? 1 : -1;
+    stand = Math.round(clamp(side === 1 ? gx - want - RIP_W : gx + xw + want, 4, w.w - RIP_W - 4));
+  }
   // Now and then it comes from behind and she has to whip round.
   const behind = side === -1 && rng() < 0.6;
 
@@ -368,6 +485,17 @@ function round(w: World): Beat {
         all(ripFire(1.9), seq(wait(0.3), xenoPose("shriek", 0.5, 1), finish(w))),
       );
       break;
+    case "grate": {
+      // It tries a grate or two first, sizing her up.
+      const peeks = w.grates.map((_, i) => i).filter((i) => i !== gi && (w.grates[i] + GRATE_W < stand - 2 || w.grates[i] > stand + RIP_W + 2));
+      const tries = (peeks.length ? peeks : [gi]).sort(() => rng() - 0.5).slice(0, 2);
+      fight = seq(
+        ...tries.flatMap((i) => [xenoPeek(i, r(0.4, 0.9)), wait(quick ? 0 : r(0.4, 1))]),
+        turn, xenoEmerge(gi), xenoPose("shriek", 0.5, 1),
+        all(ripFire(1.9), seq(wait(0.3), xenoPose("shriek", 0.5, 1), finish(w))),
+      );
+      break;
+    }
   }
   return seq(intro, fight, wait(quick ? 0 : r(0.8, 1.6)), act((w) => { w.rounds++; w.scenario = "patrol"; }));
 }
@@ -495,9 +623,44 @@ export function stepFight(w: World, dt: number): void {
     if (rng() < dt * 14 * (f.life / f.max + 0.2)) spawn(w, "flame", f.x + (rng() - 0.5) * 4, w.floor - 1, (rng() - 0.5) * 6, -12 - rng() * 12, 0.25 + rng() * 0.2, 1);
   }
 
+  stepTech(w, dt);
+
   w.shake *= Math.exp(-9 * dt);
   if (w.shake < 0.05) w.shake = 0;
   w.tracker = Math.max(0, w.tracker - dt);
+}
+
+/** The tech: types away until the tracker pings or something shows, then he's
+ *  off out the far end of the corridor, and creeps back once it's quiet. */
+function stepTech(w: World, dt: number) {
+  const k = w.tech, x = w.xeno;
+  // The tracker's ping sends him from his desk; once he's up, only the thing
+  // itself keeps him away.
+  const seen = x.present && !x.dead, threat = w.tracker > 0 || seen;
+  const bolt = () => {
+    k.state = "flee"; k.t = 0;
+    k.dir = x.present ? (k.x + 6 < x.x + XENO_FRAMES[x.frame].w / 2 ? -1 : 1) : (-w.side as 1 | -1);
+  };
+  k.t += dt;
+  switch (k.state) {
+    case "work": k.x = k.home; k.dir = 1; if (threat) bolt(); break;
+    case "flee":
+      k.x += k.dir * 80 * dt;
+      if (k.x < -16 || k.x > w.w + 4) { k.state = "gone"; k.t = 0; }
+      break;
+    case "gone":
+      if (seen) k.t = 0;
+      else if (k.t > 1.5) { k.state = "back"; k.t = 0; k.x = k.dir === 1 ? w.w + 2 : -14; k.dir = k.dir === 1 ? -1 : 1; }
+      break;
+    case "back": {
+      if (seen) { bolt(); break; }
+      const d = k.home - k.x;
+      k.dir = d > 0 ? 1 : -1;
+      k.x += Math.sign(d) * Math.min(Math.abs(d), 45 * dt);
+      if (Math.abs(d) < 0.5) { k.state = "work"; k.t = 0; }
+      break;
+    }
+  }
 }
 
 /** A single frame to show instead of the animation under reduced motion:
