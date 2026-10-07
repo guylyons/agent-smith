@@ -406,7 +406,7 @@
   }
 
   /* ---- header ---- */
-  header{max-width:var(--page-w);margin:0 auto 20px;display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap}
+  #root > header{max-width:var(--page-w);margin:0 auto 20px;display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap}
   .head-main{flex:1;min-width:260px;position:relative}
 
   /* ---- notification center ---- */
@@ -707,14 +707,6 @@
   /* The repo filter: pushed right, before the scrum button. Gold while it hides
      cards, so a filtered board never passes for the whole one. */
   .line-repo{margin-left:auto;display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--dim);min-width:0}
-  .line-repo select{
-    font-family:var(--mono);font-size:13px;min-width:0;max-width:22ch;cursor:pointer;
-    color:var(--bone);background:var(--night);
-    border:2px solid var(--bevel);border-radius:var(--radius-sm);padding:4px 4px;
-  }
-  .line-repo select:hover{border-color:var(--gold)}
-  .line-repo select:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
-  .line-repo select.is-on{border-color:var(--gold);color:var(--gold)}
   .col-count{margin:0;font-family:var(--mono);font-size:12px;color:var(--dim);padding:0 5px}
   /* The scrum master card: its own colour on the border, a tint over the face
      and a badge, so the one orchestrator card never reads as a ticket. Hover
@@ -740,7 +732,7 @@
   @media (max-width:720px){
     body{padding:14px 12px 28px}
     .title{font-size:16px}
-    header{gap:12px}
+    #root > header{gap:12px}
     /* The usage meter is ambient, not actionable — it goes first when space is short. */
     .usage{display:none}
     .statline{gap:10px}
@@ -835,12 +827,19 @@
 .settings-body{padding:16px;display:flex;flex-direction:column;gap:6px}
 .settings-label{font-size:13px;color:var(--gold);letter-spacing:.5px;margin-top:12px}
 .settings-row{display:flex;flex-wrap:wrap;gap:6px}
-.settings-select{
-  align-self:flex-start;min-width:220px;max-width:100%;cursor:pointer;
-  font-family:var(--mono);font-size:15px;
-  color:var(--bone);background:var(--night);border:2px solid var(--bevel);padding:7px 8px;
+/* Every field dropdown shares one look; each component sets only its size.
+   (.col-stage, the inline stage picker in a column head, is deliberately bare.) */
+.settings-select,.cardmodal-select,.newagent-select,.line-repo select,.mood-kind-select,.mood-card-select{
+  font-family:var(--mono);font-size:15px;cursor:pointer;max-width:100%;
+  color:var(--bone);background:var(--night);border:2px solid var(--bevel);padding:6px 8px;
 }
-.settings-select:focus-visible{outline:none;border-color:var(--gold)}
+:is(.settings-select,.cardmodal-select,.newagent-select,.line-repo select,.mood-kind-select,.mood-card-select):hover:not(:focus){border-color:var(--gold)}
+:is(.settings-select,.cardmodal-select,.newagent-select,.line-repo select,.mood-kind-select,.mood-card-select):focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+.settings-select{align-self:flex-start;min-width:220px}
+/* sits beside .reply-input fields, so it takes their padding */
+.newagent-select{padding:5px 7px}
+.line-repo select{font-size:13px;min-width:0;max-width:22ch;padding:5px 8px}
+.line-repo select.is-on{border-color:var(--gold);color:var(--gold)}
 .settings-hint{font-size:13px;color:var(--dim);line-height:1.8;margin-top:6px}
 
 /* ---- selectable 2D-art backgrounds ---- */
@@ -1033,7 +1032,8 @@ body{background:transparent}
 
 /* drawer tabs — raised, tactile buttons rather than flat segments. Each sits in
    its own bordered cap with a bottom bevel so it reads as pressable; the active
-   tab looks pushed in (inset shadow + nudged down) and glows gold. */
+   tab looks pushed in (inset shadow) and glows gold. It stays on the same
+   baseline as its neighbour; a nudge down pushed it through the bar's rule. */
 .drawer-tabs{display:flex;gap:6px;padding:8px 8px 0;border-bottom:var(--rule)}
 .drawer-tabs .tab{
   flex:1;font-family:var(--mono);font-size:14px;font-weight:600;letter-spacing:.5px;
@@ -1044,7 +1044,7 @@ body{background:transparent}
 .drawer-tabs .tab:hover{color:var(--bone);border-color:var(--gold)}
 .drawer-tabs .tab.on{
   background:var(--box);color:var(--gold);border-color:var(--gold);
-  box-shadow:inset 0 2px 4px rgba(0,0,0,.45);transform:translateY(2px)}
+  box-shadow:inset 0 2px 4px rgba(0,0,0,.45)}
 .drawer-tabs .tab:active{transform:translateY(3px);box-shadow:none}
 
 /* INFO tab */
@@ -1254,12 +1254,7 @@ body{background:transparent}
 .archivedmodal-value{font-family:var(--mono);font-size:15px;color:var(--bone)}
 .cardmodal-row{display:flex;flex-direction:column;gap:7px}
 .cardmodal-label{font-size:13px;letter-spacing:.5px;color:var(--dim);text-transform:uppercase}
-.cardmodal-select{
-  align-self:flex-start;min-width:200px;max-width:100%;cursor:pointer;
-  font-family:var(--mono);font-size:15px;
-  color:var(--bone);background:var(--night);border:2px solid var(--bevel);padding:7px 8px;
-}
-.cardmodal-select:focus{outline:none;border-color:var(--gold)}
+.cardmodal-select{align-self:flex-start;min-width:200px}
 /* The repo label: sized like the selects above it, a short name not prose. */
 .cardmodal-repo{
   align-self:flex-start;width:280px;max-width:100%;box-sizing:border-box;
@@ -1569,7 +1564,6 @@ body{background:transparent}
 /* new-agent modal: model/permission-mode option row (added for STOP/options work) */
 .newagent-opts{display:flex;flex-wrap:wrap;gap:14px;margin-top:2px}
 .newagent-opt{flex:1 1 180px;min-width:0;display:flex;flex-direction:column;gap:2px}
-.newagent-select{cursor:pointer}
 
 /* ---- quick-find command palette (Cmd+P) ---- */
 .palette-backdrop{position:fixed;inset:0;z-index:90;background:rgba(4,8,18,.6);display:flex;justify-content:center;align-items:flex-start}
@@ -1802,7 +1796,7 @@ body{background:transparent}
   width:100%;box-sizing:border-box;font-family:var(--mono);font-size:15px;
   color:var(--bone);background:var(--night);border:2px solid var(--bevel);padding:7px 8px;
 }
-.memory-input:focus-visible,.memory-scope:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+.memory-input:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
 .memory-scope{min-width:0}
 .memory-count{margin-top:4px}
 .memory-error{display:flex;gap:8px;align-items:center;font-family:var(--mono);font-size:13px;color:var(--clay)}
@@ -2208,7 +2202,6 @@ button:not(:disabled):active{transform:translateY(1px)}
   .palette-input:hover:not(:focus),
   .cardmodal-title:hover:not(:focus),
   .cardmodal-desc:hover:not(:focus),
-  .cardmodal-select:hover:not(:focus),
   .comment-input:hover:not(:focus){border-color:var(--edge-roll)}
   .add-card:hover:not(:focus){color:var(--bone)}
 
@@ -2294,8 +2287,7 @@ button:not(:disabled):active{transform:translateY(1px)}
 .mood-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .mood-zoom{display:inline-flex;gap:4px}
 .mood-zoom-pct{min-width:58px}
-.mood-kind-select,.mood-card-select{font-family:var(--mono);font-size:13px;letter-spacing:.5px;cursor:pointer;
-  background:var(--box-lo);color:var(--bone);border:2px solid var(--bevel);padding:5px 6px;max-width:100%}
+.mood-kind-select,.mood-card-select{font-size:13px;letter-spacing:.5px;background:var(--box-lo);padding:5px 8px}
 .mood-card-select{flex:1;min-width:0}
 
 .mood-viewport{
