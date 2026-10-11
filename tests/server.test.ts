@@ -1771,3 +1771,78 @@ test("GET / serves dist/index.html once built", async () => {
     server.stop(true);
   }
 });
+
+// @mentions: a comment naming a live agent reaches it too, reply expected, and
+// the sender is told who got it and which names matched nobody.
+const DALLAS = { id: "dallas-1a2b", name: "DALLAS" };
+const DALLAS_S = "3333bbbb-1111-4222-8333-444455556666";
+
+async function mentionSetup() {
+  const env = await reassignSetup();
+  writeFileSync(join(dir, `${DALLAS_S}.json`), valid({ sessionId: DALLAS_S, state: "idle", crew: DALLAS }));
+  return env;
+}
+
+test("a mention reaches the named live agent, reply expected, and unknown names are reported", async () => {
+  const { server, post, sent, cardId } = await mentionSetup();
+  const r = (await (await post("/action/card-comment", { cardId, as: "assignee", crew: RIPLEY.id, text: "@dallas is the /card shape stable? cc @BOB" })).json()) as any;
+  expect(r.ok).toBe(true);
+  expect(r.mentions).toEqual([{ mention: "dallas", name: "DALLAS", sessionId: DALLAS_S, via: "typed" }]);
+  expect(r.unmatched).toEqual(["BOB"]);
+  const toD = sent.filter((s) => s.sessionId === DALLAS_S);
+  expect(toD.length).toBe(1);
+  const t = toD[0]!.text;
+  expect(t.startsWith("[THE LINE] RIPLEY mentioned you")).toBe(true);
+  expect(t).toContain("is the /card shape stable?");
+  expect(t).toContain("reply expected");
+  expect(t).toContain(cardId);
+  expect(t).toContain('"author":"DALLAS"');
+  expect(t).toContain(`"crew":"${DALLAS.id}"`);
+  expect(t).toContain("does not make you");
+  expect(/^[\x00-\x7f]*$/.test(t)).toBe(true);
+  // The usual audience is unchanged: the scrum master once, the author never.
+  expect(sent.filter((s) => s.sessionId === SCRUM).length).toBe(1);
+  expect(sent.filter((s) => s.sessionId === WORKER).length).toBe(0);
+  server.stop(true);
+});
+
+test("nobody gets a mentioned comment twice, and the author is not woken by their own mention", async () => {
+  const { server, post, sent, cardId } = await mentionSetup();
+  const r = (await (await post("/action/card-comment", { cardId, author: "You", text: "@RIPLEY @ripley-3f2a @cadence-0001 @DALLAS @Dallas @You" })).json()) as any;
+  expect(sent.filter((s) => s.sessionId === WORKER).length).toBe(1);
+  expect(sent.filter((s) => s.sessionId === SCRUM).length).toBe(1);
+  expect(sent.filter((s) => s.sessionId === DALLAS_S).length).toBe(1);
+  expect(r.mentions).toEqual([
+    { mention: "RIPLEY", name: "RIPLEY", sessionId: WORKER, via: "already" },
+    { mention: "cadence-0001", name: "CADENCE", sessionId: SCRUM, via: "already" },
+    { mention: "DALLAS", name: "DALLAS", sessionId: DALLAS_S, via: "typed" },
+  ]);
+  expect(r.unmatched).toEqual(["You"]);
+  sent.length = 0;
+  const self = (await (await post("/action/card-comment", { cardId, author: "DALLAS", crew: DALLAS.id, text: "@DALLAS note to self" })).json()) as any;
+  expect(self.mentions).toEqual([{ mention: "DALLAS", name: "DALLAS", sessionId: DALLAS_S, via: "self" }]);
+  expect(sent.filter((s) => s.sessionId === DALLAS_S).length).toBe(0);
+  server.stop(true);
+});
+
+test("a mentioned agent's reply, signed as the notice says, lands on a card other crews were taken off", async () => {
+  const { server, post, sent, cardId } = await mentionSetup();
+  await post("/action/card-assign", { cardId, sessionId: WORKER2 }); // RIPLEY taken off, BISHOP on
+  const ask = (await (await post("/action/card-comment", { cardId, as: "assignee", crew: BISHOP.id, text: "@DALLAS @RIPLEY which endpoint?" })).json()) as any;
+  // RIPLEY was taken off this card: its reply would be refused, so it is not asked.
+  expect(ask.mentions).toEqual([
+    { mention: "DALLAS", name: "DALLAS", sessionId: DALLAS_S, via: "typed" },
+    { mention: "RIPLEY", name: "RIPLEY", sessionId: WORKER, via: "removed" },
+  ]);
+  sent.length = 0;
+  const reply = await post("/action/card-comment", { cardId, author: "DALLAS", crew: DALLAS.id, text: "@BISHOP use /card" });
+  expect(reply.status).toBe(200);
+  const card = readSnapshot(dir, Date.now()).board.cards.find((k) => k.id === cardId)!;
+  expect(card.comments!.at(-1)!.author).toBe("DALLAS");
+  expect(card.assignee!.crew).toBe(BISHOP.id); // replying did not take the card
+  expect(sent.filter((s) => s.sessionId === WORKER2).length).toBe(1);
+  expect(sent.filter((s) => s.sessionId === DALLAS_S).length).toBe(0);
+  // The crew that really was taken off is still refused.
+  expect((await post("/action/card-comment", { cardId, author: "RIPLEY", crew: RIPLEY.id, text: "me too" })).status).toBe(409);
+  server.stop(true);
+});

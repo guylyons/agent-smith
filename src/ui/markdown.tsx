@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { splitMentions } from "../lib/mentions";
 
 // Small, dependency-free markdown renderer for chat message text.
 // Never uses dangerouslySetInnerHTML — builds React elements directly from
@@ -42,6 +43,12 @@ export function imageSrc(raw: string): string | null {
   return base ? "/uploads/" + encodeURIComponent(base) : null;
 }
 
+/** Plain text with each @mention as a chip. The chip keeps its "@NAME" text,
+ *  so it reads as a mention without the colour. */
+function renderPlain(text: string): ReactNode[] {
+  return splitMentions(text).map((p) => (p.mention ? <span key={nextKey()} className="mention">{p.text}</span> : p.text));
+}
+
 /** Render inline markdown (image/bold/italic/code) within a single line of text. */
 function renderInline(text: string): ReactNode[] {
   const out: ReactNode[] = [];
@@ -50,7 +57,7 @@ function renderInline(text: string): ReactNode[] {
   let last = 0;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text))) {
-    if (m.index > last) out.push(text.slice(last, m.index));
+    if (m.index > last) out.push(...renderPlain(text.slice(last, m.index)));
     const chunk = m[0];
     if (chunk.startsWith("![")) {
       const cut = chunk.indexOf("](");
@@ -72,7 +79,7 @@ function renderInline(text: string): ReactNode[] {
     }
     last = re.lastIndex;
   }
-  if (last < text.length) out.push(text.slice(last));
+  if (last < text.length) out.push(...renderPlain(text.slice(last)));
   return out;
 }
 
