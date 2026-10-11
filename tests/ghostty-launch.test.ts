@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
 import { readFileSync } from "node:fs";
-import { buildLaunchInput, asStr, workerPermissionSettings, freshTaskInput, ALLOWED_PERMISSION_MODES } from "../src/ghostty";
-import type { Persona } from "../src/lib/personas";
+import { buildLaunchInput, asStr, workerPermissionSettings, freshTaskInput, ALLOWED_PERMISSION_MODES, ALLOWED_MODELS } from "../src/ghostty";
+import { loadPersonas, type Persona } from "../src/lib/personas";
 
 const P: Persona = {
   id: "frontend-ux", name: "PIXEL", role: "Frontend UX",
@@ -40,6 +40,26 @@ test("model and permission mode are allowlisted", () => {
     .toBe("claude --model opus --permission-mode plan 't'\n");
   expect(buildLaunchInput("t", { model: "evil; rm -rf /", permissionMode: "nope" }, null))
     .toBe("claude 't'\n");
+});
+
+test("the model allowlist is the claude CLI's family aliases", () => {
+  expect([...ALLOWED_MODELS].sort()).toEqual(["fable", "haiku", "opus", "sonnet"]);
+});
+
+test("the New Agent dialog only offers allowlisted models", () => {
+  const src = readFileSync(new URL("../src/ui/NewAgentModal.tsx", import.meta.url), "utf8");
+  const select = src.slice(src.indexOf('id="na-model"'), src.indexOf("</select>", src.indexOf('id="na-model"')));
+  const values = [...select.matchAll(/<option value="([^"]*)"/g)].map((m) => m[1]).filter((v) => v !== "");
+  expect(values.sort()).toEqual([...ALLOWED_MODELS].sort());
+});
+
+// The spawn path passes `model ?? persona.model` (src/server.ts spawnAgent).
+test("each shipped persona launches on its own model", () => {
+  const shipped = loadPersonas();
+  expect(shipped.length).toBe(5);
+  for (const p of shipped) {
+    expect(buildLaunchInput("t", { model: p.model }, p)).toContain(`claude --model ${p.model} --append-system-prompt `);
+  }
 });
 
 test("a persona adds the env var and the system prompt", () => {

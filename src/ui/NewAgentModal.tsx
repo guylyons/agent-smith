@@ -196,6 +196,7 @@ export function NewAgentModal({
             <label className="pix newagent-label" htmlFor="na-model">MODEL</label>
             <select id="na-model" className="reply-input newagent-select" value={model} onChange={(e) => setModel(e.target.value)}>
               <option value="">{personaModel ? `Default (${personaModel})` : "Default"}</option>
+              <option value="fable">Fable</option>
               <option value="opus">Opus</option>
               <option value="sonnet">Sonnet</option>
               <option value="haiku">Haiku</option>

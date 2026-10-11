@@ -37,7 +37,7 @@ const PersonaMetaSchema = z.object({
   // The model this role launches on when the launcher does not pick one.
   // Mirrors ALLOWED_MODELS in src/ghostty.ts (which imports this module, so
   // it cannot be imported here).
-  model: z.enum(["opus", "sonnet", "haiku"]).optional(),
+  model: z.enum(["fable", "opus", "sonnet", "haiku"]).optional(),
 });
 
 export type Persona = z.infer<typeof PersonaMetaSchema> & { prompt: string };

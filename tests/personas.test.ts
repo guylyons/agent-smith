@@ -4,6 +4,7 @@ import { mkdirSync, rmSync, writeFileSync, readFileSync, utimesSync } from "node
 import { join } from "node:path";
 import { parsePersona, loadPersonas, getPersona, composePrompt, composeIdentityPrompt, spawnName, PERSONA_ID_RE } from "../src/lib/personas";
 import { ROSTER } from "../src/lib/crew";
+import { ALLOWED_MODELS } from "../src/ghostty";
 
 const dir = fixtureDir("personas-test");
 function reset() { rmSync(dir, { recursive: true, force: true }); mkdirSync(dir, { recursive: true }); }
@@ -125,9 +126,22 @@ test("each shipped persona has its own roster name and a fixed look", () => {
   expect(new Set(shipped.map((p) => p.sprite!.body)).size).toBe(shipped.length);
 });
 
-test("editor and release manager launch on sonnet", () => {
-  expect(getPersona("editor")!.model).toBe("sonnet");
-  expect(getPersona("release-manager")!.model).toBe("sonnet");
+// The model each shipped role launches on. README.md (Personas) says why.
+test("every shipped persona sets its model", () => {
+  const models = Object.fromEntries(loadPersonas().map((p) => [p.id, p.model]));
+  expect(models).toEqual({
+    "scrum-master": "opus",
+    "backend-dev": "opus",
+    "frontend-ux": "opus",
+    "editor": "sonnet",
+    "release-manager": "sonnet",
+  });
+});
+
+test("the persona schema takes every model the launcher allows", () => {
+  for (const m of ALLOWED_MODELS) {
+    expect<string | undefined>(parsePersona(GOOD.replace("skills:", `model: ${m}\nskills:`), "frontend-ux")!.model).toBe(m);
+  }
 });
 
 test("a persona's model must be one the launcher allows", () => {

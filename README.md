@@ -442,11 +442,32 @@ Five ship with the app:
 
 | persona | name | plays | model | reaches for |
 | --- | --- | --- | --- | --- |
-| `scrum-master` | DALLAS | owns THE LINE: splits work into cards, staffs and watches them | default | `task-review`, `superpowers:writing-plans` |
-| `backend-dev` | VASQUEZ | data, state, server correctness, test-first | default | `superpowers:test-driven-development`, `superpowers:systematic-debugging` |
-| `frontend-ux` | RIPLEY | what the user sees and touches | default | `superpowers:brainstorming`, `run` |
+| `scrum-master` | DALLAS | owns THE LINE: splits work into cards, staffs and watches them | opus | `task-review`, `superpowers:writing-plans` |
+| `backend-dev` | VASQUEZ | data, state, server correctness, test-first | opus | `superpowers:test-driven-development`, `superpowers:systematic-debugging` |
+| `frontend-ux` | RIPLEY | what the user sees and touches | opus | `superpowers:brainstorming`, `run` |
 | `editor` | BISHOP | prose, docs, changelogs, release notes, UI copy | sonnet | `superpowers:requesting-code-review` |
 | `release-manager` | APONE | readiness checks, merge order, release notes; lands nothing without you | sonnet | `superpowers:verification-before-completion`, `superpowers:finishing-a-development-branch` |
+
+Why each role runs on the model it does (the aliases follow each family's
+latest; in October 2026 that is Opus 5.5 at $4 / $20 per million tokens in /
+out, Sonnet 5.5 at $2 / $10, Haiku 5.5 at $0.10 / $0.50, Fable 5.1 at $10 / $50):
+
+| persona | model | why |
+| --- | --- | --- |
+| `scrum-master` | opus | Scoping, splitting and checking other agents' work is judgement, and a bad brief is paid for by every agent that gets it. It writes little, so the dearer model costs little here. |
+| `backend-dev` | opus | Long multi-file edits and root-cause debugging. A wrong fix costs more than the 2x price over Sonnet. |
+| `frontend-ux` | opus | Multi-file UI work plus judging the rendered page across states and widths. |
+| `editor` | sonnet | Bounded prose edits checked against the code. Sonnet does these well, faster, at half the price. |
+| `release-manager` | sonnet | Runs a fixed list of checks and writes a report; little open-ended reasoning. |
+
+When to override (pick **MODEL** in the dialog, or `"model"` in a spawn):
+
+- `fable` for the hardest, longest work: a refactor across many modules, or a
+  bug two attempts have failed on. 2.5x the price of Opus and slower per turn.
+- `sonnet` for a dev role on a small, well-specified card (a copy change, a
+  one-file fix) where speed matters more than depth.
+- `haiku` for mechanical, throwaway jobs only. No role defaults to it: each
+  one's report is something you act on.
 
 They live in `personas/` — one markdown file each, YAML frontmatter plus a prompt
 body. Edit one, or drop in your own; the file's `id` must match its filename. A
@@ -469,7 +490,7 @@ You are the editor on this team. …
 under; leave it out and each spawn draws a random roster name. `sprite:`
 (`{ body, palette, gear }`, with `body` one of the characters in the sprite
 picker) pins the role's look; without one the desk wears its name's character.
-`model:` (`opus`, `sonnet` or `haiku`) is the model the role launches on when
+`model:` (`fable`, `opus`, `sonnet` or `haiku`) is the model the role launches on when
 **MODEL** is left at Default — picking one in the dialog still wins.
 
 Two limits worth knowing. Claude Code skills are model-invoked, so `skills:`
