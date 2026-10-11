@@ -3,7 +3,7 @@ import { isDoneColumn, finishesCard, type Board } from "../lib/board";
 
 // Which cue to play. Kept separate from the WebAudio synth (sounds.ts) so this
 // transition logic stays pure and unit-testable.
-export type SoundCue = "completion" | "question" | "permission" | "move" | "celebrate";
+export type SoundCue = "completion" | "question" | "permission" | "move" | "celebrate" | "merge";
 
 // Per-agent state carried between snapshots, keyed by session id.
 export type PrevState = Map<string, AgentStatus["state"]>;

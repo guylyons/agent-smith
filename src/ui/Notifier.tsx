@@ -4,6 +4,7 @@ import { soundTransitions, boardMoves, isCompletion, finishedAssignees, type Pre
 import { signalDying, subscribeDying, dyingMs } from "./dying";
 import { playCue, playTubeOff } from "./sounds";
 import { toast } from "./toast";
+import { landsMerge } from "../lib/notifications";
 
 function notify(name: string, waitingReason: "permission" | "question" | "plan" | undefined, doing: string) {
   try {
@@ -63,7 +64,8 @@ export function Notifier({ snap, enabled }: { snap: Snapshot; enabled: boolean }
         toast(`🎉 ${move.title} — done!`);
         if (enabled) playCue("celebrate");
       } else if (enabled) {
-        playCue("move");
+        // A merge gets the shift log's tube blip in place of the move tick.
+        playCue(landsMerge(snap.board, move.from, move.to) ? "merge" : "move");
       }
     }
 

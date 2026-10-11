@@ -105,6 +105,8 @@ export const KEYS = {
   face: "aw-face",
   // The Ripley-vs-xenomorph strip over THE LINE; ships on (see FightStrip.tsx).
   fight: "aw-fight",
+  // The shift log ticker under the header; ships on (see ShiftLog.tsx).
+  shiftLog: "aw-shift-log",
   drawerWidth: "aw-drawer-w",
   drawerFont: "aw-drawer-font",
   // JSON array of repo folders, most recent first — see recentFolders.ts.
