@@ -8,6 +8,7 @@ import { paletteFor } from "./sprite-data";
 import { focusSession, killAgent } from "./actions";
 import { subscribeFlash } from "./flash";
 import { subscribeDying, dyingMs } from "./dying";
+import { inStateFor, isStaleIdle } from "./inState";
 
 // The specific thing a waiting session needs, instead of a generic WAITING —
 // a permission prompt is a one-click, a question needs an answer, a plan needs
@@ -17,21 +18,6 @@ const WAIT_LABEL: Record<string, string> = {
   question: "ASKING YOU",
   plan: "PLAN REVIEW",
 };
-
-// Compact "how long it's been in this state": <1m, 12m, 3h, 2d. Empty when the
-// hook/scanner hasn't stamped stateSince yet (old status file).
-function inStateFor(stateSince: number | undefined, now: number): string {
-  if (!stateSince) return "";
-  const m = Math.floor((now - stateSince) / 60_000);
-  if (m < 1) return "<1m";
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h`;
-  return `${Math.floor(h / 24)}d`;
-}
-
-// Dim a desk that's been idle this long — still present, visibly dormant.
-const STALE_IDLE_MS = 30 * 60_000;
 
 const stop = (e: MouseEvent) => e.stopPropagation();
 
@@ -113,7 +99,7 @@ const AgentCard = memo(function AgentCard({ a, onCard, ticket, asking, unread, d
   const [confirmKill, setConfirmKill] = useState(false);
   const now = Date.now();
   const dur = inStateFor(a.stateSince, now);
-  const stale = a.state === "idle" && !!a.stateSince && now - a.stateSince > STALE_IDLE_MS;
+  const stale = isStaleIdle(a, now);
   const stateLabel = a.state === "waiting"
     ? WAIT_LABEL[a.waitingReason ?? ""] ?? "NEED YOU"
     : a.state.toUpperCase();

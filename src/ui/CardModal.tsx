@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from "react";
+import { useEffect, useId, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
 import type { AgentStatus } from "../schema";
 import type { Board, Card } from "../lib/board";
 import type { Assignee } from "../lib/board";
@@ -20,6 +20,7 @@ import { cardRef } from "../lib/ticket";
 import type { CardFocus } from "./nav";
 import { findLiveAssignee, sendTaskReadiness } from "../lib/sendTaskReady";
 import { knownRepos, normaliseRepo, type KnownRepo } from "./repoFilter";
+import { mentionQuery, mentionOptions, applyMention, type MentionQuery, type MentionOption } from "./mentionComplete";
 
 /** What the New Agent dialog starts with when a card asks for an agent, beyond
  *  its task: a persona to preselect and the folder to launch in. */
@@ -92,14 +93,15 @@ export function staffingGate(board: Board, cardId: string): { enabled: boolean; 
 }
 
 /** One line on where a posted comment went, from the server's delivery report. */
-export function deliveryToast(delivery: Delivery[]): string {
+export function deliveryToast(delivery: Delivery[], unmatched: string[] = []): string {
+  const nobody = unmatched.length ? ` - no live agent named ${unmatched.map((u) => `@${u}`).join(", ")}` : "";
   const typed = delivery.filter((d) => d.via === "typed").map((d) => d.name);
   const queued = delivery.filter((d) => d.via === "queued").map((d) => d.name);
-  if (!typed.length && !queued.length) return "No running agent to notify - comment saved";
-  if (!typed.length) return `Queued for ${queued.join(", ")} (busy) - lands when its turn ends`;
+  if (!typed.length && !queued.length) return `No running agent to notify - comment saved${nobody}`;
+  if (!typed.length) return `Queued for ${queued.join(", ")} (busy) - lands when its turn ends${nobody}`;
   const parts = [`Notified ${typed.join(", ")}`];
   if (queued.length) parts.push(`queued for ${queued.join(", ")} (busy)`);
-  return parts.join("; ");
+  return parts.join("; ") + nobody;
 }
 
 /** A live agent as the card stores it: its session, plus its crew id so the
@@ -258,7 +260,7 @@ export function CardModal({
       // The human replying is what clears an open question (the server does
       // the same), so the flag drops the moment they post.
       (b) => setAsk(addComment(b, card.id, ME, text), card.id, null),
-      () => { void addCommentAction(card.id, text).then((delivery) => toast(deliveryToast(delivery))); },
+      () => { void addCommentAction(card.id, text).then((r) => toast(deliveryToast(r.delivery, r.unmatched))); },
     );
   }
 
@@ -267,6 +269,50 @@ export function CardModal({
   // is often the whole point.
   const commentBody = [comment.trim(), ...commentImgs.map((i) => imageMarkdown(i.name, i.path))]
     .filter(Boolean).join("\n\n");
+
+  // @ autocomplete in the comment box: the @word under the caret, the live
+  // agents it could name, and which one the arrows have highlighted. Focus
+  // stays in the textarea; aria-activedescendant names the highlighted row.
+  const [mention, setMention] = useState<MentionQuery | null>(null);
+  const [mentionSel, setMentionSel] = useState(0);
+  const mentionListId = useId();
+  const mentionOpts = mention ? mentionOptions(mention.query, agents) : [];
+  const mentionOpen = mentionOpts.length > 0;
+  const mentionActive = Math.min(mentionSel, mentionOpts.length - 1);
+
+  function syncMention(el: HTMLTextAreaElement) {
+    const q = el.selectionStart === el.selectionEnd ? mentionQuery(el.value, el.selectionStart) : null;
+    if (q?.start !== mention?.start || q?.query !== mention?.query) setMentionSel(0);
+    setMention(q);
+  }
+
+  function pickMention(opt: MentionOption) {
+    const el = commentRef.current;
+    if (!el || !mention) return;
+    const r = applyMention(comment, mention, el.selectionStart, opt.insert);
+    setComment(r.text);
+    setMention(null);
+    requestAnimationFrame(() => { el.focus(); el.setSelectionRange(r.caret, r.caret); });
+  }
+
+  function commentKey(e: KeyboardEvent<HTMLTextAreaElement>) {
+    if (mentionOpen) {
+      const n = mentionOpts.length;
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        setMentionSel((mentionActive + (e.key === "ArrowDown" ? 1 : n - 1)) % n);
+        return;
+      }
+      if ((e.key === "Enter" && !e.metaKey && !e.ctrlKey && !e.shiftKey) || (e.key === "Tab" && !e.shiftKey)) {
+        e.preventDefault();
+        pickMention(mentionOpts[mentionActive]!);
+        return;
+      }
+      // Closes the list only: the card stays open (Backdrop skips a handled Esc).
+      if (e.key === "Escape") { e.preventDefault(); setMention(null); return; }
+    }
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); post(); }
+  }
 
   function post() {
     if (!commentBody) return;
@@ -557,16 +603,45 @@ export function CardModal({
             </div>
 
             <div className="comment-compose">
-              <textarea
-                ref={commentRef}
-                className="comment-input"
-                value={comment}
-                placeholder="Write a comment…  (⌘↵ to post · paste or drop an image)"
-                onFocus={() => setTarget("comment")}
-                onChange={(e) => setComment(e.target.value)}
-                onPaste={pasteInto("comment")}
-                onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); post(); } }}
-              />
+              <div className="comment-inputwrap">
+                <textarea
+                  ref={commentRef}
+                  className="comment-input"
+                  value={comment}
+                  placeholder="Write a comment…  (⌘↵ to post · @ to ask a teammate · paste or drop an image)"
+                  aria-label="Comment"
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-haspopup="listbox"
+                  aria-controls={mentionListId}
+                  aria-expanded={mentionOpen}
+                  aria-activedescendant={mentionOpen ? `${mentionListId}-${mentionActive}` : undefined}
+                  onFocus={() => setTarget("comment")}
+                  onChange={(e) => { setComment(e.target.value); syncMention(e.target); }}
+                  onSelect={(e) => syncMention(e.currentTarget)}
+                  onBlur={() => setMention(null)}
+                  onPaste={pasteInto("comment")}
+                  onKeyDown={commentKey}
+                />
+                <div className="mention-list" id={mentionListId} role="listbox" aria-label="Mention a teammate" hidden={!mentionOpen}>
+                  {mentionOpts.map((o, i) => (
+                    <div
+                      key={o.key}
+                      id={`${mentionListId}-${i}`}
+                      role="option"
+                      aria-selected={i === mentionActive}
+                      className={`mention-opt${i === mentionActive ? " on" : ""}`}
+                      // mousedown, not click: a click would blur the textarea
+                      // (closing the list) before it landed.
+                      onMouseDown={(e) => { e.preventDefault(); pickMention(o); }}
+                      onMouseMove={() => setMentionSel(i)}
+                    >
+                      <span className="mention-opt-name">@{o.insert}</span>
+                      {(o.label !== o.insert || o.hint) && <span className="mention-opt-hint">{o.hint ?? o.label}</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
               <ImageStrip
                 images={commentImgs.map((i) => ({ token: i.path, alt: i.name, src: i.path }))}
                 onRemove={(path) => setCommentImgs((list) => list.filter((i) => i.path !== path))}
