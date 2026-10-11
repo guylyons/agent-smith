@@ -2442,11 +2442,12 @@ body:has(#root > .game){display:flex;flex-direction:column;padding-bottom:0}
 /* no room above (top of the map): hang it under the sprite instead */
 .game-tag[data-below]{bottom:auto;top:100%;transform:translate(calc(-50% + var(--tag-dx,0px)),8px)}
 /* Touch screens can't hover, so every sprite carries its name underneath;
-   the full tag still opens on focus. */
+   the full tag still opens on focus. Rows are stepped (--name-row) so
+   neighbours' names don't cover each other. */
 .game-name{display:none}
 @media (hover:none){
-  .game-name{display:block;position:absolute;left:50%;top:100%;transform:translate(-50%,2px);
-    max-width:64px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  .game-name{display:block;position:absolute;left:50%;top:100%;transform:translate(-50%,calc(2px + var(--name-row,0) * 13px));
+    max-width:56px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
     font-size:10px;line-height:1.2;color:var(--bone);background:rgba(0,0,0,.7);padding:0 3px;pointer-events:none}
   .game-agent.is-waiting .game-name{color:var(--gold)}
 }

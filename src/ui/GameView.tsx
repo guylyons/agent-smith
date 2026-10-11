@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
 import type { AgentStatus } from "../schema";
 import type { Board } from "../lib/board";
 import { Sprite } from "./Sprite";
@@ -79,6 +79,10 @@ function RoomsOverlay() {
     </svg>
   );
 }
+
+/** Neighbours stand closer together than a name is wide, so the touch-only
+ *  name labels step down over three rows by spot. */
+const nameRow = (slot: number) => ({ "--name-row": slot % 3 }) as CSSProperties;
 
 const pct = (p: Pt) => ({ left: `${(p.x / MAP_W) * 100}%`, top: `${(p.y / MAP_H) * 100}%` });
 
@@ -176,8 +180,9 @@ export function GameView({ agents, board, onOpen, onOpenCard }: {
           )}
           {ordered.map((a) => {
             const p = at.get(agentKey(a));
-            const room = placed.get(agentKey(a))?.room;
-            if (!p || !room) return null;
+            const spot = placed.get(agentKey(a));
+            const room = spot?.room;
+            if (!p || !spot || !room) return null;
             const dur = inStateFor(a.stateSince, now);
             const state = `${stateText(a)}${dur ? ` · ${dur}` : ""}`;
             const label = `${a.name}, ${ROOMS[room].label.toLowerCase()}, ${stateText(a)}${dur ? ` for ${dur}` : ""}${a.doing ? `: ${a.doing}` : ""}`;
@@ -187,7 +192,7 @@ export function GameView({ agents, board, onOpen, onOpenCard }: {
                 onPointerEnter={fitTag} onFocus={fitTag}>
                 <Sprite sessionId={a.sessionId} role={a.role} name={a.name} state={a.state} override={a.sprite} />
                 {a.state === "waiting" && <span className="pix bubble" aria-hidden="true">{a.waitingReason === "question" ? "?" : "!"}</span>}
-                <span className="pix game-name" aria-hidden="true">{a.name}</span>
+                <span className="pix game-name" style={nameRow(spot.slot)} aria-hidden="true">{a.name}</span>
                 <span className="pix game-tag" aria-hidden="true"><b>{a.name} · {state}</b>{a.doing && <span>{a.doing}</span>}</span>
               </button>
             );
@@ -199,7 +204,7 @@ export function GameView({ agents, board, onOpen, onOpenCard }: {
               onClick={() => onOpenCard(s.cardId)} onPointerEnter={fitTag} onFocus={fitTag}>
               <Sprite sessionId={s.who.id} role="" name={s.who.name} state="idle" />
               <span className="pix game-z" aria-hidden="true">z</span>
-              <span className="pix game-name" aria-hidden="true">{s.who.name}</span>
+              <span className="pix game-name" style={nameRow(i)} aria-hidden="true">{s.who.name}</span>
               <span className="pix game-tag" aria-hidden="true"><b>{s.who.name}</b><span>asleep · session ended</span></span>
             </button>
           ))}
