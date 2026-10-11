@@ -321,3 +321,35 @@ function finished(board: Board, columnId: string): boolean {
 export function cargoCount(board: Board): number {
   return board.cards.filter((c) => finished(board, c.columnId)).length;
 }
+
+const TAB_RANK: Record<AgentStatus["state"], number> = { waiting: 0, working: 1, idle: 2 };
+
+/** The order the map's agents are rendered in, which is their Tab order:
+ *  whoever is waiting on you first, then working, then idle, each group in
+ *  snapshot order. Sleepers come after all of them. Drawing order is by
+ *  zIndex, so this changes only the keyboard and screen-reader order. */
+export function tabOrder<T extends Pick<AgentStatus, "state">>(agents: T[]): T[] {
+  return [...agents].sort((a, b) => TAB_RANK[a.state] - TAB_RANK[b.state]);
+}
+
+type Size = { w: number; h: number };
+
+/** Where to scroll a map drawn at `map` size inside a `view`-sized box so
+ *  `at` (in art pixels) is centred, clamped to the map's edges. With no point
+ *  it centres the map. An axis the map already fits on stays at 0. */
+export function scrollToShow(at: Pt | undefined, map: Size, view: Size): { left: number; top: number } {
+  const p = at ?? { x: MAP_W / 2, y: MAP_H / 2 };
+  const axis = (v: number, art: number, drawn: number, seen: number) =>
+    Math.round(Math.max(0, Math.min(drawn - seen, (v / art) * drawn - seen / 2)));
+  return { left: axis(p.x, MAP_W, map.w, view.w), top: axis(p.y, MAP_H, map.h, view.h) };
+}
+
+/** How far to slide a tag sideways so it sits inside the visible box with
+ *  `pad` px to spare: 0 when it already fits. A tag wider than the box keeps
+ *  its left edge in view. */
+export function nudgeInto(tag: { left: number; right: number }, box: { left: number; right: number }, pad = 4): number {
+  const min = box.left + pad, max = box.right - pad;
+  if (tag.left < min) return min - tag.left;
+  if (tag.right > max) return Math.max(max - tag.right, min - tag.left);
+  return 0;
+}
