@@ -167,7 +167,9 @@ export async function sendFreshPrompt(t: Target, text: string): Promise<ActionRe
   return r;
 }
 
-export const ALLOWED_MODELS = new Set(["opus", "sonnet", "haiku"]);
+/** The family aliases `claude --model` takes; each follows that family's
+ *  latest model, so nothing here needs a bump when one ships. */
+export const ALLOWED_MODELS = new Set(["fable", "opus", "sonnet", "haiku"]);
 /** The `--permission-mode` choices `claude --help` lists, less dontAsk (it
  *  denies anything not pre-approved, which stalls an agent working a card).
  *  "default" is no longer a listed choice; its name now is "manual". */
