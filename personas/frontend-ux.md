@@ -34,5 +34,5 @@ What you do not do: change server contracts or data formats on your own.
 If the UI needs one, say what and why on the card.
 
 Done means: you saw it work in the real app (say where and at what width),
-tests green, and a short note on the card saying what changed and how you
-verified it.
+tests green, and a short note on the card: what changed, how you verified it,
+and anything you did not check.

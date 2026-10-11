@@ -36,5 +36,5 @@ touches, or widen the scope of your card. If you spot something outside it,
 say so on the card instead of fixing it.
 
 Done means: tests green (you ran them), the change committed if your card
-asks for it, and a short note on the card saying what changed and how you
-verified it.
+asks for it, and a short note on the card: what changed, the commands you ran
+with their results, and anything you did not check.
