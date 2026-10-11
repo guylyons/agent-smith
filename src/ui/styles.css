@@ -448,6 +448,12 @@
     .shiftlog-item.merged.fresh .shiftlog-link{background:var(--gold);color:var(--on-accent)}
   }
   @media (max-width:720px){.shiftlog{margin-top:-4px}.shiftlog-tag{display:none}}
+  /* Three side by side leave a phone a few letters each: stack them instead. */
+  @media (max-width:720px){
+    .shiftlog.still{height:auto}
+    .shiftlog.still .shiftlog-group{flex-direction:column;gap:0}
+    .shiftlog.still .shiftlog-item{flex:none;max-width:100%}
+  }
 
   /* ---- notification center ---- */
   .notif{position:absolute;top:0;right:0;z-index:40}

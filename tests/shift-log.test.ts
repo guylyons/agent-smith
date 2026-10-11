@@ -17,12 +17,10 @@ const card = (columnId: string) => ({ id: "c1", num: 117, title: "Fix the thing"
 
 const n = (over: Partial<Notif>): Notif => ({ id: "x", kind: "move", at: 0, who: "", text: "", ...over });
 
-test("a move reads as who moved which card where", () => {
-  expect(shiftLogText(n({ kind: "move", who: "Dallas", text: "to Review", cardNum: 117 }))).toBe("DALLAS moved #117 to REVIEW");
-});
-
-test("an unassigned move leaves the mover out rather than inventing one", () => {
-  expect(shiftLogText(n({ kind: "move", who: "", text: "to Done", cardNum: 9 }))).toBe("#9 moved to DONE");
+test("a move names the card and the column, never a mover", () => {
+  // The assignee is not the mover: the human does most moves and every merge.
+  expect(shiftLogText(n({ kind: "move", who: "Dallas", text: "to Review", cardNum: 117 }))).toBe("#117 → REVIEW");
+  expect(shiftLogText(n({ kind: "move", who: "", text: "to Done", cardNum: 9 }))).toBe("#9 → DONE");
 });
 
 test("a merge reads as MERGED", () => {
@@ -39,7 +37,7 @@ test("comments and asks carry a short one-line snippet", () => {
 });
 
 test("a card without a number falls back to its title", () => {
-  expect(shiftLogText(n({ kind: "move", who: "Ash", text: "to Review", cardTitle: "Tidy" }))).toBe('ASH moved "Tidy" to REVIEW');
+  expect(shiftLogText(n({ kind: "move", who: "Ash", text: "to Review", cardTitle: "Tidy" }))).toBe('"Tidy" → REVIEW');
 });
 
 test("clock time is HH:MM, zero-padded, local", () => {
@@ -75,7 +73,7 @@ test("diffNotifications marks a merge and carries the card number", () => {
   expect(out[0]).toMatchObject({ kind: "move", merged: true, cardNum: 117 });
   const plain = diffNotifications(snap(board([card("in-progress")])), snap(board([card("review")])), "You", 100);
   expect(plain[0]!.merged).toBeUndefined();
-  expect(shiftLogText(plain[0]!)).toBe("DALLAS moved #117 to REVIEW");
+  expect(shiftLogText(plain[0]!)).toBe("#117 → REVIEW");
 });
 
 test("the feed keeps board events only, newest first, capped", () => {

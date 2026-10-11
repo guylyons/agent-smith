@@ -34,19 +34,18 @@ function clip(s: string, max: number): string {
 }
 
 /** One event as the ticker reads it (without the time):
- *  "DALLAS moved #117 to REVIEW", "#118 MERGED", "KANE on #117: tests green",
+ *  "#117 → REVIEW", "#118 MERGED", "KANE on #117: tests green",
  *  "RIPLEY asks on #120: which port?". Names and columns in caps, like the rest
- *  of the header. The mover is the card's assignee: the snapshot does not say
- *  who dragged a card, and on this board it is nearly always the agent. */
+ *  of the header. A move names no mover: the snapshot does not say who moved a
+ *  card, and the human does most moves and every merge, so naming the card's
+ *  assignee (the event's `who`) would often be false. Comments and asks are
+ *  signed, so those do carry a name. */
 export function shiftLogText(n: Notif): string {
   const who = (n.who || "someone").toUpperCase();
   const card = cardLabel(n);
   switch (n.kind) {
-    case "move": {
-      if (n.merged) return `${card} MERGED`;
-      const to = n.text.replace(/^to /, "").toUpperCase();
-      return n.who ? `${who} moved ${card} to ${to}` : `${card} moved to ${to}`;
-    }
+    case "move":
+      return n.merged ? `${card} MERGED` : `${card} → ${n.text.replace(/^to /, "").toUpperCase()}`;
     case "comment":
       return `${who} on ${card}: ${clip(n.text, 60)}`;
     case "ask":

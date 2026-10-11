@@ -69,9 +69,11 @@ export function ShiftLog() {
     return () => ro.disconnect();
   }, [items.length, newest]);
 
-  // One run per new event: two passes, then rest. Focus ends the run.
+  // One run per new event: two passes, then rest. Focus ends the run, and no
+  // run starts while focus is inside: the item you tabbed to must not slide off.
+  const sectionRef = useRef<HTMLElement>(null);
   const [running, setRunning] = useState(false);
-  useEffect(() => { if (newest) setRunning(true); }, [newest]);
+  useEffect(() => { if (newest && !sectionRef.current?.contains(document.activeElement)) setRunning(true); }, [newest]);
   const moving = scroll && overflow && running;
 
   function onBlur(e: React.FocusEvent) {
@@ -97,14 +99,13 @@ export function ShiftLog() {
   );
 
   return (
-    <section className={`shiftlog${reduced ? " still" : ""}`} aria-label="Shift log" onFocus={() => setRunning(false)} onBlur={onBlur}>
+    <section className={`shiftlog${reduced ? " still" : ""}`} aria-label="Shift log" ref={sectionRef} onFocus={() => setRunning(false)} onBlur={onBlur}>
       <span className="pix shiftlog-tag" aria-hidden="true">SHIFT LOG</span>
       <div className="shiftlog-window" ref={windowRef}>
         {items.length === 0 ? (
           <p className="shiftlog-empty">Listening. Moves, merges and comments show up here as they happen.</p>
         ) : (
           <div
-            key={moving ? newest : "rest"}
             className={`shiftlog-track${moving ? " moving" : ""}`}
             style={{ "--shiftlog-dur": `${durSec}s` } as React.CSSProperties}
             onAnimationEnd={(e) => { if (e.target === e.currentTarget) setRunning(false); }}
