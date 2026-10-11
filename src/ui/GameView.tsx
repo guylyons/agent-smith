@@ -6,9 +6,9 @@ import mapUrl from "./nostromo.png";
 import { hashFlag } from "./view";
 import { inStateFor, isStaleIdle } from "./inState";
 import {
-  MAP_W, MAP_H, ROOMS, ROOM_IDS, placeAll, stepWalks, walkersAt, agentKey, spotFor, sleepers, cargoCount, roomsOverlay,
+  MAP_W, MAP_H, ROOMS, ROOM_IDS, placeAll, stepWalks, walkersAt, agentKey, sleepers, sleeperKey, cargoCount, roomsOverlay,
   tabOrder, scrollToShow, nudgeInto,
-  type Pt, type Placement, type Walk,
+  type Pt, type Placement, type Walk, type Sleeper,
 } from "./game";
 
 function prefersReducedMotion(): boolean {
@@ -17,7 +17,7 @@ function prefersReducedMotion(): boolean {
 
 /** Where everyone is drawn this frame. stepWalks does the bookkeeping on each
  *  new placement; this only ticks frames while someone is still walking. */
-function useWalkers(agents: AgentStatus[], placed: Map<string, Placement>, ready: boolean): Map<string, Pt> {
+function useWalkers(agents: AgentStatus[], placed: Map<string, Placement>, asleep: Sleeper[], ready: boolean): { walks: Map<string, Walk>; at: Map<string, Pt> } {
   const walks = useRef(new Map<string, Walk>());
   // Anyone on the map before the first real snapshot was already aboard; only
   // later arrivals come in through the airlock.
@@ -25,11 +25,11 @@ function useWalkers(agents: AgentStatus[], placed: Map<string, Placement>, ready
   const [now, setNow] = useState(() => performance.now());
 
   const current = useMemo(() => {
-    const next = stepWalks(walks.current, agents, placed, performance.now(), { reduceMotion: prefersReducedMotion(), primed: primed.current });
+    const next = stepWalks(walks.current, agents, placed, performance.now(), { reduceMotion: prefersReducedMotion(), primed: primed.current, asleep });
     walks.current = next;
     if (ready) primed.current = true;
     return next;
-  }, [agents, placed, ready]);
+  }, [agents, placed, asleep, ready]);
   const { at, moving } = walkersAt(current, now);
 
   // Tick frames only while someone is still walking.
@@ -38,7 +38,7 @@ function useWalkers(agents: AgentStatus[], placed: Map<string, Placement>, ready
     const id = requestAnimationFrame((ts) => setNow(ts));
     return () => cancelAnimationFrame(id);
   });
-  return at;
+  return { walks: current, at };
 }
 
 /** Is a debug flag on in the URL hash (#game?rooms=1)? Follows hash changes. */
@@ -148,8 +148,15 @@ export function GameView({ agents, board, onOpen, onOpenCard }: {
   lastPlaced.current = placed;
   // The pre-connect placeholder board has no columns; the server always sends some.
   const ready = board.columns.length > 0;
-  const at = useWalkers(agents, placed, ready);
   const asleep = useMemo(() => sleepers(board, agents), [board, agents]);
+  const { walks, at } = useWalkers(agents, placed, asleep, ready);
+  // How everyone on the map last looked, so someone walking out, or to a pod,
+  // keeps the sprite they had.
+  const looks = useRef(new Map<string, Pick<AgentStatus, "sessionId" | "role" | "name" | "sprite">>());
+  for (const s of asleep) if (!looks.current.has(sleeperKey(s))) looks.current.set(sleeperKey(s), { sessionId: s.who.id, role: "", name: s.who.name });
+  for (const a of agents) looks.current.set(agentKey(a), a);
+  for (const k of looks.current.keys()) if (!walks.has(k)) looks.current.delete(k);
+  const arrived = (k: string) => { const w = walks.get(k), p = at.get(k); return !!w && !!p && p.x === w.to.x && p.y === w.to.y; };
   const pods = ROOMS.hypersleep.spots.length;
   const cargo = cargoCount(board);
   const showRooms = useHashFlag("rooms");
@@ -197,17 +204,34 @@ export function GameView({ agents, board, onOpen, onOpenCard }: {
               </button>
             );
           })}
+          {[...walks.keys()].map((k) => {
+            // Session ended, still walking to the airlock or a pod: drawn, but
+            // nothing to click or tab to.
+            const p = at.get(k), look = looks.current.get(k);
+            if (!p || !look || placed.has(k) || arrived(k)) return null;
+            return (
+              <div key={k} className="game-agent is-leaving" style={{ ...pct(p), zIndex: Math.round(p.y) }} aria-hidden="true">
+                <Sprite sessionId={look.sessionId} role={look.role} name={look.name} state="idle" override={look.sprite} />
+              </div>
+            );
+          })}
           {/* After the agents, so Tab reaches everyone awake first. */}
-          {asleep.slice(0, pods).map((s, i) => (
-            <button key={s.who.crew ?? s.who.id} className="game-agent is-asleep" style={pct(spotFor("hypersleep", i))}
-              aria-label={`${s.who.name}, in hypersleep: session ended, still on a card. Open the card.`}
-              onClick={() => onOpenCard(s.cardId)} onPointerEnter={fitTag} onFocus={fitTag}>
-              <Sprite sessionId={s.who.id} role="" name={s.who.name} state="idle" />
-              <span className="pix game-z" aria-hidden="true">z</span>
-              <span className="pix game-name" style={nameRow(i)} aria-hidden="true">{s.who.name}</span>
-              <span className="pix game-tag" aria-hidden="true"><b>{s.who.name}</b><span>asleep · session ended</span></span>
-            </button>
-          ))}
+          {asleep.map((s) => {
+            // In its pod. On the walk there it is drawn above, with the leavers.
+            const k = sleeperKey(s), look = looks.current.get(k), p = at.get(k);
+            if (!look || !p || walks.get(k)?.room !== "hypersleep" || !arrived(k)) return null;
+            const pod = ROOMS.hypersleep.spots.findIndex((q) => q.x === p.x && q.y === p.y);
+            return (
+              <button key={k} className="game-agent is-asleep" style={pct(p)}
+                aria-label={`${s.who.name}, in hypersleep: session ended, still on a card. Open the card.`}
+                onClick={() => onOpenCard(s.cardId)} onPointerEnter={fitTag} onFocus={fitTag}>
+                <Sprite sessionId={look.sessionId} role={look.role} name={look.name} state="idle" override={look.sprite} />
+                <span className="pix game-z" aria-hidden="true">z</span>
+                <span className="pix game-name" style={nameRow(pod)} aria-hidden="true">{s.who.name}</span>
+                <span className="pix game-tag" aria-hidden="true"><b>{s.who.name}</b><span>asleep · session ended</span></span>
+              </button>
+            );
+          })}
           {!agents.length && ready && (
             <p className="pix game-empty">NO SESSIONS ABOARD · START ONE WITH + NEW AGENT</p>
           )}

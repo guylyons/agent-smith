@@ -230,9 +230,14 @@ export function pathBetween(from: RoomId, fromAt: Pt, to: RoomId, toAt: Pt): Pt[
   if (from === to) return [fromAt, toAt];
   const a = ROOMS[from], b = ROOMS[to];
   const va = viaFor(from, fromAt), vb = viaFor(to, toAt);
-  const pts: Pt[] = [fromAt, ...(va ? [va] : []), a.door, a.exit];
-  if (a.exit.y !== b.exit.y) pts.push({ x: TRUNK, y: a.exit.y }, { x: TRUNK, y: b.exit.y });
-  pts.push(b.exit, b.door, ...(vb ? [vb] : []), toAt);
+  const pts: Pt[] = [fromAt, ...(va ? [va] : []), a.door];
+  // Rooms off the same corridor point (the mess and hypersleep) go door to door.
+  if (a.exit.x !== b.exit.x || a.exit.y !== b.exit.y) {
+    pts.push(a.exit);
+    if (a.exit.y !== b.exit.y) pts.push({ x: TRUNK, y: a.exit.y }, { x: TRUNK, y: b.exit.y });
+    pts.push(b.exit);
+  }
+  pts.push(b.door, ...(vb ? [vb] : []), toAt);
   // Drop repeats (a door that is also the spot, a room whose exit is the trunk).
   return pts.filter((p, i) => i === 0 || p.x !== pts[i - 1]!.x || p.y !== pts[i - 1]!.y);
 }
@@ -294,23 +299,37 @@ export function pointAlong(path: Pt[], dist: number): Pt {
 // Walking speed, in map pixels per second: a cross-ship trip takes a few seconds.
 export const SPEED = 260;
 
-/** An agent's current walk: the path from where it was to its placement,
- *  begun at `start` (a performance.now() time). A walk that has arrived just
- *  stays at its end. */
+/** A walk: the path from where someone was to where they are going, begun at
+ *  `start` (a performance.now() time). A walk that has arrived just stays at
+ *  its end. `room` is where it ends: a live agent's room, "hypersleep" for a
+ *  sleeper (ended session, still on an open card) or "airlock" for someone on
+ *  the way out, who is gone once they get there. */
 export type Walk = { room: RoomId; to: Pt; path: Pt[]; len: number; start: number };
 
 /** Everyone's walks after a snapshot, keyed by agentKey. An agent whose
  *  placement is unchanged keeps its walk as it was. A change of room or spot
  *  starts a new walk from wherever it stands at `now`. A newcomer walks in
  *  from the airlock, unless nothing is `primed` yet (the first snapshot:
- *  everyone on it was already aboard) when it simply appears. With
- *  `reduceMotion` every walk is a jump. Agents gone from the list are dropped;
- *  one with no placement is skipped. `prev` is not changed. */
+ *  everyone on it was already aboard) when it simply appears. An agent with no
+ *  placement is skipped.
+ *
+ *  Departures mirror arrivals. Someone gone from the list who is in `asleep`
+ *  walks to the lowest free hypersleep pod and keeps that pod while they
+ *  sleep; a sleeper never seen awake simply lies in one. Anyone else gone
+ *  from the list (and a sleeper when every pod is taken) walks out to the
+ *  airlock and is dropped once there. Because a sleeper's walk stays in the
+ *  map, a session that comes back under the same key walks from its pod to
+ *  its room like any other move.
+ *
+ *  With `reduceMotion` every walk is a jump and leavers just go. `prev` is
+ *  not changed. */
 export function stepWalks(
   prev: Map<string, Walk>, agents: AgentStatus[], placements: Map<string, Placement>, now: number,
-  { reduceMotion, primed }: { reduceMotion: boolean; primed: boolean },
+  { reduceMotion, primed, asleep = [] }: { reduceMotion: boolean; primed: boolean; asleep?: Sleeper[] },
 ): Map<string, Walk> {
   const out = new Map<string, Walk>();
+  const here = (w: Walk) => pointAlong(w.path, (now - w.start) * SPEED / 1000);
+  const walk = (room: RoomId, to: Pt, path: Pt[]): Walk => ({ room, to, path, len: pathLength(path), start: now });
   for (const a of agents) {
     const k = agentKey(a);
     const p = placements.get(k);
@@ -319,28 +338,61 @@ export function stepWalks(
     if (w && w.room === p.room && w.to.x === p.at.x && w.to.y === p.at.y) { out.set(k, w); continue; }
     let path: Pt[];
     if (reduceMotion) path = [p.at];
-    else if (w) path = pathBetween(w.room, pointAlong(w.path, (now - w.start) * SPEED / 1000), p.room, p.at);
+    else if (w) path = pathBetween(w.room, here(w), p.room, p.at);
     else if (primed) path = pathBetween("airlock", spotFor("airlock", 0), p.room, p.at);
     else path = [p.at];
-    out.set(k, { room: p.room, to: p.at, path, len: pathLength(path), start: now });
+    out.set(k, walk(p.room, p.at, path));
+  }
+
+  // Sleepers already in a pod keep it; the rest take the lowest free one.
+  const pods = ROOMS.hypersleep.spots;
+  const taken = new Set<number>();
+  const fresh: string[] = [];
+  for (const k of asleep.map(sleeperKey)) {
+    if (out.has(k)) continue;
+    const w = prev.get(k);
+    const pod = w?.room === "hypersleep" ? pods.findIndex((p) => p.x === w.to.x && p.y === w.to.y) : -1;
+    if (pod >= 0 && !taken.has(pod)) { taken.add(pod); out.set(k, w!); }
+    else fresh.push(k);
+  }
+  for (const k of fresh) {
+    const pod = pods.findIndex((_, i) => !taken.has(i));
+    if (pod < 0) break;
+    taken.add(pod);
+    const w = prev.get(k), to = pods[pod]!;
+    out.set(k, walk("hypersleep", to, w && !reduceMotion ? pathBetween(w.room, here(w), "hypersleep", to) : [to]));
+  }
+
+  // Everyone else who was on the map heads for the airlock.
+  if (!reduceMotion) for (const [k, w] of prev) {
+    if (out.has(k)) continue;
+    if (w.room !== "airlock") {
+      const to = spotFor("airlock", 0);
+      out.set(k, walk("airlock", to, pathBetween(w.room, here(w), "airlock", to)));
+    } else if ((now - w.start) * SPEED / 1000 < w.len) out.set(k, w);
   }
   return out;
 }
 
 /** Where each walk has got to at `now`, and whether anyone is still moving
- *  (so the view knows to keep ticking frames). */
+ *  (so the view knows to keep ticking frames). Someone who has reached the
+ *  airlock on their way out is left off: they are gone. */
 export function walkersAt(walks: Map<string, Walk>, now: number): { at: Map<string, Pt>; moving: boolean } {
   const at = new Map<string, Pt>();
   let moving = false;
   for (const [k, w] of walks) {
     const d = (now - w.start) * SPEED / 1000;
     if (d < w.len) moving = true;
+    else if (w.room === "airlock") continue;
     at.set(k, pointAlong(w.path, d));
   }
   return { at, moving };
 }
 
 export type Sleeper = { who: Assignee; cardId: string };
+
+/** A sleeper's key on the map: the same one agentKey gave them awake. */
+export const sleeperKey = (s: Sleeper) => s.who.crew ?? s.who.id;
 
 /** People still named on an open card whose session has ended: the board
  *  remembers them, the fleet doesn't. Cards in a done column, or a column past

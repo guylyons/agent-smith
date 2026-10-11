@@ -407,13 +407,81 @@ test("stepWalks: with reduced motion every move is a jump", () => {
   expect(stepWalks(one, [busy], p2, 100, { reduceMotion: true, primed: true }).get("a")!.path).toEqual([p2.get("a")!.at]);
 });
 
-test("stepWalks: an agent that leaves is dropped", () => {
+const motion = { reduceMotion: false, primed: true };
+const POD = ROOMS.hypersleep.spots;
+
+test("stepWalks: an agent that leaves walks to the airlock, then is dropped", () => {
   const a = agent({ sessionId: "a", state: "idle" }), b = agent({ sessionId: "b", state: "idle" });
   const p1 = placeAll([a, b], board);
-  const one = stepWalks(new Map(), [a, b], p1, 0, { reduceMotion: false, primed: true });
+  const one = stepWalks(new Map(), [a, b], p1, 0, { reduceMotion: false, primed: false });
   const p2 = placeAll([b], board, p1);
-  const two = stepWalks(one, [b], p2, 100, { reduceMotion: false, primed: true });
-  expect([...two.keys()]).toEqual(["b"]);
+  const two = stepWalks(one, [b], p2, 100, motion);
+  const out = two.get("a")!;
+  expect(out.room).toBe("airlock");
+  expect(out.path[0]).toEqual(p1.get("a")!.at);
+  expect(out.path.at(-1)).toEqual(spotFor("airlock", 0));
+  expect(out.start).toBe(100);
+  // Still on the way: kept as it is, and drawn. There: not drawn, then dropped.
+  expect(stepWalks(two, [b], p2, 200, motion).get("a")).toBe(out);
+  expect(walkersAt(two, 200).at.has("a")).toBe(true);
+  const there = 100 + (out.len / 260) * 1000 + 1;
+  expect(walkersAt(two, there)).toEqual({ at: new Map([["b", p2.get("b")!.at]]), moving: false });
+  expect([...stepWalks(two, [b], p2, there, motion).keys()]).toEqual(["b"]);
+});
+
+test("stepWalks: a leaver who still holds an open card walks to the next free pod and stays", () => {
+  const a = crewAgent("s-a", "a-1", { state: "idle" });
+  const b = withCard("in-progress", { id: "s-a", name: "A", crew: "a-1" });
+  b.cards.unshift({ id: "c0", title: "T", columnId: "review", assignee: { id: "s-z", name: "Z", crew: "z-1" } });
+  const p1 = placeAll([a], b);
+  // Z was asleep on load: lying in pod 0, no walk.
+  const one = stepWalks(new Map(), [a], p1, 0, { reduceMotion: false, primed: false, asleep: sleepers(b, [a]) });
+  expect(one.get("z-1")).toMatchObject({ room: "hypersleep", to: POD[0]!, path: [POD[0]!] });
+  const two = stepWalks(one, [], new Map(), 100, { ...motion, asleep: sleepers(b, []) });
+  expect(two.get("z-1")).toBe(one.get("z-1")!);
+  const w = two.get("a-1")!;
+  expect(w.room).toBe("hypersleep");
+  expect(w.path[0]).toEqual(p1.get("a-1")!.at);
+  expect(w.to).toEqual(POD[1]!);
+  // Z's card is finished: Z walks out, A keeps pod 1 rather than shuffling up.
+  b.cards[0]!.columnId = "done";
+  const three = stepWalks(two, [], new Map(), 60_000, { ...motion, asleep: sleepers(b, []) });
+  expect(three.get("a-1")).toBe(w);
+  expect(three.get("z-1")!.room).toBe("airlock");
+});
+
+test("stepWalks: a sleeper whose session comes back walks from its pod to its room", () => {
+  const b = withCard("in-progress", { id: "old", name: "A", crew: "a-1" });
+  const one = stepWalks(new Map(), [], new Map(), 0, { reduceMotion: false, primed: false, asleep: sleepers(b, []) });
+  const back = crewAgent("new", "a-1", { state: "idle" });
+  const placed = placeAll([back], b);
+  const w = stepWalks(one, [back], placed, 100, { ...motion, asleep: sleepers(b, [back]) }).get("a-1")!;
+  expect(w.room).toBe("mess");
+  expect(w.path[0]).toEqual(POD[0]!);
+  expect(w.path.at(-1)).toEqual(placed.get("a-1")!.at);
+});
+
+test("stepWalks: with every pod taken, a leaver on a card goes out by the airlock", () => {
+  const b: Board = { ...board, cards: ["a", "b", "c", "d", "e", "f"].map((id) => ({ id: `c-${id}`, title: "T", columnId: "review", assignee: { id, name: id } })) };
+  const f = agent({ sessionId: "f", state: "idle" });
+  const one = stepWalks(new Map(), [f], placeAll([f], b), 0, { reduceMotion: false, primed: false, asleep: sleepers(b, [f]) });
+  const two = stepWalks(one, [], new Map(), 100, { ...motion, asleep: sleepers(b, []) });
+  expect(two.get("f")!.room).toBe("airlock");
+  expect([...two.values()].filter((w) => w.room === "hypersleep").map((w) => w.to)).toEqual(POD);
+});
+
+test("stepWalks: with reduced motion a leaver just goes, or is in its pod at once", () => {
+  const a = agent({ sessionId: "a", state: "idle" }), c = agent({ sessionId: "c", state: "idle" });
+  const b = withCard("in-progress", { id: "a", name: "A" });
+  const one = stepWalks(new Map(), [a, c], placeAll([a, c], b), 0, { reduceMotion: true, primed: true });
+  const two = stepWalks(one, [], new Map(), 100, { reduceMotion: true, primed: true, asleep: sleepers(b, []) });
+  expect([...two.keys()]).toEqual(["a"]);
+  expect(two.get("a")).toMatchObject({ room: "hypersleep", path: [POD[0]!], len: 0 });
+});
+
+test("pathBetween: the mess and hypersleep share a corridor point, so it is door to door", () => {
+  const p = pathBetween("mess", ROOMS.mess.spots[0]!, "hypersleep", POD[0]!);
+  expect(p).toEqual([ROOMS.mess.spots[0]!, ROOMS.mess.door, ROOMS.hypersleep.door, POD[0]!]);
 });
 
 test("stepWalks: an agent with no placement is skipped, not crashed on", () => {
