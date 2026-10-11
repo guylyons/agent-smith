@@ -4,7 +4,7 @@
 import { test, expect } from "bun:test";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
-import { roomFor, PERSONA_ROOM, spotFor, placeAll, stepWalks, walkersAt, agentKey, pathBetween, pathLength, pointAlong, sleepers, cargoCount, viaFor, roomsOverlay, ROOMS, ROOM_IDS, MAP_W, MAP_H } from "../src/ui/game";
+import { roomFor, PERSONA_ROOM, spotFor, placeAll, stepWalks, walkersAt, agentKey, pathBetween, pathLength, pointAlong, sleepers, cargoCount, viaFor, roomsOverlay, tabOrder, scrollToShow, nudgeInto, ROOMS, ROOM_IDS, MAP_W, MAP_H } from "../src/ui/game";
 import { viewFromHash, hashForView, hashFlag } from "../src/ui/view";
 import type { AgentStatus } from "../src/schema";
 import type { Board } from "../src/lib/board";
@@ -311,6 +311,44 @@ test("hashFlag: the ROOMS overlay is on only with rooms=1 after the page", () =>
   expect(hashFlag("#game?rooms=0", "rooms")).toBe(false);
   expect(hashFlag("#game?rooms", "rooms")).toBe(false);
   expect(hashFlag("#rooms=1", "rooms")).toBe(false);
+});
+
+test("tabOrder: waiting, then working, then idle, each in snapshot order", () => {
+  const list = [
+    agent({ sessionId: "i1", state: "idle" }),
+    agent({ sessionId: "w1", state: "working" }),
+    agent({ sessionId: "q1", state: "waiting" }),
+    agent({ sessionId: "i2", state: "idle" }),
+    agent({ sessionId: "q2", state: "waiting" }),
+    agent({ sessionId: "w2", state: "working" }),
+  ];
+  expect(tabOrder(list).map((a) => a.sessionId)).toEqual(["q1", "q2", "w1", "w2", "i1", "i2"]);
+  // The snapshot itself is left alone.
+  expect(list[0]!.sessionId).toBe("i1");
+  expect(tabOrder([])).toEqual([]);
+});
+
+test("scrollToShow: centres the point, clamped to the map; no point centres the map", () => {
+  const map = { w: 720, h: 480 }, view = { w: 390, h: 600 };
+  // A bridge spot: x 768 of 1536 is the map's middle.
+  expect(scrollToShow({ x: 768, y: 200 }, map, view)).toEqual({ left: 165, top: 0 });
+  // Far right (comms) clamps to the right edge, far left to 0.
+  expect(scrollToShow({ x: 1385, y: 262 }, map, view).left).toBe(720 - 390);
+  expect(scrollToShow({ x: 150, y: 262 }, map, view).left).toBe(0);
+  expect(scrollToShow(undefined, map, view)).toEqual({ left: 165, top: 0 });
+  // Taller than the box: scrolls down too.
+  expect(scrollToShow({ x: 768, y: 1000 }, { w: 720, h: 480 }, { w: 390, h: 200 }).top).toBe(280);
+  // A map that fits never scrolls.
+  expect(scrollToShow({ x: 1500, y: 1000 }, map, { w: 800, h: 600 })).toEqual({ left: 0, top: 0 });
+});
+
+test("nudgeInto: slides a tag back inside the box", () => {
+  const box = { left: 0, right: 390 };
+  expect(nudgeInto({ left: 100, right: 300 }, box)).toBe(0);
+  expect(nudgeInto({ left: 300, right: 500 }, box)).toBe(-114);
+  expect(nudgeInto({ left: -50, right: 150 }, box)).toBe(54);
+  // Wider than the box: keep its left edge in view.
+  expect(nudgeInto({ left: 100, right: 600 }, box)).toBe(-96);
 });
 
 // Walks: the bookkeeping GameView redraws every frame. At 260 px/s.

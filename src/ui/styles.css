@@ -409,6 +409,52 @@
   #root > header{max-width:var(--page-w);margin:0 auto 20px;display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap}
   .head-main{flex:1;min-width:260px;position:relative}
 
+  /* ---- shift log ----
+     A one-line CRT strip under the header: the last board events, newest at
+     the left (ShiftLog.tsx). Thin on purpose — it sits above the desks and the
+     fight strip, and must not push THE LINE down a laptop screen. It scrolls
+     only for a short run after news (see the component), pauses on hover. */
+  .shiftlog{max-width:var(--page-w);margin:-10px auto 14px;display:flex;align-items:stretch;
+    height:28px;background:var(--box-lo);border:2px solid var(--bevel);border-radius:var(--radius-sm);
+    overflow:hidden;font-size:13px;position:relative}
+  .shiftlog::after{content:"";position:absolute;inset:0;pointer-events:none;
+    background:repeating-linear-gradient(0deg,rgba(0,0,0,.18) 0 1px,transparent 1px 3px)}
+  .shiftlog-tag{flex:none;display:flex;align-items:center;padding:0 8px;font-size:12px;
+    letter-spacing:calc(1px + var(--track));color:var(--on-bevel);background:var(--bevel)}
+  .shiftlog-window{flex:1;min-width:0;overflow:hidden;display:flex;align-items:center}
+  .shiftlog-empty{margin:0 10px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .shiftlog-track{display:flex;width:max-content}
+  .shiftlog-track.moving{animation:shiftlog-roll var(--shiftlog-dur,20s) linear 2}
+  .shiftlog:hover .shiftlog-track{animation-play-state:paused}
+  @keyframes shiftlog-roll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+  .shiftlog-group{display:flex;list-style:none;margin:0;padding:0 24px 0 0;gap:24px}
+  .shiftlog-item{flex:none;display:flex}
+  .shiftlog-link{font:inherit;color:var(--leaf);text-shadow:var(--glow);background:none;border:0;
+    padding:2px 4px;cursor:pointer;white-space:nowrap}
+  .shiftlog-link:hover{color:var(--gold);text-decoration:underline}
+  .shiftlog-link:focus-visible{outline:2px solid var(--gold);outline-offset:-2px}
+  .shiftlog-link:disabled{cursor:default;text-decoration:none;color:var(--dim)}
+  .shiftlog-time{color:var(--dim)}
+  .shiftlog-item.merged .shiftlog-link{color:var(--gold)}
+  .shiftlog-item.merged.fresh .shiftlog-link{animation:shiftlog-flash .4s steps(2) 5}
+  @keyframes shiftlog-flash{0%{background:var(--gold);color:var(--on-accent)}100%{background:transparent}}
+  /* Reduced motion: the newest three, still, each cut short rather than the
+     strip growing a second line. */
+  .shiftlog.still .shiftlog-group{flex:1;min-width:0;padding-right:0}
+  .shiftlog.still .shiftlog-track{width:100%}
+  .shiftlog.still .shiftlog-item{flex:1 1 0;min-width:0;max-width:max-content}
+  .shiftlog.still .shiftlog-link{overflow:hidden;text-overflow:ellipsis}
+  @media (prefers-reduced-motion:reduce){
+    .shiftlog-item.merged.fresh .shiftlog-link{background:var(--gold);color:var(--on-accent)}
+  }
+  @media (max-width:720px){.shiftlog{margin-top:-4px}.shiftlog-tag{display:none}}
+  /* Three side by side leave a phone a few letters each: stack them instead. */
+  @media (max-width:720px){
+    .shiftlog.still{height:auto}
+    .shiftlog.still .shiftlog-group{flex-direction:column;gap:0}
+    .shiftlog.still .shiftlog-item{flex:none;max-width:100%}
+  }
+
   /* ---- notification center ---- */
   .notif{position:absolute;top:0;right:0;z-index:40}
   .notif-bell{position:relative;background:var(--box);border:2px solid var(--bevel);
@@ -2434,13 +2480,25 @@ body:has(#root > .game){display:flex;flex-direction:column;padding-bottom:0}
 .game-agent.is-stale:hover .sprite,.game-agent.is-stale:focus-visible .sprite{opacity:1}
 .game-z{position:absolute;top:-12px;right:-8px;font-size:11px;color:#bfe9ff;pointer-events:none}
 /* name + doing, on hover or keyboard focus only, so the map stays readable */
-.game-tag{display:none;position:absolute;left:50%;bottom:100%;transform:translate(-50%,-8px);z-index:1;
+.game-tag{display:none;position:absolute;left:50%;bottom:100%;transform:translate(calc(-50% + var(--tag-dx,0px)),-8px);z-index:1;
   width:max-content;max-width:220px;text-align:left;font-size:12px;line-height:1.4;
   background:var(--box);color:var(--bone);border:2px solid var(--bevel);padding:4px 7px}
 .game-tag b{display:block;color:var(--gold);font-weight:600}
 .game-tag span{color:var(--dim);overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}
 .game-agent:hover,.game-agent:focus-visible{z-index:5000 !important}
 .game-agent:hover .game-tag,.game-agent:focus-visible .game-tag{display:block}
+/* no room above (top of the map): hang it under the sprite instead */
+.game-tag[data-below]{bottom:auto;top:100%;transform:translate(calc(-50% + var(--tag-dx,0px)),8px)}
+/* Touch screens can't hover, so every sprite carries its name underneath;
+   the full tag still opens on focus. Rows are stepped (--name-row) so
+   neighbours' names don't cover each other. */
+.game-name{display:none}
+@media (hover:none){
+  .game-name{display:block;position:absolute;left:50%;top:100%;transform:translate(-50%,calc(2px + var(--name-row,0) * 13px));
+    max-width:56px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    font-size:10px;line-height:1.2;color:var(--bone);background:rgba(0,0,0,.7);padding:0 3px;pointer-events:none}
+  .game-agent.is-waiting .game-name{color:var(--gold)}
+}
 .game-empty{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:14px;color:var(--gold);
   background:rgba(0,0,0,.75);border:2px dashed var(--bevel);padding:12px 16px;text-align:center}
 

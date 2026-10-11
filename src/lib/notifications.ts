@@ -1,4 +1,4 @@
-import type { Board } from "./board";
+import { isDoneColumn, isLandedColumn, type Board } from "./board";
 import type { AgentStatus } from "../schema";
 
 /** What a notification is about. */
@@ -15,9 +15,18 @@ export type Notif = {
   text: string;           // a short human-readable description / snippet
   cardId?: string;        // the card to open, when there is one
   cardTitle?: string;
+  cardNum?: number;       // the card's "#42" label, when it has one
+  merged?: boolean;       // a move that landed the card past Done (e.g. into "Merged")
   commentId?: string;     // the exact comment to land on, for a comment
   sessionId?: string;     // the agent to open, for a needs-you
 };
+
+/** Does a card moving `from` -> `to` land a merge? True when it lands past Done
+ *  (a MERGE into "Merged") from somewhere it had not landed yet. Done itself is
+ *  excluded: reaching it is the completion, which has its own party. */
+export function landsMerge(board: Board, from: string, to: string): boolean {
+  return isLandedColumn(board, to) && !isDoneColumn(board, to) && !isLandedColumn(board, from);
+}
 
 type Snap = { agents: AgentStatus[]; board: Board };
 
@@ -55,6 +64,7 @@ export function diffNotifications(prev: Snap | null, curr: Snap, me: string, now
       text: `WAITING ON YOU: ${m?.text ?? ""}`,
       cardId: card.id,
       cardTitle: card.title,
+      cardNum: card.num,
       commentId: card.ask.commentId,
     });
   }
@@ -73,6 +83,7 @@ export function diffNotifications(prev: Snap | null, curr: Snap, me: string, now
         text: m.text,
         cardId: card.id,
         cardTitle: card.title,
+        cardNum: card.num,
         commentId: m.id,
       });
     }
@@ -106,6 +117,7 @@ export function diffNotifications(prev: Snap | null, curr: Snap, me: string, now
     const ti = colIndex.get(card.columnId);
     // Forward only: a card dragged back a column is not news.
     if (fi === undefined || ti === undefined || ti <= fi) continue;
+    const merged = landsMerge(curr.board, from, card.columnId);
     out.push({
       id: `move:${card.id}:${card.columnId}:${now}`,
       kind: "move",
@@ -114,6 +126,8 @@ export function diffNotifications(prev: Snap | null, curr: Snap, me: string, now
       text: `to ${colName.get(card.columnId)}`,
       cardId: card.id,
       cardTitle: card.title,
+      cardNum: card.num,
+      ...(merged ? { merged: true } : {}),
     });
   }
 

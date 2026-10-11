@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Snapshot } from "../lib/snapshot";
 import { diffNotifications, type Notif } from "../lib/notifications";
 import { openCard, openAgent, type CardFocus } from "./nav";
+import { publishShiftLog } from "./shiftEvents";
 
 const ME = "You";        // the human's byline, so their own comments never notify
 const CAP = 50;          // most recent N events kept
@@ -62,6 +63,7 @@ export function NotificationCenter({ snap }: { snap: Snapshot }) {
     }
     const evs = diffNotifications(prev.current, snap, ME, Date.now());
     prev.current = snap;
+    publishShiftLog(evs);
     if (evs.length) setItems((cur) => [...evs, ...cur].slice(0, CAP));
   }, [snap]);
 
@@ -114,7 +116,7 @@ export function NotificationCenter({ snap }: { snap: Snapshot }) {
                   className={`notif-item${read.has(n.id) ? "" : " unread"}`}
                   onClick={() => activate(n)}
                 >
-                  <span className="notif-kind" aria-hidden="true">{ICON[n.kind]}</span>
+                  <span className="notif-kind" aria-hidden="true">{n.merged ? "🎉" : ICON[n.kind]}</span>
                   <span className="notif-body">
                     <span className="notif-line1">
                       <b>{n.who || "someone"}</b>
