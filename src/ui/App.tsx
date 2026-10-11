@@ -17,6 +17,7 @@ import { EndConfirm } from "./EndConfirm";
 import { UpdateNotice } from "./UpdateNotice";
 import { Dictation } from "./Dictation";
 import { Notifier } from "./Notifier";
+import { ShiftLog } from "./ShiftLog";
 import { MoodBoard } from "./MoodBoard";
 import { GameView } from "./GameView";
 import { onOpenAgent, onOpenCard, openCard } from "./nav";
@@ -72,6 +73,7 @@ export function App() {
   const [faceEnabled, setFaceEnabled] = useState(true);
   // The fight strip over THE LINE: on unless switched off, like the face.
   const [fightEnabled, setFightEnabled] = useState(true);
+  const [shiftLogEnabled, setShiftLogEnabled] = useState(true);
   // Just the folders live agents are running in; the New Agent dialog merges
   // these with its own remembered history (see recentFolders.ts).
   const liveFolders = [...new Set(snap.agents.map((a) => a.cwd).filter(Boolean))];
@@ -83,12 +85,18 @@ export function App() {
     setAlertsEnabled(loadBool(KEYS.alerts));
     setFaceEnabled(loadBoolDefaultOn(KEYS.face));
     setFightEnabled(loadBoolDefaultOn(KEYS.fight));
+    setShiftLogEnabled(loadBoolDefaultOn(KEYS.shiftLog));
   }, []);
 
   function toggleFace() {
     const next = !faceEnabled;
     setFaceEnabled(next);
     saveSetting(KEYS.face, next ? "1" : "0");
+  }
+  function toggleShiftLog() {
+    const next = !shiftLogEnabled;
+    setShiftLogEnabled(next);
+    saveSetting(KEYS.shiftLog, next ? "1" : "0");
   }
   function toggleFight() {
     const next = !fightEnabled;
@@ -179,6 +187,7 @@ export function App() {
       <Crt mode={display.crt} />
       <TubeBevel mode={display.bevel} />
       <Header snap={snap} live={live} view={view} onView={setView} onNewAgent={() => setSpawnSeed({})} onFind={() => setPaletteOpen(true)} onMemory={() => setMemoryOpen(true)} onSettings={() => setSettingsOpen(true)} />
+      {shiftLogEnabled && <ShiftLog />}
       {view === "mood" ? (
         <MoodBoard mood={snap.mood} board={snap.board} onOpenCard={openCard} />
       ) : view === "game" ? (
@@ -214,6 +223,8 @@ export function App() {
           onToggleFace={toggleFace}
           fight={fightEnabled}
           onToggleFight={toggleFight}
+          shiftLog={shiftLogEnabled}
+          onToggleShiftLog={toggleShiftLog}
           onClose={() => setSettingsOpen(false)}
         />
       )}

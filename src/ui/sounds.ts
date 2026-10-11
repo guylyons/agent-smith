@@ -102,6 +102,14 @@ export function playCelebrate(): void {
   ]);
 }
 
+// A tube blip — a card merging. Two quick high pips, brighter than a move and
+// far shorter than the Done fanfare: a small celebration, heard on the shift log.
+export function playMerge(): void {
+  playSequence([
+    { freq: 1568, start: 0, dur: 0.05 },
+    { freq: 2093, start: 0.06, dur: 0.09 },
+  ]);
+}
 
 // A mechanical key click — a short noise burst through a band-pass, not a
 // square wave: a keycap bottoming out is a clack, and the chiptune blips we use
@@ -260,5 +268,6 @@ export function playCue(cue: SoundCue): void {
   else if (cue === "question") playQuestion();
   else if (cue === "move") playMove();
   else if (cue === "celebrate") playCelebrate();
+  else if (cue === "merge") playMerge();
   else playPermission();
 }
