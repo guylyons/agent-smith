@@ -4,7 +4,7 @@
 import { test, expect } from "bun:test";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
-import { roomFor, PERSONA_ROOM, spotFor, placeAll, stepWalks, walkersAt, agentKey, pathBetween, pathLength, pointAlong, sleepers, cargoCount, viaFor, roomsOverlay, tabOrder, scrollToShow, nudgeInto, ROOMS, ROOM_IDS, MAP_W, MAP_H } from "../src/ui/game";
+import { roomFor, PERSONA_ROOM, spotFor, placeAll, stepWalks, walkersAt, agentKey, pathBetween, pathLength, pointAlong, sleepers, cargoCount, viaFor, roomsOverlay, tabOrder, crowds, roomSize, scrollToShow, nudgeInto, ROOMS, ROOM_IDS, MAP_W, MAP_H } from "../src/ui/game";
 import { viewFromHash, hashForView, hashFlag } from "../src/ui/view";
 import type { AgentStatus } from "../src/schema";
 import type { Board } from "../src/lib/board";
@@ -142,11 +142,12 @@ test("cargo is label-only: no spots, and roomFor never sends anyone there", () =
       expect(roomFor(agent({ state, persona }), withCard("review", { id: "s1", name: "A" }))).not.toBe("cargo");
 });
 
-test("viaFor: a spot's own waypoint, also for agents fanned out past it; none where the line is clear", () => {
+test("viaFor: a spot's own waypoint, also for a grid place nearest it; none where the line is clear, or for the door", () => {
   expect(viaFor("medbay", ROOMS.medbay.spots[0]!)).toEqual(ROOMS.medbay.via![0]!);
   expect(viaFor("medbay", ROOMS.medbay.spots[2]!)).toBeUndefined();
-  const n = ROOMS.medbay.spots.length;
-  expect(viaFor("medbay", spotFor("medbay", n))).toEqual(ROOMS.medbay.via![0]!);
+  const near = ROOMS.medbay.spots[0]!;
+  expect(viaFor("medbay", { x: near.x - 20, y: near.y + 10 })).toEqual(ROOMS.medbay.via![0]!);
+  expect(viaFor("medbay", ROOMS.medbay.door)).toBeUndefined();
   expect(viaFor("comms", ROOMS.comms.spots[0]!)).toBeUndefined();
   expect(viaFor("cargo", { x: 300, y: 800 })).toBeUndefined();
 });
@@ -187,13 +188,72 @@ test("roomsOverlay: every room with its points, the corridors, and a leg per spo
   }
 });
 
-test("spotFor: no two of the first twenty agents in a room share a spot", () => {
+test("spotFor: for 1-15 agents in any room, spots stay in the rect and 40 px apart, or the room is full", () => {
   for (const id of ROOM_IDS) {
-    if (!ROOMS[id].spots.length) continue;
-    const seen = new Set<string>();
-    for (let i = 0; i < 20; i++) { const p = spotFor(id, i); seen.add(`${p.x},${p.y}`); }
-    expect(seen.size).toBe(20);
+    const { rect, spots } = ROOMS[id];
+    expect(roomSize(id)).toBeGreaterThanOrEqual(spots.length);
+    for (let n = 1; n <= 15; n++) {
+      const got = Array.from({ length: n }, (_, i) => spotFor(id, i));
+      const pts = got.filter((p) => !!p);
+      // Past the room's size there is no spot: that is the overflow count.
+      expect(pts.length).toBe(Math.min(n, roomSize(id)));
+      expect(got.slice(pts.length).every((p) => p === undefined)).toBe(true);
+      pts.forEach((p, i) => {
+        expect(p.x).toBeGreaterThanOrEqual(rect.x); expect(p.x).toBeLessThanOrEqual(rect.x + rect.w);
+        expect(p.y).toBeGreaterThanOrEqual(rect.y); expect(p.y).toBeLessThanOrEqual(rect.y + rect.h);
+        for (let j = 0; j < i; j++) {
+          // The pods are where the art draws them, 38 px apart.
+          if (id === "hypersleep" && i < spots.length) continue;
+          expect(Math.hypot(p.x - pts[j]!.x, p.y - pts[j]!.y)).toBeGreaterThanOrEqual(40);
+        }
+      });
+    }
   }
+});
+
+test("spotFor: a sprite on a grid place covers no other sprite", () => {
+  for (const id of ROOM_IDS) {
+    const n = ROOMS[id].spots.length;
+    for (let i = n; i < roomSize(id); i++) for (let j = 0; j < i; j++) {
+      const p = spotFor(id, i)!, q = spotFor(id, j)!;
+      expect(Math.abs(p.x - q.x) >= 40 || Math.abs(p.y - q.y) >= 60).toBe(true);
+    }
+  }
+});
+
+test("placeAll: a full room puts the rest at its door as over, and they take a spot when one frees", () => {
+  const size = roomSize("workshop");
+  const crew = Array.from({ length: size + 3 }, (_, i) => agent({ sessionId: `s${String(i).padStart(2, "0")}`, persona: "backend-dev" }));
+  const one = placeAll(crew, board);
+  const over = crew.filter((a) => one.get(a.sessionId)!.over);
+  expect(over.map((a) => a.sessionId)).toEqual(crew.slice(size).map((a) => a.sessionId));
+  for (const a of over) expect(one.get(a.sessionId)!.at).toEqual(ROOMS.workshop.door);
+  expect(new Set([...one.values()].map((p) => p.slot)).size).toBe(crew.length);
+  // 12 fit with room to spare (the card's case).
+  expect([...placeAll(crew.slice(0, 12), board).values()].some((p) => p.over)).toBe(false);
+  // s00 leaves: the first one waiting takes its spot, nobody else moves.
+  const two = placeAll(crew.slice(1), board, one);
+  expect(two.get(over[0]!.sessionId)).toEqual({ room: "workshop", slot: 0, at: spotFor("workshop", 0)! });
+  expect(two.get("s01")).toEqual(one.get("s01")!);
+  expect(two.get(over[1]!.sessionId)!.over).toBe(true);
+});
+
+test("crowds: one per full room, most urgent first, and tabOrder puts it after the agents in that state", () => {
+  const size = roomSize("bridge");
+  const waiting = Array.from({ length: size + 1 }, (_, i) => agent({ sessionId: `w${String(i).padStart(2, "0")}`, state: "waiting" }));
+  // A scrum master is on the bridge even when idle, and sorts last by key.
+  const sm = agent({ sessionId: "z", state: "idle", persona: "scrum-master" });
+  const idle = agent({ sessionId: "i", state: "idle" });
+  const all = [idle, sm, ...waiting];
+  const placed = placeAll(all, board);
+  const got = crowds(all, placed);
+  expect(got).toHaveLength(1);
+  expect(got[0]!.room).toBe("bridge");
+  expect(got[0]!.state).toBe("waiting");
+  expect(got[0]!.who.map((a) => a.sessionId)).toEqual([waiting.at(-1)!.sessionId, "z"]);
+  const order = tabOrder([...all, ...got]);
+  expect(order.indexOf(got[0]!)).toBe(waiting.length);
+  expect(crowds([idle], placeAll([idle], board))).toEqual([]);
 });
 
 test("placeAll: spots go in session-id order, so reordering the list moves nobody", () => {
@@ -366,7 +426,7 @@ test("stepWalks: once primed, a newcomer walks in from the airlock", () => {
   const a = agent({ sessionId: "a", state: "idle" });
   const placed = placeAll([a], board);
   const w = stepWalks(new Map(), [a], placed, 1000, { reduceMotion: false, primed: true }).get("a")!;
-  expect(w.path[0]).toEqual(spotFor("airlock", 0));
+  expect(w.path[0]).toEqual(spotFor("airlock", 0)!);
   expect(w.path.at(-1)).toEqual(placed.get("a")!.at);
   expect(w.start).toBe(1000);
   expect(w.len).toBeGreaterThan(0);
@@ -419,7 +479,7 @@ test("stepWalks: an agent that leaves walks to the airlock, then is dropped", ()
   const out = two.get("a")!;
   expect(out.room).toBe("airlock");
   expect(out.path[0]).toEqual(p1.get("a")!.at);
-  expect(out.path.at(-1)).toEqual(spotFor("airlock", 0));
+  expect(out.path.at(-1)).toEqual(spotFor("airlock", 0)!);
   expect(out.start).toBe(100);
   // Still on the way: kept as it is, and drawn. There: not drawn, then dropped.
   expect(stepWalks(two, [b], p2, 200, motion).get("a")).toBe(out);
