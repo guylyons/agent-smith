@@ -65,7 +65,7 @@ export const ROOMS: Record<RoomId, Room> = {
   workshop: {
     label: "WORKSHOP",
     rect: { x: 90, y: 395, w: 420, h: 185 },
-    spots: [{ x: 200, y: 460 }, { x: 420, y: 470 }, { x: 215, y: 560 }, { x: 195, y: 515 }, { x: 420, y: 560 }, { x: 230, y: 420 }],
+    spots: [{ x: 200, y: 460 }, { x: 420, y: 470 }, { x: 235, y: 560 }, { x: 195, y: 515 }, { x: 420, y: 560 }, { x: 240, y: 420 }],
     // Round the central bench.
     via: { 2: { x: 205, y: 460 }, 3: { x: 205, y: 460 }, 4: { x: 410, y: 470 } },
     // Below the red cabinet beside the doorway, so walks to the left clear it.
@@ -163,19 +163,38 @@ export function roomFor(a: Pick<AgentStatus, "sessionId" | "state" | "persona" |
   return "mess";
 }
 
-/** Where the i-th agent in a room stands. Past the last marked spot, agents
- *  fan out around them so they never land exactly on top of each other. */
-export function spotFor(room: RoomId, i: number): Pt {
-  const spots = ROOMS[room].spots;
-  const base = spots[i % spots.length]!;
-  const lap = Math.floor(i / spots.length);
-  if (!lap) return base;
-  // Each extra lap steps a little further right and down, alternating sides.
-  const side = lap % 2 ? 1 : -1;
-  return { x: base.x + side * 18 * Math.ceil(lap / 2), y: base.y + 10 * Math.ceil(lap / 2) };
+// A sprite is drawn 2.6% of the map wide and half as tall again, standing on
+// its spot.
+const SPRITE_W = 40;
+const SPRITE_H = 60;
+
+/** Everywhere in a room an agent can stand: the marked spots, then a grid
+ *  over the rest of the floor, front row first. A grid place is left out if a
+ *  sprite on it would cover one on a place already listed. */
+function places({ rect, spots }: Room): Pt[] {
+  const out = [...spots];
+  for (let y = rect.y + rect.h; y >= rect.y + SPRITE_H / 2; y -= SPRITE_H) {
+    for (let x = rect.x + SPRITE_W / 2; x <= rect.x + rect.w - SPRITE_W / 2; x += SPRITE_W) {
+      if (out.every((p) => Math.abs(p.x - x) >= SPRITE_W || Math.abs(p.y - y) >= SPRITE_H)) out.push({ x, y });
+    }
+  }
+  return out;
 }
 
-export type Placement = { room: RoomId; slot: number; at: Pt };
+const PLACES = Object.fromEntries(ROOM_IDS.map((id) => [id, places(ROOMS[id])])) as Record<RoomId, Pt[]>;
+
+/** Where the i-th agent in a room stands: a marked spot, then the grid.
+ *  Undefined once the room is full. */
+export function spotFor(room: RoomId, i: number): Pt | undefined {
+  return PLACES[room][i];
+}
+
+/** How many agents a room has places for. */
+export const roomSize = (room: RoomId) => PLACES[room].length;
+
+/** `over`: the room is full. The agent waits at its door (`at`) and is listed
+ *  under the room's "+N" instead of drawn. */
+export type Placement = { room: RoomId; slot: number; at: Pt; over?: true };
 
 /** An agent's identity on the map: its crew id when it has one, so a /clear
  *  (new session id, same crew member) doesn't look like a new arrival. */
@@ -184,7 +203,8 @@ export const agentKey = (a: Pick<AgentStatus, "sessionId" | "crew">) => a.crew?.
 /** Every agent's room and spot, keyed by agentKey. Someone who stays in the
  *  same room keeps the spot they had in `prev`, so an arrival never shuffles
  *  the people already there; everyone else takes the lowest free spot, in key
- *  order, so a snapshot that reorders the list moves nobody either. */
+ *  order, so a snapshot that reorders the list moves nobody either. Past the
+ *  room's last place they are `over`, until a spot comes free. */
 export function placeAll(agents: AgentStatus[], board: Board, prev?: Map<string, Placement>): Map<string, Placement> {
   const byRoom = new Map<RoomId, string[]>();
   for (const a of agents) {
@@ -198,24 +218,26 @@ export function placeAll(agents: AgentStatus[], board: Board, prev?: Map<string,
     const fresh: string[] = [];
     for (const id of ids) {
       const was = prev?.get(id);
-      if (was && was.room === room && !taken.has(was.slot)) { taken.add(was.slot); out.set(id, was); }
+      if (was && was.room === room && !was.over && !taken.has(was.slot)) { taken.add(was.slot); out.set(id, was); }
       else fresh.push(id);
     }
     let slot = 0;
     for (const id of fresh) {
       while (taken.has(slot)) slot++;
       taken.add(slot);
-      out.set(id, { room, slot, at: spotFor(room, slot) });
+      const at = spotFor(room, slot);
+      out.set(id, at ? { room, slot, at } : { room, slot, at: ROOMS[room].door, over: true });
     }
   }
   return out;
 }
 
 /** The in-room waypoint for a point in a room: that of the marked spot it is
- *  nearest, so an agent fanned out past the last spot uses its base spot's. */
+ *  nearest, so an agent on the grid uses its nearest spot's. None for the
+ *  door itself. */
 export function viaFor(room: RoomId, at: Pt): Pt | undefined {
-  const { spots, via } = ROOMS[room];
-  if (!via || !spots.length) return undefined;
+  const { spots, via, door } = ROOMS[room];
+  if (!via || !spots.length || (at.x === door.x && at.y === door.y)) return undefined;
   let best = 0;
   for (let i = 1; i < spots.length; i++) {
     if (Math.hypot(spots[i]!.x - at.x, spots[i]!.y - at.y) < Math.hypot(spots[best]!.x - at.x, spots[best]!.y - at.y)) best = i;
@@ -244,17 +266,18 @@ export function pathBetween(from: RoomId, fromAt: Pt, to: RoomId, toAt: Pt): Pt[
 
 export type OverlayLine = { a: Pt; b: Pt; kind: "corridor" | "exit" | "leg" };
 export type Overlay = {
-  rooms: { id: RoomId; rect: Room["rect"]; spots: Pt[]; door: Pt; exit: Pt; vias: Pt[] }[];
+  rooms: { id: RoomId; rect: Room["rect"]; spots: Pt[]; grid: Pt[]; door: Pt; exit: Pt; vias: Pt[] }[];
   lines: OverlayLine[];
 };
 
 /** What the ROOMS debug overlay (#game?rooms=1) draws, in map pixels: every
- *  room's rect, spots, door, exit and in-room waypoints, the door-exit legs,
- *  the last leg of the walk to each spot, and the corridor lines. */
+ *  room's rect, spots, grid places, door, exit and in-room waypoints, the
+ *  door-exit legs, the last leg of the walk to each spot, and the corridor
+ *  lines. */
 export function roomsOverlay(): Overlay {
   const rooms = ROOM_IDS.map((id) => {
     const { rect, spots, door, exit, via } = ROOMS[id];
-    return { id, rect, spots, door, exit, vias: Object.values(via ?? {}) };
+    return { id, rect, spots, grid: PLACES[id].slice(spots.length), door, exit, vias: Object.values(via ?? {}) };
   });
   // Each corridor is drawn as far as walks use it: its outermost exits, and
   // the trunk.
@@ -339,7 +362,7 @@ export function stepWalks(
     let path: Pt[];
     if (reduceMotion) path = [p.at];
     else if (w) path = pathBetween(w.room, here(w), p.room, p.at);
-    else if (primed) path = pathBetween("airlock", spotFor("airlock", 0), p.room, p.at);
+    else if (primed) path = pathBetween("airlock", ROOMS.airlock.spots[0]!, p.room, p.at);
     else path = [p.at];
     out.set(k, walk(p.room, p.at, path));
   }
@@ -367,7 +390,7 @@ export function stepWalks(
   if (!reduceMotion) for (const [k, w] of prev) {
     if (out.has(k)) continue;
     if (w.room !== "airlock") {
-      const to = spotFor("airlock", 0);
+      const to = ROOMS.airlock.spots[0]!;
       out.set(k, walk("airlock", to, pathBetween(w.room, here(w), "airlock", to)));
     } else if ((now - w.start) * SPEED / 1000 < w.len) out.set(k, w);
   }
@@ -435,6 +458,23 @@ const TAB_RANK: Record<AgentStatus["state"], number> = { waiting: 0, working: 1,
  *  zIndex, so this changes only the keyboard and screen-reader order. */
 export function tabOrder<T extends Pick<AgentStatus, "state">>(agents: T[]): T[] {
   return [...agents].sort((a, b) => TAB_RANK[a.state] - TAB_RANK[b.state]);
+}
+
+/** A full room's "+N": the agents it has no place for, most urgent first.
+ *  `state` is that of the most urgent, so tabOrder puts the button just after
+ *  the agents in that state. */
+export type Crowd<T> = { room: RoomId; state: AgentStatus["state"]; who: T[] };
+
+export function crowds<T extends Pick<AgentStatus, "sessionId" | "crew" | "state">>(agents: T[], placed: Map<string, Placement>): Crowd<T>[] {
+  const out: Crowd<T>[] = [];
+  for (const a of tabOrder(agents)) {
+    const p = placed.get(agentKey(a));
+    if (!p?.over) continue;
+    const c = out.find((c) => c.room === p.room);
+    if (c) c.who.push(a);
+    else out.push({ room: p.room, state: a.state, who: [a] });
+  }
+  return out;
 }
 
 type Size = { w: number; h: number };

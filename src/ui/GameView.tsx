@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
 import type { AgentStatus } from "../schema";
 import type { Board } from "../lib/board";
 import { Sprite } from "./Sprite";
@@ -7,7 +7,7 @@ import { hashFlag } from "./view";
 import { inStateFor, isStaleIdle } from "./inState";
 import {
   MAP_W, MAP_H, ROOMS, ROOM_IDS, placeAll, stepWalks, walkersAt, agentKey, sleepers, sleeperKey, cargoCount, roomsOverlay,
-  tabOrder, scrollToShow, nudgeInto,
+  tabOrder, crowds, scrollToShow, nudgeInto,
   type Pt, type Placement, type Walk, type Sleeper,
 } from "./game";
 
@@ -68,6 +68,7 @@ function RoomsOverlay() {
           <circle className="exit" cx={r.exit.x} cy={r.exit.y} r={7} />
           <circle className="door" cx={r.door.x} cy={r.door.y} r={7} />
           {r.vias.map((v, i) => <circle key={i} className="via" cx={v.x} cy={v.y} r={6} />)}
+          {r.grid.map((p, i) => <circle key={i} className="grid" cx={p.x} cy={p.y} r={5} />)}
           {r.spots.map((p, i) => (
             <g key={i}>
               <circle className="spot" cx={p.x} cy={p.y} r={9} />
@@ -93,6 +94,18 @@ function stateText(a: AgentStatus): string {
   return a.state;
 }
 
+/** "working · 5m": the state line of an agent's tag. */
+function stateLine(a: AgentStatus, now: number): string {
+  const dur = inStateFor(a.stateSince, now);
+  return `${stateText(a)}${dur ? ` · ${dur}` : ""}`;
+}
+
+/** "#12 Title": the card a sleeper still holds. */
+function cardLine(board: Board, cardId: string): string {
+  const c = board.cards.find((c) => c.id === cardId);
+  return c ? `${c.num ? `#${c.num} ` : ""}${c.title}` : "asleep";
+}
+
 /** Keep an agent's tag inside the scroll box: slide it sideways off an edge,
  *  and drop it below the sprite when there's no room above. Measured when the
  *  tag appears (hover or focus), since that's when it is laid out. */
@@ -108,6 +121,44 @@ function fitTag(e: { currentTarget: HTMLElement }) {
   if (r.top < box.top + 4) tag.dataset.below = "";
   const dx = nudgeInto(r, box);
   if (dx) tag.style.setProperty("--tag-dx", `${dx}px`);
+}
+
+/** A "+N" button for people the map has no place to draw. It opens a list of
+ *  them, in the tag's box; picking one opens it. Esc closes the list and puts
+ *  focus back on the button. */
+function More({ text, label, className = "", at, items }: {
+  text: string; label: string; className?: string; at: Pt;
+  items: { key: string; name: string; note: string; open: () => void }[];
+}) {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  const btn = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => { if (open && box.current) fitTag({ currentTarget: box.current }); }, [open, items.length]);
+  // A click or tap anywhere else closes it.
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: PointerEvent) => { if (!box.current?.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("pointerdown", away);
+    return () => document.removeEventListener("pointerdown", away);
+  }, [open]);
+  const close = () => { setOpen(false); btn.current?.focus(); };
+  return (
+    <div ref={box} className={`game-more${open ? " is-open" : ""} ${className}`} style={pct(at)}
+      onKeyDown={(e) => { if (e.key === "Escape" && open) { e.preventDefault(); e.stopPropagation(); close(); } }}
+      // Tabbing away closes it. No relatedTarget is a click, handled above.
+      onBlur={(e) => { if (e.relatedTarget && !e.currentTarget.contains(e.relatedTarget)) setOpen(false); }}>
+      <button ref={btn} className="pix game-more-btn" aria-label={label} aria-expanded={open} onClick={() => setOpen(!open)}>{text}</button>
+      {open && (
+        <ul className="pix game-tag game-list">
+          {items.map((it) => (
+            <li key={it.key}>
+              <button onClick={() => { close(); it.open(); }}><b>{it.name}</b><span>{it.note}</span></button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 }
 
 /** Once per open, if the map is bigger than its box: bring the first agent
@@ -157,14 +208,17 @@ export function GameView({ agents, board, onOpen, onOpenCard }: {
   for (const a of agents) looks.current.set(agentKey(a), a);
   for (const k of looks.current.keys()) if (!walks.has(k)) looks.current.delete(k);
   const arrived = (k: string) => { const w = walks.get(k), p = at.get(k); return !!w && !!p && p.x === w.to.x && p.y === w.to.y; };
-  const pods = ROOMS.hypersleep.spots.length;
+  // Sleepers with no pod: they went out by the airlock, and are only listed.
+  const noPod = asleep.filter((s) => walks.get(sleeperKey(s))?.room !== "hypersleep");
   const cargo = cargoCount(board);
   const showRooms = useHashFlag("rooms");
   // Read per render, like the crew grid: snapshots re-render the map often
   // enough that minute-grained times stay current.
   const now = Date.now();
-  const ordered = useMemo(() => tabOrder(agents), [agents]);
-  const firstWaiting = ordered[0]?.state === "waiting" ? placed.get(agentKey(ordered[0]))?.at : undefined;
+  // A full room's "+N" comes just after the agents in its most urgent state.
+  const ordered = useMemo(() => tabOrder([...agents, ...crowds(agents, placed)]), [agents, placed]);
+  const first = ordered[0];
+  const firstWaiting = first && !("who" in first) && first.state === "waiting" ? placed.get(agentKey(first))?.at : undefined;
   const scroller = useRef<HTMLDivElement>(null);
   useOpeningScroll(scroller, ready, firstWaiting);
 
@@ -180,18 +234,30 @@ export function GameView({ agents, board, onOpen, onOpenCard }: {
               {id === "cargo" && cargo > 0 && <span className="game-count"> · {cargo} DONE</span>}
             </div>
           ))}
-          {asleep.length > pods && (
-            <div className="pix game-room game-more" style={pct({ x: ROOMS.hypersleep.rect.x + ROOMS.hypersleep.rect.w - 50, y: ROOMS.hypersleep.rect.y + ROOMS.hypersleep.rect.h - 30 })}>
-              +{asleep.length - pods} ASLEEP
-            </div>
-          )}
           {ordered.map((a) => {
+            if ("who" in a) {
+              const { rect, label } = ROOMS[a.room];
+              return (
+                <More key={a.room} text={`+${a.who.length}`} label={`${a.who.length} more in ${label.toLowerCase()}, show list`}
+                  className={`is-${a.state}`} at={{ x: rect.x + rect.w, y: rect.y }}
+                  items={a.who.map((w) => ({ key: agentKey(w), name: w.name, note: stateLine(w, now), open: () => onOpen(w.sessionId) }))} />
+              );
+            }
             const p = at.get(agentKey(a));
             const spot = placed.get(agentKey(a));
             const room = spot?.room;
             if (!p || !spot || !room) return null;
+            if (spot.over) {
+              // No place in the room: drawn on the walk to its door, then
+              // only listed under the room's "+N".
+              return arrived(agentKey(a)) ? null : (
+                <div key={agentKey(a)} className="game-agent is-leaving" style={{ ...pct(p), zIndex: Math.round(p.y) }} aria-hidden="true">
+                  <Sprite sessionId={a.sessionId} role={a.role} name={a.name} state={a.state} override={a.sprite} />
+                </div>
+              );
+            }
             const dur = inStateFor(a.stateSince, now);
-            const state = `${stateText(a)}${dur ? ` · ${dur}` : ""}`;
+            const state = stateLine(a, now);
             const label = `${a.name}, ${ROOMS[room].label.toLowerCase()}, ${stateText(a)}${dur ? ` for ${dur}` : ""}${a.doing ? `: ${a.doing}` : ""}`;
             return (
               <button key={agentKey(a)} className={`game-agent is-${a.state}${isStaleIdle(a, now) ? " is-stale" : ""}`}
@@ -232,6 +298,11 @@ export function GameView({ agents, board, onOpen, onOpenCard }: {
               </button>
             );
           })}
+          {noPod.length > 0 && (
+            <More className="is-asleep" text={`+${noPod.length} ASLEEP`} label={`${noPod.length} more asleep, show list`}
+              at={{ x: ROOMS.hypersleep.rect.x + ROOMS.hypersleep.rect.w, y: ROOMS.hypersleep.rect.y + ROOMS.hypersleep.rect.h }}
+              items={noPod.map((s) => ({ key: sleeperKey(s), name: s.who.name, note: cardLine(board, s.cardId), open: () => onOpenCard(s.cardId) }))} />
+          )}
           {!agents.length && ready && (
             <p className="pix game-empty">NO SESSIONS ABOARD · START ONE WITH + NEW AGENT</p>
           )}
